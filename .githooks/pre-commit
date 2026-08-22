@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# Gate lane: deterministic, local, free. Runs on every commit.
+# Install with: scripts/install-hooks.sh
+#
+# If this fails, fix the underlying issue. Never pass --no-verify.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: typecheck"
+npx tsc --noEmit
+
+echo "pre-commit: lint"
+npx eslint src
+
+echo "pre-commit: tests"
+npx vitest run
+
+echo "pre-commit: ok"

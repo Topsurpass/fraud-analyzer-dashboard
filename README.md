@@ -56,12 +56,34 @@ actually deflect.
 
 ## Checks
 
+Two lanes, different budgets.
+
+**Gate** - deterministic, local, free. Runs on every commit via the hook in
+`.githooks/pre-commit`; install it once per clone:
+
 ```bash
-npm test               # gate suite: deterministic, local, ~20s
+scripts/install-hooks.sh
+npm test               # 195 tests, ~20s
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm run build
 ```
+
+**Smoke** - a real browser against a real engine, run before shipping:
+
+```bash
+node scripts/dev-seed.mjs && npm run dev   # in another shell
+npm run smoke
+```
+
+The smoke lane exists because the gate lane structurally cannot catch this
+project's worst failure mode. Recharts computes geometry from real layout, so
+under jsdom a chart that renders zero bars and one that renders ten are
+indistinguishable - both are "a `<BarChart />` that mounted without throwing".
+Twice during development a library-level animation defect left charts
+permanently blank while every unit test stayed green. `scripts/smoke.mjs`
+asserts on the actual SVG geometry for all five chart types, checks that no card
+sits in a stale state, and checks that the layout does not overflow at 390px.
 
 ## How it is put together
 
