@@ -5,6 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type TooltipProps } 
 import type { PieData, PieSlice } from "@/services/charts/shape";
 import { formatInteger, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { ChartEmpty } from "./ChartEmpty";
 import { ChartTooltip } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
 import { ALERT_COLOR, DATA_TWEEN_MS, MAX_SERIES, OTHER_COLOR, OTHER_LABEL, seriesColor } from "./theme";
@@ -65,6 +66,9 @@ export function PieChartView({ data, title }: PieChartViewProps) {
   const slices = useMemo(() => foldSlices(data.slices), [data.slices]);
   const total = data.total;
 
+  // An empty donut is just a ring of nothing; say so instead.
+  const empty = slices.length === 0 || total <= 0;
+
 
   const renderTooltip = ({ active: hovering, payload }: TooltipProps<number, string>) => {
     if (!hovering || !payload?.length) return null;
@@ -87,6 +91,8 @@ export function PieChartView({ data, title }: PieChartViewProps) {
     );
   };
 
+  if (empty) return <ChartEmpty />;
+
   return (
     <div className="flex h-full flex-col">
       <div
@@ -98,6 +104,16 @@ export function PieChartView({ data, title }: PieChartViewProps) {
           <PieChart>
             <Tooltip content={renderTooltip} isAnimationActive={false} />
             <Pie
+              /*
+               * Recharts makes the pie's root group focusable by default, but
+               * that group carries no accessible name, so a keyboard user hits
+               * a stop that announces nothing. The chart's name is on the
+               * wrapper's role="img" above and the legend buttons below are the
+               * real keyboard affordance, so the stop is removed. `tabIndex`
+               * alone does not do it - the root group reads `rootTabIndex`.
+               */
+              rootTabIndex={-1}
+              tabIndex={-1}
               data={slices}
               dataKey="value"
               nameKey="name"

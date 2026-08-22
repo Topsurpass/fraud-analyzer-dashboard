@@ -86,15 +86,35 @@ async function main() {
     const expectation = EXPECTATIONS[query.chart_type];
     if (!expectation) continue;
 
-    const count = await page
-      .locator(`article[aria-label="${query.name}"] ${expectation.selector}`)
-      .count();
+    /*
+     * Ask the engine how many rows this query actually returns before deciding
+     * what the card owes us. A time-windowed query outside its window returns
+     * nothing, and a chart that correctly draws nothing must not be reported as
+     * a chart that failed to draw - that would make this lane cry wolf and get
+     * ignored, which is worse than not having it.
+     */
+    const poll = await fetch(`${ENGINE}/queries/${query.id}/poll?force=true`).then((r) =>
+      r.json(),
+    );
+    const rows = poll.row_count ?? 0;
+    const card = page.locator(`article[aria-label="${query.name}"]`);
 
+    if (rows === 0) {
+      const empty = await card.getByText("No rows in range").count();
+      const ok = empty > 0;
+      console.log(
+        `${ok ? "ok  " : "FAIL"} ${query.chart_type.padEnd(6)} ${query.name.padEnd(28)} 0 rows, empty state shown=${ok}`,
+      );
+      if (!ok) failures.push(`${query.name} returned no rows but showed no empty state`);
+      continue;
+    }
+
+    const count = await card.locator(expectation.selector).count();
     const ok = count >= expectation.min;
     console.log(
-      `${ok ? "ok  " : "FAIL"} ${query.chart_type.padEnd(6)} ${query.name.padEnd(28)} ${count} ${expectation.selector}`,
+      `${ok ? "ok  " : "FAIL"} ${query.chart_type.padEnd(6)} ${query.name.padEnd(28)} ${count} ${expectation.selector} (${rows} rows)`,
     );
-    if (!ok) failures.push(`${query.name} (${query.chart_type}) drew nothing`);
+    if (!ok) failures.push(`${query.name} (${query.chart_type}) has ${rows} rows but drew nothing`);
   }
 
   // A card must never fail silently: no card should be showing an error state.

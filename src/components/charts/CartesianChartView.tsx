@@ -17,6 +17,7 @@ import {
 import type { CartesianData, ChartPoint } from "@/services/charts/shape";
 import { formatAxisValue } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { ChartEmpty } from "./ChartEmpty";
 import { ChartTooltip, type TooltipEntry } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
 import {
@@ -74,6 +75,9 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
   const [activeSeries, setActiveSeries] = useState<string | null>(null);
 
   const legend = data.seriesKeys.map((key, index) => ({ key, color: seriesColor(index) }));
+
+  // Axes over an empty plot look like a failure. Say what actually happened.
+  if (data.data.length === 0) return <ChartEmpty />;
 
   const renderTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (!active || !payload?.length) return null;
