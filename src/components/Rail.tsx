@@ -7,39 +7,73 @@ import { useConnections } from "@/services/connections/ConnectionsContext";
 import { StatusDot } from "./StatusDot";
 
 /**
- * The persistent left rail. This *is* the app's navigation - always visible on
- * desktop, never behind a hamburger, as the design brief requires. On small
- * screens the same component is rendered inside a drawer by `AppShell`.
+ * The persistent left rail.
+ *
+ * Collapses to a 48px strip rather than disappearing: an instrument panel
+ * should not lose its connection status lights just because the analyst wanted
+ * more room for charts, so the collapsed form keeps every status dot and drops
+ * only the labels.
  */
-export function Rail({ onNavigate }: { onNavigate?: () => void }) {
+export function Rail({
+  onNavigate,
+  collapsed = false,
+  onToggleCollapse,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}) {
   const pathname = usePathname();
   const { connections, initial, error } = useConnections();
   const { dashboards, hydrated } = useDashboards();
 
   return (
-    <nav aria-label="Primary" className="flex h-full min-h-0 flex-col bg-sunken">
-      <div className="shrink-0 border-b border-line px-3 py-3">
+    <nav
+      aria-label="Primary"
+      className="flex h-full min-h-0 flex-col bg-sunken"
+    >
+      <div
+        className={`flex shrink-0 items-start border-b border-line py-3 ${collapsed ? "justify-center px-1" : "gap-1 px-3"}`}
+      >
         <Link
           href="/"
           onClick={onNavigate}
-          className="display block text-[13px] leading-tight font-medium tracking-tight"
+          title={collapsed ? "Fraud Analyzer" : undefined}
+          className="display block min-w-0 text-[13px] leading-tight font-medium tracking-tight"
         >
-          FRAUD
-          <br />
-          ANALYZER
+          {collapsed ? (
+            <span aria-label="Fraud Analyzer">FA</span>
+          ) : (
+            <>
+              FRAUD
+              <br />
+              ANALYZER
+            </>
+          )}
         </Link>
+
+        {onToggleCollapse && !collapsed ? (
+          <CollapseButton collapsed={collapsed} onClick={onToggleCollapse} className="ml-auto" />
+        ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <Section title="Connections" action={{ href: "/connections/new", label: "+ New" }} onNavigate={onNavigate}>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <Section
+          title="Connections"
+          action={{ href: "/connections/new", label: "+ New" }}
+          onNavigate={onNavigate}
+          collapsed={collapsed}
+        >
           {initial ? (
-            <RailSkeleton rows={3} />
+            <RailSkeleton rows={3} collapsed={collapsed} />
           ) : error ? (
-            <p className="px-3 py-1.5 text-[11px] text-muted">
-              Engine unreachable
-            </p>
+            collapsed ? null : (
+              <p className="px-3 py-1.5 text-[11px] text-muted">Engine unreachable</p>
+            )
           ) : connections.length === 0 ? (
-            <p className="px-3 py-1.5 text-[11px] text-muted">No connections yet</p>
+            collapsed ? null : (
+              <p className="px-3 py-1.5 text-[11px] text-muted">No connections yet</p>
+            )
           ) : (
             <ul>
               {connections.map((connection) => {
@@ -50,9 +84,11 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
                       href={href}
                       active={pathname.startsWith(href)}
                       onNavigate={onNavigate}
+                      collapsed={collapsed}
+                      title={connection.name}
                     >
                       <StatusDot status={connection.status} />
-                      <span className="truncate">{connection.name}</span>
+                      {collapsed ? null : <span className="truncate">{connection.name}</span>}
                     </RailLink>
                   </li>
                 );
@@ -63,11 +99,18 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
 
         <div className="mx-3 my-1 border-t border-line" />
 
-        <Section title="Dashboards" action={{ href: "/dashboards/new", label: "+ New" }} onNavigate={onNavigate}>
+        <Section
+          title="Dashboards"
+          action={{ href: "/dashboards/new", label: "+ New" }}
+          onNavigate={onNavigate}
+          collapsed={collapsed}
+        >
           {!hydrated ? (
-            <RailSkeleton rows={2} />
+            <RailSkeleton rows={2} collapsed={collapsed} />
           ) : dashboards.length === 0 ? (
-            <p className="px-3 py-1.5 text-[11px] text-muted">No dashboards yet</p>
+            collapsed ? null : (
+              <p className="px-3 py-1.5 text-[11px] text-muted">No dashboards yet</p>
+            )
           ) : (
             <ul>
               {dashboards.map((dashboard) => {
@@ -78,11 +121,19 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
                       href={href}
                       active={pathname === href}
                       onNavigate={onNavigate}
+                      collapsed={collapsed}
+                      title={`${dashboard.name} (${dashboard.queryIds.length})`}
                     >
-                      <span className="truncate">{dashboard.name}</span>
-                      <span className="tnum ml-auto shrink-0 text-[10px] text-muted">
-                        {dashboard.queryIds.length}
-                      </span>
+                      {collapsed ? (
+                        <span className="tnum text-[10px]">{dashboard.queryIds.length}</span>
+                      ) : (
+                        <>
+                          <span className="truncate">{dashboard.name}</span>
+                          <span className="tnum ml-auto shrink-0 text-[10px] text-muted">
+                            {dashboard.queryIds.length}
+                          </span>
+                        </>
+                      )}
                     </RailLink>
                   </li>
                 );
@@ -91,7 +142,55 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
           )}
         </Section>
       </div>
+
+      {onToggleCollapse && collapsed ? (
+        <div className="shrink-0 border-t border-line p-1">
+          <CollapseButton collapsed={collapsed} onClick={onToggleCollapse} className="mx-auto" />
+        </div>
+      ) : null}
     </nav>
+  );
+}
+
+function CollapseButton({
+  collapsed,
+  onClick,
+  className,
+}: {
+  collapsed: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-expanded={!collapsed}
+      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      className={`block shrink-0 p-1 text-muted transition-colors hover:text-live ${className ?? ""}`}
+    >
+      <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+        <rect
+          x={1.5}
+          y={2}
+          width={11}
+          height={10}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.25}
+        />
+        {/* The filled column shows which side the panel is on. */}
+        <rect
+          x={collapsed ? 1.5 : 1.5}
+          y={2}
+          width={3.5}
+          height={10}
+          fill="currentColor"
+          opacity={collapsed ? 0.35 : 1}
+        />
+      </svg>
+    </button>
   );
 }
 
@@ -100,26 +199,42 @@ function Section({
   action,
   children,
   onNavigate,
+  collapsed,
 }: {
   title: string;
   action: { href: string; label: string };
   children: React.ReactNode;
   onNavigate?: () => void;
+  collapsed: boolean;
 }) {
   return (
     <section className="py-2">
-      <div className="flex items-center justify-between px-3 pb-1">
-        <h2 className="text-[10px] font-medium tracking-widest text-muted uppercase">
-          {title}
-        </h2>
-        <Link
-          href={action.href}
-          onClick={onNavigate}
-          className="text-[10px] text-muted transition-colors hover:text-live"
-        >
-          {action.label}
-        </Link>
-      </div>
+      {collapsed ? (
+        <div className="flex justify-center pb-1">
+          <Link
+            href={action.href}
+            onClick={onNavigate}
+            title={`${title}: ${action.label}`}
+            aria-label={`${title}: ${action.label}`}
+            className="text-[11px] text-muted transition-colors hover:text-live"
+          >
+            +
+          </Link>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-3 pb-1">
+          <h2 className="text-[10px] font-medium tracking-widest text-muted uppercase">
+            {title}
+          </h2>
+          <Link
+            href={action.href}
+            onClick={onNavigate}
+            className="text-[10px] text-muted transition-colors hover:text-live"
+          >
+            {action.label}
+          </Link>
+        </div>
+      )}
       {children}
     </section>
   );
@@ -130,18 +245,25 @@ function RailLink({
   active,
   children,
   onNavigate,
+  collapsed,
+  title,
 }: {
   href: string;
   active: boolean;
   children: React.ReactNode;
   onNavigate?: () => void;
+  collapsed: boolean;
+  title?: string;
 }) {
   return (
     <Link
       href={href}
       onClick={onNavigate}
+      title={collapsed ? title : undefined}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2 border-l-2 py-1.5 pr-3 pl-[10px] text-[12px] transition-colors ${
+      className={`flex items-center gap-2 border-l-2 py-1.5 text-[12px] transition-colors ${
+        collapsed ? "justify-center px-0" : "pr-3 pl-[10px]"
+      } ${
         active
           ? "border-live bg-surface text-ink"
           : "border-transparent text-muted hover:bg-surface/60 hover:text-ink"
@@ -152,11 +274,15 @@ function RailLink({
   );
 }
 
-function RailSkeleton({ rows }: { rows: number }) {
+function RailSkeleton({ rows, collapsed }: { rows: number; collapsed: boolean }) {
   return (
-    <ul className="skeleton-sweep space-y-1.5 px-3 py-1.5">
+    <ul className={`skeleton-sweep space-y-1.5 py-1.5 ${collapsed ? "px-3" : "px-3"}`}>
       {Array.from({ length: rows }, (_, index) => (
-        <li key={index} className="h-2.5 bg-line" style={{ width: `${80 - index * 12}%` }} />
+        <li
+          key={index}
+          className="h-2.5 bg-line"
+          style={{ width: collapsed ? "100%" : `${80 - index * 12}%` }}
+        />
       ))}
     </ul>
   );

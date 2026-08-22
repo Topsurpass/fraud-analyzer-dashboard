@@ -7,7 +7,6 @@ import {
   ApiError,
   deleteConnection,
   getConnection,
-  listTables,
   testConnection,
   updateConnection,
 } from "@/services/api-client";
@@ -17,6 +16,7 @@ import { PageBody } from "@/components/PageBody";
 import { ConnectionForm, type ConnectionFormValues } from "@/components/ConnectionForm";
 import { TestOutcome } from "@/components/TestOutcome";
 import { Button, ErrorState, Panel } from "@/components/ui";
+import { SchemaBrowser } from "@/components/SchemaBrowser";
 import { formatDateTime } from "@/services/format";
 
 /** Edit credentials, re-test, browse the schema, or delete the connection. */
@@ -166,7 +166,7 @@ export default function ConnectionSettingsPage({
           </Panel>
 
           <div className="space-y-3">
-            <SchemaPanel connectionId={id} />
+            <SchemaBrowser connectionId={id} />
 
             <Panel title="Danger zone">
               <div className="p-3">
@@ -199,50 +199,5 @@ export default function ConnectionSettingsPage({
         </div>
       )}
     </PageBody>
-  );
-}
-
-/** Read-only schema browser, so SQL can be written without guessing names. */
-function SchemaPanel({ connectionId }: { connectionId: string }) {
-  const load = useCallback(
-    (signal: AbortSignal) => listTables(connectionId, { signal }),
-    [connectionId],
-  );
-  const tables = useResource(load);
-
-  return (
-    <Panel
-      title="Tables"
-      actions={
-        tables.data ? (
-          <span className="tnum text-[11px] text-muted">{tables.data.tables.length}</span>
-        ) : null
-      }
-    >
-      <div className="max-h-64 overflow-y-auto p-3">
-        {tables.error ? (
-          <p className="text-[12px] text-muted">{tables.error.displayMessage}</p>
-        ) : tables.initial ? (
-          <div className="skeleton-sweep space-y-1.5">
-            {[0, 1, 2, 3, 4].map((index) => (
-              <div key={index} className="h-2.5 bg-line" style={{ width: `${70 - index * 8}%` }} />
-            ))}
-          </div>
-        ) : (tables.data?.tables ?? []).length === 0 ? (
-          <p className="text-[12px] text-muted">No tables visible to this user.</p>
-        ) : (
-          <ul className="space-y-0.5">
-            {tables.data?.tables.map((table) => (
-              <li key={table.name} className="flex items-baseline gap-2">
-                <span className="tnum truncate text-[12px]">{table.name}</span>
-                <span className="ml-auto shrink-0 text-[10px] tracking-wide text-muted uppercase">
-                  {table.kind}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Panel>
   );
 }

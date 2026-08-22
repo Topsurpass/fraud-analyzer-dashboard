@@ -6,8 +6,9 @@ import { listQueries } from "@/services/api-client";
 import { useResource } from "@/lib/useResource";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
-import { ChartGrid, chartCellStyle } from "@/components/ChartGrid";
+import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { AddToDashboardMenu } from "@/components/AddToDashboardMenu";
+import { useExpandedCards } from "@/lib/useExpandedCards";
 import { EmptyState, ErrorState, LinkButton } from "@/components/ui";
 
 /**
@@ -21,6 +22,7 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
 
   const load = useCallback((signal: AbortSignal) => listQueries(id, { signal }), [id]);
   const queries = useResource(load);
+  const expanded = useExpandedCards();
 
   const name = connection?.name ?? "Connection";
 
@@ -39,8 +41,8 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
       {connection?.status === "failed" ? (
         <p className="mb-2 border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
           This connection last failed its test
-          {connection.last_test_error ? `: ${connection.last_test_error}` : "."} Cards below
-          will keep failing until it is fixed.
+          {connection.last_test_error ? `: ${connection.last_test_error.replace(/\.?$/, ".")}` : "."}{" "}
+          Cards below will keep failing until it is fixed.
         </p>
       ) : null}
 
@@ -55,8 +57,7 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
           {[0, 1, 2, 3].map((index) => (
             <div
               key={index}
-              className="skeleton-sweep border border-line bg-surface"
-              style={{ gridRow: "span 3" }}
+              className={`skeleton-sweep border border-line bg-surface ${PENDING_CELL_CLASS}`}
             />
           ))}
         </ChartGrid>
@@ -76,7 +77,11 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
             <ChartCard
               key={query.id}
               query={query}
-              style={chartCellStyle(query.chart_type)}
+              className={chartCellClass(query.chart_type, expanded.isExpanded(query.id))}
+              expanded={expanded.isExpanded(query.id)}
+              onToggleExpand={() => expanded.toggle(query.id)}
+              onChanged={queries.reload}
+              onDeleted={queries.reload}
               actions={<AddToDashboardMenu queryId={query.id} />}
             />
           ))}

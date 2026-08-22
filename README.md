@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 195 tests, ~20s
+npm test               # 234 tests, ~45s
 npm run lint
 npm run typecheck
 npm run build
@@ -74,6 +74,7 @@ npm run build
 ```bash
 node scripts/dev-seed.mjs && npm run dev   # in another shell
 npm run smoke
+npm run check:endpoints                    # every documented operation is used
 ```
 
 The smoke lane exists because the gate lane structurally cannot catch this
@@ -117,6 +118,23 @@ The trace scrolls right to left at a fixed rate, so its horizontal axis is
 genuinely time. Every pulse line on the page shares one `requestAnimationFrame`
 ticker (`src/lib/ticker.ts`) rather than starting its own.
 
+### Working the grid
+
+The grid is for scanning; reading one chart properly needs more room. Both are
+available without leaving the page.
+
+- **Expand a card** with the arrows in its header. It takes a second column and
+  more rows, keeps polling throughout, and the default size is unchanged for
+  everything else. Several cards can be expanded at once.
+- **Collapse the rail** with the toggle beside the app name. It becomes a 48px
+  strip that still shows every connection's status light — an instrument panel
+  should not lose its status lights to make room.
+- **Each card's `⋯` menu** carries the actions for the query behind it: pick how
+  it is drawn (line, bar, pie, number, table), run it now, edit it, or delete
+  it. Chart type is a property of the saved query rather than a view preference,
+  so choosing one writes through to the engine and every other card showing that
+  query agrees.
+
 ### What `--signal-alert` means
 
 The brief reserves the alert colour for flagged or anomalous points in chart
@@ -146,12 +164,32 @@ still delivering the information the animation carried.
 
 ## Decisions worth knowing
 
-**Dashboards are stored in this browser.** The engine models connections and
-saved queries; it has no dashboard resource. A dashboard here is a named,
-ordered set of query ids in `localStorage`, so it can span connections but does
-not follow the analyst to another machine. The UI says so where it matters.
-Everything a dashboard points at — the queries, the SQL, the results — is
-server-side and shared.
+**Dashboards are stored in this browser, and cannot yet be anything else.** The
+engine models connections and saved queries; there is no dashboard resource. A
+dashboard here is a named, ordered set of query ids in `localStorage`, so it can
+span connections but does not follow the analyst to another machine. The UI says
+so where it matters. Everything a dashboard points at — the queries, the SQL,
+the results — is server-side and shared; only the grouping is local.
+
+This is the one piece of client-side state left, and it is not a preference: it
+is data, and it belongs on the engine. Moving it needs four endpoints the engine
+does not currently expose:
+
+```
+GET    /dashboards
+POST   /dashboards                      { name, query_ids }
+PUT    /dashboards/{dashboard_id}       { name?, query_ids? }
+DELETE /dashboards/{dashboard_id}
+```
+
+`src/services/dashboards/store.ts` is already written as pure functions over an
+explicit state value with `useDashboards` as the only binding to storage, so the
+swap is confined to that one module.
+
+Session-only UI state — which cards are expanded, whether the rail is collapsed
+— is deliberately *not* persisted anywhere. Those are momentary gestures, and a
+grid that came back from a reload in a shape set days ago would surprise more
+than it helped.
 
 **Fonts come from `@fontsource-variable/*` via `next/font/local`, not from
 `next/font/google`.** `next/font/google` downloads and self-hosts at build time,
@@ -174,11 +212,21 @@ tooltip by scanning children **by component type and does not look inside a
 fragment** — `src/components/charts/CartesianChartView.tsx` passes them as a
 keyed array for that reason.
 
-**The deployed engine is currently failing.** `GET /health` returns
-`200 {"status":"ok"}`, but every database-backed route returns
-`500 INTERNAL_ERROR` — `/connections` included. `/health` is the one endpoint
-that touches no database, which is why the top-bar readout uses it: it separates
-"the engine is down" from "the engine is up but its storage is unhappy". Running
-the engine locally from its own repo, against a migrated SQLite file, all of
-these routes return 200, so this is environmental rather than a contract
-problem.
+**Every engine endpoint is used by the UI.** All eighteen, verified by
+`npm run check:endpoints`. Two were worth calling out because they are easy
+to leave stranded in a client: `GET /connections/{id}/tables/{table}/columns`
+powers the expandable schema browser in the query editor and connection
+settings, and `POST /queries/{id}/run` is the "Run now" action on a card's menu
+and above the execution history — distinct from a poll in that it always
+executes and always writes a history entry.
+
+**The deployed engine works, with one route failing.** `/connections`,
+`/queries`, `/tables` and `/columns` all answer correctly from
+`https://fraud-analyzer-engine.fastapicloud.dev`. But
+`GET /queries/{id}/poll` returns a platform-level `502` with
+`content-type: text/plain` — Cloudflare's own error page, not the engine's JSON
+envelope — for the query on the failed `warehouse-neon` connection. Because that
+502 never reaches the app, it carries no `Access-Control-Allow-Origin` header
+either, so the browser reports it as a CORS failure. The CORS message is a
+symptom; the 502 is the cause. The card degrades correctly: dashed pulse line,
+inline "Cannot reach engine", and a retry.

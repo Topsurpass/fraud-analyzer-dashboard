@@ -9,8 +9,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
-    // Gate lane: deterministic, local, free. Anything slower than this is a bug.
-    testTimeout: 5_000,
+    // Gate lane: deterministic, local, free. Tests resolve in milliseconds; this
+    // ceiling exists to fail a genuine hang, not to absorb machine load, and is
+    // deliberately above the Testing Library budget set in vitest.setup.ts.
+    testTimeout: 15_000,
     restoreMocks: true,
   },
 });

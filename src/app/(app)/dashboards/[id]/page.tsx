@@ -8,8 +8,9 @@ import { findDashboard, useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
-import { ChartGrid, chartCellStyle } from "@/components/ChartGrid";
+import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/ui";
+import { useExpandedCards } from "@/lib/useExpandedCards";
 
 /**
  * A curated board: saved queries from any connection, side by side.
@@ -65,6 +66,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
 
   const load = useCallback((signal: AbortSignal) => resolveQueries(key, signal), [key]);
   const queries = useResource(load);
+  const expandedCards = useExpandedCards();
 
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -180,8 +182,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
           {queryIds.map((queryId) => (
             <div
               key={queryId}
-              className="skeleton-sweep border border-line bg-surface"
-              style={{ gridRow: "span 3" }}
+              className={`skeleton-sweep border border-line bg-surface ${PENDING_CELL_CLASS}`}
             />
           ))}
         </ChartGrid>
@@ -191,7 +192,11 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
             <ChartCard
               key={query.id}
               query={query}
-              style={chartCellStyle(query.chart_type)}
+              className={chartCellClass(query.chart_type, expandedCards.isExpanded(query.id))}
+              expanded={expandedCards.isExpanded(query.id)}
+              onToggleExpand={() => expandedCards.toggle(query.id)}
+              onChanged={queries.reload}
+              onDeleted={queries.reload}
               actions={
                 <button
                   type="button"

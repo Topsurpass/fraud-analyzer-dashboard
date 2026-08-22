@@ -113,6 +113,40 @@ body {
   border-radius: 999px;
 }
 
+/*
+ * Card footprints in the chart grid.
+ *
+ * Written as real CSS rather than Tailwind utilities because the class is
+ * chosen from data at runtime, and a utility assembled at runtime is not
+ * guaranteed to survive Tailwind's source scanning - a missing span silently
+ * collapses every chart card to a single row.
+ *
+ * The default sizes are the dense scanning layout. Expanding is opt-in per
+ * card: more rows always, and a second column once there is one to take.
+ */
+.card-cell {
+  grid-row: span 3;
+}
+
+.card-cell-number {
+  grid-row: span 2;
+}
+
+.card-cell-expanded {
+  grid-row: span 5;
+}
+
+@media (min-width: 640px) {
+  .card-cell-expanded {
+    grid-column: span 2;
+  }
+}
+
+/* The skeleton stands in for a not-yet-known chart type. */
+.card-cell-pending {
+  grid-row: span 3;
+}
+
 /* The skeleton shimmer: a slow sweep, not a pulsing block. */
 @keyframes sweep {
   0% {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback } from "react";
-import { listLogs } from "@/services/api-client";
+import { useCallback, useState } from "react";
+import { ApiError, listLogs, runQuery } from "@/services/api-client";
 import { useResource } from "@/lib/useResource";
 import { formatClock, formatDuration, formatInteger } from "@/services/format";
 import { Button, Panel } from "./ui";
@@ -20,15 +20,46 @@ export function ExecutionLog({ queryId, limit = 20 }: { queryId: string; limit?:
   );
   const logs = useResource(load);
 
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  /**
+   * Force an execution now. Distinct from a card's poll: this always runs the
+   * SQL against the target database and writes an entry to the history below,
+   * which is how an analyst reproduces a failure on demand.
+   */
+  const run = async () => {
+    setRunning(true);
+    setRunError(null);
+    try {
+      await runQuery(queryId);
+      logs.reload();
+    } catch (cause) {
+      setRunError(cause instanceof ApiError ? cause.displayMessage : "The query failed to run");
+      logs.reload();
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <Panel
       title="Execution history"
       actions={
-        <Button type="button" onClick={logs.reload} disabled={logs.loading}>
-          {logs.loading ? "…" : "Refresh"}
-        </Button>
+        <>
+          <Button type="button" onClick={run} disabled={running || logs.loading}>
+            {running ? "Running…" : "Run now"}
+          </Button>
+          <Button type="button" onClick={logs.reload} disabled={logs.loading}>
+            {logs.loading ? "…" : "Refresh"}
+          </Button>
+        </>
       }
     >
+      {runError ? (
+        <p className="border-b border-line px-3 py-1.5 text-[11px] text-change">{runError}</p>
+      ) : null}
+
       <div className="max-h-64 overflow-y-auto">
         {logs.error ? (
           <p className="p-3 text-[12px] text-muted">{logs.error.displayMessage}</p>

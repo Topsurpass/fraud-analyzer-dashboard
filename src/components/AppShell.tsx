@@ -12,6 +12,10 @@ export function useOpenNav(): () => void {
   return useContext(NavContext);
 }
 
+/** Widths of the desktop rail in each state. */
+const RAIL_WIDTH = 184;
+const RAIL_WIDTH_COLLAPSED = 48;
+
 /**
  * Rail plus content. The rail is permanent from `md` up and becomes a drawer
  * below it, which is the only responsive move the layout makes: the grid inside
@@ -20,6 +24,12 @@ export function useOpenNav(): () => void {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const [openNav] = useState(() => () => setNavOpen(true));
+  /*
+   * Session state rather than storage. The layout does not remount across
+   * client-side navigation, so a collapsed rail stays collapsed while the
+   * analyst moves around; only a full reload resets it.
+   */
+  const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 
   // A drawer that survived navigation would cover the page it just opened.
@@ -41,8 +51,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ConnectionsProvider>
       <div className="flex h-dvh min-h-0 w-full">
-        <aside className="hidden w-[184px] shrink-0 border-r border-line md:block">
-          <Rail />
+        <aside
+          className="hidden shrink-0 border-r border-line transition-[width] duration-150 md:block"
+          style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}
+        >
+          <Rail
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((value) => !value)}
+          />
         </aside>
 
         {navOpen ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   ChartType,
   PreviewResponse,
@@ -13,6 +13,7 @@ import { formatDuration, formatInteger } from "@/services/format";
 import { Button, Field, Input, Panel, Select, Textarea } from "./ui";
 import { TableView } from "./charts/TableView";
 import { buildTable } from "@/services/charts/shape";
+import { SchemaBrowser } from "./SchemaBrowser";
 
 /**
  * Write SQL, see what it returns, then say how to draw it.
@@ -62,6 +63,29 @@ export function QueryEditor({
     initial?.poll_interval_ms != null ? String(initial.poll_interval_ms) : "",
   );
   const [touched, setTouched] = useState(false);
+
+  const sqlRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * Write a table or column name into the SQL at the caret, rather than
+   * appending it. Appending would be useless the moment the analyst is editing
+   * the middle of a statement, which is most of the time.
+   */
+  const insertAtCaret = useCallback((text: string) => {
+    const field = sqlRef.current;
+    if (!field) {
+      setSql((previous) => previous + text);
+      return;
+    }
+    const start = field.selectionStart ?? field.value.length;
+    const end = field.selectionEnd ?? start;
+    setSql(field.value.slice(0, start) + text + field.value.slice(end));
+    // The value lands on the next render, so move the caret after it.
+    requestAnimationFrame(() => {
+      field.focus();
+      field.setSelectionRange(start + text.length, start + text.length);
+    });
+  }, []);
 
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewError, setPreviewError] = useState<ApiError | null>(null);
@@ -161,6 +185,7 @@ export function QueryEditor({
             >
               <Textarea
                 id="query-sql"
+                ref={sqlRef}
                 value={sql}
                 onChange={(event) => setSql(event.target.value)}
                 rows={12}
@@ -180,6 +205,8 @@ export function QueryEditor({
       </div>
 
       <div className="space-y-3">
+        <SchemaBrowser connectionId={connectionId} onInsert={insertAtCaret} />
+
         <Panel title="Chart">
           <div className="space-y-3 p-3">
             <Field label="Type" htmlFor="query-chart">

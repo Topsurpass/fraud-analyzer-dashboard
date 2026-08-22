@@ -6,6 +6,7 @@ import { buildCartesian, buildNumber, buildPie, buildTable } from "@/services/ch
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
 import { formatDuration, formatHash, formatInteger, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
+import { CardMenu } from "./CardMenu";
 import { PulseLine } from "./PulseLine";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
@@ -23,15 +24,35 @@ import { TableView } from "./charts/TableView";
 
 export interface ChartCardProps {
   query: SavedQueryRead;
-  /** Rendered in the header, e.g. "remove from dashboard". */
+  /** Rendered in the header, e.g. "add to dashboard". */
   actions?: React.ReactNode;
+  /** Extra items inside the card's action menu. */
+  menuExtra?: React.ReactNode;
   /** Stop polling, e.g. while a modal is open over the grid. */
   enabled?: boolean;
+  /** True when the card is currently occupying its larger grid footprint. */
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  /** The saved query changed on the engine and the list should be refetched. */
+  onChanged?: () => void;
+  /** The saved query was deleted on the engine. */
+  onDeleted?: () => void;
   className?: string;
   style?: React.CSSProperties;
 }
 
-export function ChartCard({ query, actions, enabled = true, className, style }: ChartCardProps) {
+export function ChartCard({
+  query,
+  actions,
+  menuExtra,
+  enabled = true,
+  expanded = false,
+  onToggleExpand,
+  onChanged,
+  onDeleted,
+  className,
+  style,
+}: ChartCardProps) {
   const poll = useQueryPolling(query.id, {
     enabled,
     fallbackIntervalMs: query.poll_interval_ms ?? undefined,
@@ -95,6 +116,20 @@ export function ChartCard({ query, actions, enabled = true, className, style }: 
               </span>
             ) : null}
             {actions}
+            {onToggleExpand ? (
+              <ExpandButton expanded={expanded} onClick={onToggleExpand} name={query.name} />
+            ) : null}
+            <CardMenu
+              query={query}
+              onMutated={() => {
+                // Re-poll immediately so a new chart type is drawn now rather
+                // than at the end of this card's interval.
+                poll.refresh();
+                onChanged?.();
+              }}
+              onDeleted={onDeleted}
+              extra={menuExtra}
+            />
           </div>
         </div>
 
@@ -231,5 +266,47 @@ function CardErrorBanner({
         Retry
       </button>
     </div>
+  );
+}
+
+/**
+ * Grow a card to its larger footprint and back.
+ *
+ * A dense grid is right for scanning and wrong for reading a 50-row table or a
+ * crowded multi-series line, so any card can take more room without the analyst
+ * leaving the page. The default size is unchanged; this is opt-in per card.
+ */
+function ExpandButton({
+  expanded,
+  onClick,
+  name,
+}: {
+  expanded: boolean;
+  onClick: () => void;
+  name: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={expanded}
+      aria-label={expanded ? `Shrink ${name}` : `Expand ${name}`}
+      title={expanded ? "Shrink" : "Expand"}
+      className="shrink-0 px-1 text-muted transition-colors hover:text-live"
+    >
+      <svg width={11} height={11} viewBox="0 0 12 12" aria-hidden="true">
+        {expanded ? (
+          <>
+            <path d="M5 1v4H1" fill="none" stroke="currentColor" strokeWidth={1.25} />
+            <path d="M7 11V7h4" fill="none" stroke="currentColor" strokeWidth={1.25} />
+          </>
+        ) : (
+          <>
+            <path d="M1 5V1h4" fill="none" stroke="currentColor" strokeWidth={1.25} />
+            <path d="M11 7v4H7" fill="none" stroke="currentColor" strokeWidth={1.25} />
+          </>
+        )}
+      </svg>
+    </button>
   );
 }

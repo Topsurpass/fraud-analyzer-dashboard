@@ -85,8 +85,9 @@ export function Select({ className, ...props }: ComponentProps<"select">) {
   return <select {...props} className={`${CONTROL} ${className ?? ""}`} />;
 }
 
-export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
-  return <textarea {...props} className={`${CONTROL} ${className ?? ""}`} />;
+export function Textarea({ className, ref, ...props }: ComponentProps<"textarea">) {
+  // React 19 passes `ref` as an ordinary prop, so no forwardRef is needed.
+  return <textarea {...props} ref={ref} className={`${CONTROL} ${className ?? ""}`} />;
 }
 
 export function Panel({
