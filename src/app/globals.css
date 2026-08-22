@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+/*
+ * Fraud Analyzer — instrument panel design tokens.
+ *
+ * Cool slate base, never pure black. Signal colours carry meaning and nothing
+ * else: --signal-live for "polling is alive", --signal-change for "this data
+ * just moved", --signal-alert exclusively for flagged or anomalous points
+ * inside chart data. No gradient, no glow, no shadow beyond a 1px hairline.
+ * This is a schematic, not a poster.
+ */
+:root {
+  --bg: #12151c;
+  --surface: #1a1f29;
+  --border: #2a3140;
+  --text-primary: #e6e9f0;
+  --text-muted: #8b93a7;
+  --signal-live: #4fb0c6;
+  --signal-change: #e8a33d;
+  --signal-alert: #e5484d;
+
+  /* Derived, never introduced as new hues: tints of the tokens above. */
+  --surface-raised: #1f2430;
+  --surface-sunken: #161a23;
+  --border-strong: #3a4356;
+  --signal-live-dim: color-mix(in srgb, var(--signal-live) 22%, transparent);
+  --signal-change-dim: color-mix(in srgb, var(--signal-change) 24%, transparent);
+  --signal-alert-dim: color-mix(in srgb, var(--signal-alert) 22%, transparent);
+
+  /* Motion. Short enough that the panel still reads as fast. */
+  --tween-fast: 140ms;
+  --tween-data: 360ms;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-muted: var(--text-muted);
+  --color-live: var(--signal-live);
+  --color-change: var(--signal-change);
+  --color-alert: var(--signal-alert);
+
+  --font-display: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono",
+    Menlo, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Every number, timestamp, hash and axis value is monospace. This is the single
+ * decision that makes the app read as instrumentation rather than a website, so
+ * it gets a named class and tabular figures — columns of digits must not shift
+ * width as values change during a poll.
+ */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  letter-spacing: -0.01em;
+}
+
+.display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* One focus treatment across the app, in the live signal colour. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--signal-live);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Scrollbars that belong to a dark instrument, not to the OS. */
+* {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--bg);
+  border-radius: 999px;
+}
+
+/* The skeleton shimmer: a slow sweep, not a pulsing block. */
+@keyframes sweep {
+  0% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+
+.skeleton-sweep {
+  animation: sweep 1.6s ease-in-out infinite;
+}
+
+/*
+ * Reduced motion collapses every animation to an instant state change. The
+ * information — that something changed — still has to arrive; only the
+ * animation goes. The pulse line and count-up handle that in their own code.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
