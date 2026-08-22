@@ -79,3 +79,29 @@ describe("empty result sets", () => {
     expect(screen.getByText("No rows in range")).toBeInTheDocument();
   });
 });
+
+describe("very short series", () => {
+  it("draws visible points when a series is too short to form a line", () => {
+    // One bucket per channel is a real shape: a five-minute-bucket query
+    // renders exactly this in its first minutes. Without dots the card would
+    // show an empty plot over real data.
+    const { container } = render(
+      <CartesianChartView
+        data={buildCartesian({
+          columns: ["bucket", "channel", "approvals"],
+          rows: [
+            ["22:43", "api", 2],
+            ["22:43", "web", 1],
+          ],
+          chart: spec({ x_field: "bucket", y_field: "approvals", series_field: "channel" }),
+        })}
+        kind="line"
+        title="Authorisations by channel"
+      />,
+    );
+    expect(screen.queryByText("No rows in range")).not.toBeInTheDocument();
+    // jsdom gives Recharts no layout, so assert on the series rather than the
+    // rendered geometry; scripts/smoke.mjs covers the drawn output.
+    expect(container.querySelector("[aria-label*='2 series']")).not.toBeNull();
+  });
+});

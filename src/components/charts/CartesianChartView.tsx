@@ -48,26 +48,41 @@ interface AlertDotProps {
   cy?: number;
   payload?: ChartPoint;
   dataKey?: string;
-  fill?: string;
-  index?: number;
+  stroke?: string;
+  /**
+   * Draw every point, not just the anomalous ones. Set when the series is too
+   * short to form a visible line.
+   */
+  showAll?: boolean;
 }
 
 /**
  * Points are unmarked unless the data says they are anomalous, in which case
  * they get the alert colour *and* a distinct hollow-ring shape. The shape is
  * what carries the meaning for a colour-blind analyst.
+ *
+ * The exception is a series with a single point: a one-point line has no
+ * segment to draw, so without a dot the card renders an empty plot over real
+ * data - indistinguishable from a broken chart, which is exactly what the
+ * design brief forbids.
  */
-function AlertDot({ cx, cy, payload, dataKey }: AlertDotProps) {
-  const flagged =
-    typeof dataKey === "string" && payload?.__alert?.[dataKey] === true;
-  if (!flagged || cx === undefined || cy === undefined) return <g />;
+function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) {
+  if (cx === undefined || cy === undefined) return <g />;
 
-  return (
-    <g>
-      <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={ALERT_COLOR} strokeWidth={1.5} />
-      <circle cx={cx} cy={cy} r={1.5} fill={ALERT_COLOR} />
-    </g>
-  );
+  const flagged = typeof dataKey === "string" && payload?.__alert?.[dataKey] === true;
+
+  if (flagged) {
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={ALERT_COLOR} strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={1.5} fill={ALERT_COLOR} />
+      </g>
+    );
+  }
+
+  if (showAll) return <circle cx={cx} cy={cy} r={2.5} fill={stroke ?? "currentColor"} />;
+
+  return <g />;
 }
 
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
@@ -165,7 +180,9 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                   stroke={seriesColor(index)}
                   strokeWidth={2}
                   strokeOpacity={opacityFor(key)}
-                  dot={<AlertDot />}
+                  // A single-point series has no segment to draw, so its points
+                  // are rendered explicitly rather than leaving an empty plot.
+                  dot={<AlertDot showAll={data.data.length < 2} />}
                   activeDot={{ r: 3.5, strokeWidth: 0 }}
                   isAnimationActive={!reducedMotion}
                   animationDuration={DATA_TWEEN_MS}
