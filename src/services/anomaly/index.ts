@@ -98,6 +98,48 @@ export function findFlagColumn(
   return null;
 }
 
+/**
+ * Column names that hold an identifier rather than a measurement.
+ *
+ * An outlier test on a bank sort code, an account number or a row id is
+ * arithmetic on something that has no distribution: the values are labels that
+ * happen to be spelled with digits. Left unguarded it produces confident
+ * nonsense - three banks out of ten reported as anomalous because their sort
+ * codes are numerically further from the median than the rest.
+ */
+const IDENTIFIER_WORDS = [
+  "id",
+  "code",
+  "key",
+  "ref",
+  "reference",
+  "no",
+  "number",
+  "msisdn",
+  "account",
+  "uuid",
+  "guid",
+  "hash",
+];
+
+/**
+ * Matched on word boundaries only - the whole name, a `snake_case` part, or a
+ * `camelCase` part. Deliberately not a bare suffix test: "encode" ends with
+ * "code" and "casino" ends with "no", and a false positive here silently turns
+ * anomaly detection off for a real measurement, which is a worse failure than
+ * missing an unconventionally-named identifier.
+ */
+export function looksLikeIdentifier(name: string): boolean {
+  const parts = name
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[\s_\-.]+/)
+    .filter(Boolean);
+
+  return parts.some((part) => IDENTIFIER_WORDS.includes(part));
+}
+
 /** SQL truthiness across drivers: 1, "1", true, "true", "yes", "t". */
 export function isTruthyFlag(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -205,7 +247,8 @@ export function detectRowAnomalies(input: RowAnomalyInput): RowAnomalyResult {
     };
   }
 
-  if (valueColumn) {
+  // An identifier has no distribution to be an outlier in.
+  if (valueColumn && !looksLikeIdentifier(valueColumn)) {
     const valueIndex = columns.indexOf(valueColumn);
     if (valueIndex !== -1) {
       const values = rows.map((row) => {

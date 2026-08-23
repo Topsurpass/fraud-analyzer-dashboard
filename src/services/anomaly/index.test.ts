@@ -9,6 +9,7 @@ import {
   median,
   modifiedZScores,
   MODIFIED_Z_THRESHOLD,
+  looksLikeIdentifier,
 } from "./index";
 
 describe("isFlagColumn", () => {
@@ -216,5 +217,60 @@ describe("detectRowAnomalies", () => {
       valueColumn: "n",
     });
     expect(result.flags[5]).toBe(true);
+  });
+});
+
+describe("looksLikeIdentifier", () => {
+  it("recognises identifier columns by whole name or word part", () => {
+    for (const name of [
+      "id",
+      "code",
+      "bank_code",
+      "merchant_id",
+      "accountNumber",
+      "external_ref",
+      "msisdn",
+      "data_hash",
+    ]) {
+      expect(looksLikeIdentifier(name)).toBe(true);
+    }
+  });
+
+  it("does not match a measurement whose name merely contains those letters", () => {
+    // A bare suffix test would call all of these identifiers, and silently turn
+    // anomaly detection off for them.
+    for (const name of ["encode", "casino_revenue", "amount", "keystrokes", "decoded_total"]) {
+      expect(looksLikeIdentifier(name)).toBe(false);
+    }
+  });
+});
+
+describe("detectRowAnomalies on an identifier column", () => {
+  const columns = ["code", "name"];
+  // Real NIBBS sort codes: numerically far apart, semantically labels.
+  const rows: unknown[][] = [
+    ["4000470158", "Access"],
+    ["4010350115", "Polaris"],
+    ["4000410140", "Unity"],
+    ["4000070135", "Firstbank"],
+    ["4000015101", "Providus"],
+    ["4010100137", "FCMB"],
+  ];
+
+  it("refuses to call sort codes outliers", () => {
+    const result = detectRowAnomalies({ columns, rows, valueColumn: "code" });
+    expect(result.flags.some(Boolean)).toBe(false);
+    expect(result.reason).toBe("none");
+  });
+
+  it("still runs the test on a real measurement beside it", () => {
+    const withValue = rows.map((row, index) => [...row, index === 0 ? 11_950_000_000 : 1_000_000]);
+    const result = detectRowAnomalies({
+      columns: [...columns, "collateral"],
+      rows: withValue,
+      valueColumn: "collateral",
+    });
+    expect(result.flags).toEqual([true, false, false, false, false, false]);
+    expect(result.reason).toBe("outlier");
   });
 });

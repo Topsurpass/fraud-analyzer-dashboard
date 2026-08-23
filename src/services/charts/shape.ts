@@ -46,6 +46,28 @@ function columnIsNumeric(rows: Row[], index: number): boolean {
 }
 
 /**
+ * True when the column arrives as actual numbers rather than numeric-looking
+ * strings.
+ *
+ * Both are "numeric" for alignment purposes, but only one is reliably a
+ * *measurement*. A driver returns a real number column as JS numbers; a bank
+ * sort code, an account number or an external reference comes back as a string
+ * even though every character in it is a digit. Preferring a true numeric
+ * column when defaulting the value axis is what stops a table of
+ * `code, name, collateral` plotting the sort codes.
+ */
+function columnIsRealNumber(rows: Row[], index: number): boolean {
+  let seen = 0;
+  for (const row of rows) {
+    const cell = row[index];
+    if (cell === null || cell === undefined) continue;
+    if (typeof cell !== "number" || !Number.isFinite(cell)) return false;
+    seen += 1;
+  }
+  return seen > 0;
+}
+
+/**
  * Decide which columns to plot. Honours the saved ChartSpec first; falls back
  * only when a named field is missing from the result set, which happens the
  * moment someone edits the SQL without updating the chart config.
@@ -75,9 +97,21 @@ export function resolveFields(result: ResultSet): ResolvedFields {
   if (has(chart.y_field)) yKey = chart.y_field;
 
   if (!yKey) {
-    const candidate = columns.findIndex(
-      (name, index) => name !== xKey && name !== seriesKey && columnIsNumeric(rows, index),
+    const eligible = (name: string) => name !== xKey && name !== seriesKey;
+    /*
+     * A column of real numbers wins over one of numeric-looking strings, even
+     * when the string column comes first. `SELECT code, name, collateral` used
+     * to default its value axis to `code` - the sort code - because the digits
+     * coerce; the magnitude the analyst meant is always the real number.
+     */
+    let candidate = columns.findIndex(
+      (name, index) => eligible(name) && columnIsRealNumber(rows, index),
     );
+    if (candidate === -1) {
+      candidate = columns.findIndex(
+        (name, index) => eligible(name) && columnIsNumeric(rows, index),
+      );
+    }
     if (candidate !== -1) {
       yKey = columns[candidate];
       if (chart.type !== "table") warnings.push(`value axis defaulted to "${yKey}"`);

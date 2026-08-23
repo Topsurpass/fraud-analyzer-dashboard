@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 246 tests, ~70s
+npm test               # 250 tests, ~70s
 npm run lint
 npm run typecheck
 npm run build
@@ -207,6 +207,15 @@ in priority order:
    median absolute deviation, threshold 3.5). Mean and standard deviation are
    the wrong tools here: a fraud spike is exactly the kind of point that inflates
    a standard deviation enough to hide itself.
+3. **Never on an identifier.** A bank sort code, an account number or a row id is
+   a label spelled with digits; it has no distribution to be an outlier in.
+   `SELECT code, name, collateral` used to report three of ten banks as
+   anomalous because their *sort codes* were numerically far from the median.
+   Two guards: the value axis prefers a column that arrives as real numbers over
+   one of numeric-looking strings, and the outlier test refuses a column whose
+   name carries an identifier word. That second test matches on word boundaries
+   only - a bare suffix test calls "encode" an identifier, and a false positive
+   silently disables detection on a real measurement.
 
 Colour is never the only signal, and on a categorical chart it is not the
 *primary* one either. A flagged bar or wedge **keeps its own series colour** and
