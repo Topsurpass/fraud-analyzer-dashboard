@@ -6,6 +6,7 @@ import {
   ApiError,
   createDashboard,
   deleteDashboard,
+  getDashboard,
   listDashboards,
   updateDashboard,
 } from "@/services/api-client";
@@ -79,15 +80,21 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
   /**
    * `query_ids` replaces the arrangement wholesale, so every membership change
    * is "read the current order, compute the next one, send it".
+   *
+   * The read is a fresh GET rather than a lookup in the list above, for two
+   * reasons. The list may not contain the board at all - a link opened straight
+   * to a board this browser has never listed - and reading from it would make
+   * the action silently do nothing. And a read-modify-write over a cached order
+   * would clobber a card another machine added between the list loading and
+   * this click.
    */
   const rearrange = useCallback(
     async (id: string, next: (current: readonly string[]) => string[]) => {
-      const current = dashboards.find((entry) => entry.id === id);
-      if (!current) return;
+      const current = await getDashboard(id);
       await updateDashboard(id, { query_ids: next(current.query_ids) });
       reload();
     },
-    [dashboards, reload],
+    [reload],
   );
 
   const addQueryTo = useCallback(

@@ -176,7 +176,11 @@ export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) 
   );
 }
 
-function MenuButton({
+/**
+ * Exported so anything adding to a card's menu through `extra` gets the same
+ * affordance rather than re-typing the classes and drifting from it.
+ */
+export function MenuButton({
   onClick,
   disabled,
   tone,

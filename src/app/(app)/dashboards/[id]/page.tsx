@@ -9,6 +9,7 @@ import { useResource } from "@/lib/useResource";
 import { useExpandedCards } from "@/lib/useExpandedCards";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
+import { MenuButton } from "@/components/CardMenu";
 import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/ui";
 
@@ -55,6 +56,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     rename,
     remove,
     removeQueryFrom,
+    moveQueryTo,
   } = useDashboards();
 
   // Fetched by id rather than read out of the rail's list, so a link to a board
@@ -220,16 +222,18 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
               }}
               menuExtra={
                 dashboard ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
+                  <BoardCardActions
+                    position={queryIds.indexOf(query.id)}
+                    count={queryIds.length}
+                    onMove={async (toIndex) => {
+                      await moveQueryTo(dashboard.id, query.id, toIndex);
+                      board.reload();
+                    }}
+                    onRemove={async () => {
                       await removeQueryFrom(dashboard.id, query.id);
                       board.reload();
                     }}
-                    className="block w-full px-2.5 py-1 text-left text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink"
-                  >
-                    Remove from this board
-                  </button>
+                  />
                 ) : null
               }
             />
@@ -237,5 +241,69 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         </ChartGrid>
       )}
     </PageBody>
+  );
+}
+
+/**
+ * Where this card sits on the board, and how to leave it.
+ *
+ * A board is an ordered set - the engine stores a position per card - so the
+ * order has to be changeable or every card is stuck where it was added. Two
+ * steps rather than drag-and-drop: this is keyboard- and screen-reader-operable
+ * with no pointer gestures to reproduce, and "earlier/later" stays true in the
+ * single-column mobile layout where "left/right" would not.
+ */
+function BoardCardActions({
+  position,
+  count,
+  onMove,
+  onRemove,
+}: {
+  position: number;
+  count: number;
+  onMove: (toIndex: number) => Promise<void>;
+  onRemove: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Both actions write to the engine, so both can fail. A menu item that
+  // quietly did nothing would read as the app being broken.
+  const attempt = async (fallback: string, action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.displayMessage : fallback);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <MenuButton
+        onClick={() => attempt("Could not reorder the board", () => onMove(position - 1))}
+        disabled={busy || position <= 0}
+      >
+        Move earlier
+      </MenuButton>
+      <MenuButton
+        onClick={() => attempt("Could not reorder the board", () => onMove(position + 1))}
+        disabled={busy || position >= count - 1}
+      >
+        Move later
+      </MenuButton>
+      <MenuButton
+        onClick={() => attempt("Could not take it off this board", onRemove)}
+        disabled={busy}
+      >
+        Remove from this board
+      </MenuButton>
+      {error ? (
+        <p className="px-2.5 pt-1.5 text-[10px] leading-snug text-change">{error}</p>
+      ) : null}
+    </>
   );
 }

@@ -6,6 +6,7 @@ import { DashboardsProvider, findDashboard, useDashboards } from "./DashboardsCo
 
 const listDashboards = vi.hoisted(() => vi.fn());
 const createDashboard = vi.hoisted(() => vi.fn());
+const getDashboard = vi.hoisted(() => vi.fn());
 const updateDashboard = vi.hoisted(() => vi.fn());
 const deleteDashboard = vi.hoisted(() => vi.fn());
 
@@ -13,7 +14,14 @@ vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",
   );
-  return { ...actual, listDashboards, createDashboard, updateDashboard, deleteDashboard };
+  return {
+    ...actual,
+    listDashboards,
+    createDashboard,
+    getDashboard,
+    updateDashboard,
+    deleteDashboard,
+  };
 });
 
 const board = (over: Partial<DashboardRead> = {}): DashboardRead => ({
@@ -34,6 +42,9 @@ const setup = () => renderHook(() => useDashboards(), { wrapper });
 beforeEach(() => {
   listDashboards.mockReset().mockResolvedValue([board()]);
   createDashboard.mockReset().mockResolvedValue(board({ id: "new" }));
+  // Membership changes read the board fresh rather than trusting the list, so
+  // the read side needs its own answer here.
+  getDashboard.mockReset().mockResolvedValue(board());
   updateDashboard.mockReset().mockResolvedValue(board());
   deleteDashboard.mockReset().mockResolvedValue(undefined);
 });
@@ -133,14 +144,54 @@ describe("DashboardsProvider", () => {
       expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2", "q1"] });
     });
 
-    it("does nothing for a board it does not know about", async () => {
+    it("changes a board this browser has never listed", async () => {
+      // A link opened straight to a board created elsewhere: the list is empty
+      // and the board is still perfectly real. Reading the order from the list
+      // would make every action here silently do nothing.
+      listDashboards.mockResolvedValue([]);
+      getDashboard.mockResolvedValue(board({ id: "elsewhere", query_ids: ["q9"] }));
+
+      const { result } = setup();
+      await waitFor(() => expect(result.current.initial).toBe(false));
+      expect(result.current.dashboards).toEqual([]);
+
+      await act(async () => {
+        await result.current.addQueryTo("elsewhere", "q3");
+      });
+      expect(updateDashboard).toHaveBeenCalledWith("elsewhere", {
+        query_ids: ["q9", "q3"],
+      });
+    });
+
+    it("does not write when the board turns out to be gone", async () => {
+      getDashboard.mockRejectedValue(
+        new ApiError({ kind: "http", status: 404, message: "no", url: "/dashboards/absent" }),
+      );
+      const { result } = setup();
+      await waitFor(() => expect(result.current.initial).toBe(false));
+
+      await expect(
+        act(async () => {
+          await result.current.addQueryTo("absent", "q3");
+        }),
+      ).rejects.toThrow();
+      expect(updateDashboard).not.toHaveBeenCalled();
+    });
+
+    it("computes the next order from the engine, not from the cached list", async () => {
+      // Another machine added a card after this browser listed the board. The
+      // write must not drop it.
+      getDashboard.mockResolvedValue(board({ query_ids: ["q1", "q2", "added-elsewhere"] }));
+
       const { result } = setup();
       await waitFor(() => expect(result.current.initial).toBe(false));
 
       await act(async () => {
-        await result.current.addQueryTo("absent", "q3");
+        await result.current.addQueryTo("d1", "q3");
       });
-      expect(updateDashboard).not.toHaveBeenCalled();
+      expect(updateDashboard).toHaveBeenCalledWith("d1", {
+        query_ids: ["q1", "q2", "added-elsewhere", "q3"],
+      });
     });
   });
 

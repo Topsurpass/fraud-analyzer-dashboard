@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 228 tests, ~80s
+npm test               # 234 tests, ~60s
 npm run lint
 npm run typecheck
 npm run build
@@ -92,9 +92,10 @@ the engine, so it can prove the client calls the right endpoints and no more.
 The claim worth proving is that a board created in one browser exists for every
 other one and keeps nothing in `localStorage`, and that is only testable across
 two real browser contexts: it creates a board, adds a card, opens it from a
-second context that has never listed it, renames it, empties it and deletes it,
-checking the engine's own state after each step. It cleans up its board even
-when it fails.
+second context that has never listed it, reorders two cards, renames it, empties
+it and deletes it, checking the engine's own state after each step. It cleans up
+its board even when it fails, matching by name rather than by id so a failure
+early enough to lose the id still leaves nothing behind.
 
 ## How it is put together
 
@@ -144,6 +145,13 @@ available without leaving the page.
   it. Chart type is a property of the saved query rather than a view preference,
   so choosing one writes through to the engine and every other card showing that
   query agrees.
+- **On a board, that menu also moves the card**, earlier or later, and takes it
+  off the board. A board is an ordered set - the engine stores a position per
+  card - so the order has to be changeable or every card is stuck where it was
+  added. Two menu steps rather than drag-and-drop: it works from the keyboard
+  and from a screen reader with no pointer gestures to reproduce, and
+  "earlier/later" stays true in the single-column mobile layout where
+  "left/right" would not.
 
 ### What `--signal-alert` means
 
@@ -194,10 +202,17 @@ membership is an association table with `ON DELETE CASCADE`, so deleting a query
 or a whole connection takes it off every board server-side — the client refetches
 instead of reconciling.
 
-`/dashboards/{id}` is fetched by id on the board page rather than read out of the
-already-loaded rail list. Reading it from the list is invisible on the machine
-that created the board and broken everywhere else: a link to a board created
-elsewhere would render "does not exist" until the list caught up.
+`/dashboards/{id}` is fetched by id in two places rather than read out of the
+already-loaded rail list. On the board page, reading it from the list is
+invisible on the machine that created the board and broken everywhere else: a
+link to a board created elsewhere would render "does not exist" until the list
+caught up. In `rearrange`, the read-modify-write reads fresh for the same
+reason plus one more - a cached order would silently drop a card another machine
+added between the list loading and the click.
+
+Only a `404` means a board is gone. Any other failure means the engine is
+unreachable, and gets a retry rather than a headstone; the two used to render
+the same way.
 
 Session-only UI state — which cards are expanded, whether the rail is collapsed
 — is deliberately *not* persisted anywhere. Those are momentary gestures, and a

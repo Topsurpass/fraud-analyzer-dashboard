@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardRead, SavedQueryRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
@@ -15,6 +16,7 @@ import DashboardPage from "./page";
  */
 
 const getDashboard = vi.hoisted(() => vi.fn());
+const updateDashboard = vi.hoisted(() => vi.fn());
 const getQuery = vi.hoisted(() => vi.fn());
 const listDashboards = vi.hoisted(() => vi.fn());
 
@@ -28,7 +30,7 @@ vi.mock("@/services/api-client", async () => {
     getQuery,
     listDashboards,
     createDashboard: vi.fn(),
-    updateDashboard: vi.fn(),
+    updateDashboard,
     deleteDashboard: vi.fn(),
   };
 });
@@ -41,8 +43,13 @@ vi.mock("next/navigation", () => ({
 // The card owns a poll loop of its own; this page's job is only to hand it a
 // query, so the real one would test the wrong thing here.
 vi.mock("@/components/ChartCard", () => ({
-  ChartCard: ({ query }: { query: SavedQueryRead }) => (
-    <article aria-label={query.name}>{query.name}</article>
+  // The card owns a poll loop of its own; this page's job is to hand it a query
+  // and a menu, so only those two are kept.
+  ChartCard: ({ query, menuExtra }: { query: SavedQueryRead; menuExtra?: React.ReactNode }) => (
+    <article aria-label={query.name}>
+      {query.name}
+      {menuExtra}
+    </article>
   ),
 }));
 
@@ -89,7 +96,12 @@ beforeEach(() => {
   listDashboards.mockReset().mockResolvedValue([]);
   getDashboard.mockReset().mockResolvedValue(board());
   getQuery.mockReset().mockResolvedValue(query());
+  updateDashboard.mockReset().mockImplementation((id: string, patch: { query_ids?: string[] }) =>
+    Promise.resolve(board({ query_ids: patch.query_ids ?? ["q1"] })),
+  );
 });
+
+
 
 describe("DashboardPage", () => {
   it("resolves a board the rail's list has never seen", async () => {
@@ -137,5 +149,70 @@ describe("DashboardPage", () => {
     await open();
     expect(await screen.findByLabelText("Declines by hour")).toBeInTheDocument();
     await waitFor(() => expect(getDashboard.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  describe("ordering", () => {
+    const twoUp = () => {
+      getDashboard.mockResolvedValue(board({ query_ids: ["q1", "q2"] }));
+      getQuery.mockImplementation((id: string) =>
+        Promise.resolve(
+          id === "q1" ? query() : query({ id: "q2", name: "Chargeback rate" }),
+        ),
+      );
+    };
+
+    it("moves a card later and sends the whole new order", async () => {
+      twoUp();
+      await open();
+      await screen.findByLabelText("Declines by hour");
+
+      const first = within(screen.getByLabelText("Declines by hour"));
+      await userEvent.click(first.getByRole("button", { name: "Move later" }));
+
+      // PUT replaces query_ids wholesale, so the request carries the full order.
+      await waitFor(() =>
+        expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2", "q1"] }),
+      );
+    });
+
+    it("does not offer a move past either end", async () => {
+      twoUp();
+      await open();
+      await screen.findByLabelText("Declines by hour");
+
+      const first = within(screen.getByLabelText("Declines by hour"));
+      const last = within(screen.getByLabelText("Chargeback rate"));
+      expect(first.getByRole("button", { name: "Move earlier" })).toBeDisabled();
+      expect(first.getByRole("button", { name: "Move later" })).toBeEnabled();
+      expect(last.getByRole("button", { name: "Move earlier" })).toBeEnabled();
+      expect(last.getByRole("button", { name: "Move later" })).toBeDisabled();
+    });
+
+    it("names the failure instead of doing nothing visible", async () => {
+      twoUp();
+      updateDashboard.mockRejectedValue(
+        new ApiError({ kind: "network", message: "down", url: "/dashboards/d1" }),
+      );
+      await open();
+      await screen.findByLabelText("Declines by hour");
+
+      const first = within(screen.getByLabelText("Declines by hour"));
+      await userEvent.click(first.getByRole("button", { name: "Move later" }));
+
+      expect(await first.findByText("Cannot reach engine")).toBeInTheDocument();
+    });
+
+    it("removes a card from the board without touching the query", async () => {
+      twoUp();
+      await open();
+      await screen.findByLabelText("Declines by hour");
+
+      const first = within(screen.getByLabelText("Declines by hour"));
+      await userEvent.click(first.getByRole("button", { name: "Remove from this board" }));
+
+      await waitFor(() =>
+        expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2"] }),
+      );
+    });
   });
 });

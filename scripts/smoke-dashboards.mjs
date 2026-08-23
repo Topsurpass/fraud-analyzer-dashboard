@@ -41,6 +41,18 @@ const check = (ok, label, detail = "") => {
   return ok;
 };
 
+/**
+ * Open one card's action menu, scoped to that card.
+ *
+ * `<details>` stays open once clicked, so with two cards on a board the same
+ * item name matches twice. Every menu click has to be scoped to its card.
+ */
+async function openCardMenu(page, name) {
+  const card = page.locator(`article[aria-label="${name}"]`).first();
+  await card.getByLabel(`Actions for ${name}`).click();
+  return card;
+}
+
 const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const NAME = `Smoke board ${new Date().toISOString().slice(11, 19)}`;
@@ -65,6 +77,7 @@ async function main() {
     process.exit(2);
   }
   const query = queries[0];
+  const second = queries.find((q) => q.id !== query.id) ?? null;
 
   const browser = await chromium.launch();
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
@@ -164,6 +177,41 @@ async function main() {
     check(marks > 0, "the card on the board actually draws", `${marks} marks`);
     await fresh.close();
 
+    // --- reorder ----------------------------------------------------------
+    if (second) {
+      await page.goto(`${BASE}/connections/${connection.id}`, { waitUntil: "networkidle" });
+      await page.locator(`article[aria-label="${second.name}"]`).first()
+        .getByLabel("Add to dashboard").click();
+      await page.getByRole("button", { name: new RegExp(`Add to ${escapeRe(NAME)}`) }).click();
+      await page.waitForTimeout(1500);
+
+      const before = (await engineBoards()).find((b) => b.id === boardId);
+      check(
+        JSON.stringify(before?.query_ids) === JSON.stringify([query.id, second.id]),
+        "cards land in the order they were added",
+        `query_ids=${JSON.stringify(before?.query_ids)}`,
+      );
+
+      await page.goto(`${BASE}/dashboards/${boardId}`, { waitUntil: "networkidle" });
+      const firstCard = await openCardMenu(page, query.name);
+      await firstCard.getByRole("button", { name: "Move later" }).click();
+      await page.waitForTimeout(1500);
+
+      const after = (await engineBoards()).find((b) => b.id === boardId);
+      check(
+        JSON.stringify(after?.query_ids) === JSON.stringify([second.id, query.id]),
+        "reordering writes the whole new order through",
+        `query_ids=${JSON.stringify(after?.query_ids)}`,
+      );
+
+      // Take it back off so the remove/delete steps below stay as written.
+      const extraCard = await openCardMenu(page, second.name);
+      await extraCard.getByRole("button", { name: /remove from this board/i }).click();
+      await page.waitForTimeout(1500);
+    } else {
+      console.log("skip reorder: the seed has only one query on this connection");
+    }
+
     // --- rename -----------------------------------------------------------
     await page.goto(`${BASE}/dashboards/${boardId}`, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: /^rename$/i }).click();
@@ -178,12 +226,8 @@ async function main() {
     );
 
     // --- remove the card from the board -----------------------------------
-    await page
-      .locator(`article[aria-label="${query.name}"]`)
-      .first()
-      .getByLabel(`Actions for ${query.name}`)
-      .click();
-    await page.getByRole("button", { name: /remove from this board/i }).click();
+    const onlyCard = await openCardMenu(page, query.name);
+    await onlyCard.getByRole("button", { name: /remove from this board/i }).click();
     await page.waitForTimeout(1500);
     const afterRemove = (await engineBoards()).find((b) => b.id === boardId);
     check(
@@ -214,9 +258,17 @@ async function main() {
       "an unknown board id reads as missing, not as an error",
     );
   } finally {
-    // Never leave a smoke board behind, even on a failure.
-    if (boardId) {
-      await fetch(`${ENGINE}/dashboards/${boardId}`, { method: "DELETE" }).catch(() => {});
+    /*
+     * Never leave a smoke board behind, even on a failure - and match by name
+     * rather than by the captured id, because a failure early enough (the
+     * create navigation timing out, say) leaves a board on the engine that this
+     * script never learned the id of.
+     */
+    const mine = await engineBoards()
+      .then((boards) => boards.filter((b) => b.id === boardId || b.name.startsWith(NAME)))
+      .catch(() => []);
+    for (const leftover of mine) {
+      await fetch(`${ENGINE}/dashboards/${leftover.id}`, { method: "DELETE" }).catch(() => {});
     }
     await browser.close();
   }
