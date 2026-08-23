@@ -283,21 +283,30 @@ function BoardCardActions({
 
   return (
     <>
+      {/*
+       * `keepOpen`, because these are async and this panel is where their
+       * failure is reported - and because nudging a card two places along
+       * should not cost two trips through the menu. The card moves under the
+       * open menu, which is the confirmation that it worked.
+       */}
       <MenuButton
         onClick={() => attempt("Could not reorder the board", () => onMove(position - 1))}
         disabled={busy || position <= 0}
+        keepOpen
       >
         Move earlier
       </MenuButton>
       <MenuButton
         onClick={() => attempt("Could not reorder the board", () => onMove(position + 1))}
         disabled={busy || position >= count - 1}
+        keepOpen
       >
         Move later
       </MenuButton>
       <MenuButton
         onClick={() => attempt("Could not take it off this board", onRemove)}
         disabled={busy}
+        keepOpen
       >
         Remove from this board
       </MenuButton>

@@ -146,6 +146,53 @@ async function main() {
   }
   if (hatched.length === 0) console.log("note: no card has a flagged series right now");
 
+  /*
+   * The card menu has to close.
+   *
+   * It is a `<details>` popover, which has no notion of "outside" on its own -
+   * left unguarded it stays open after a choice and stays open when the page
+   * behind it is clicked, so two can overlap the cards you were reading. jsdom
+   * covers the logic; this covers it with real pointer events and real layout.
+   */
+  {
+    const card = page.locator("article[aria-label]").first();
+    const cardName = await card.getAttribute("aria-label");
+    const trigger = card.getByLabel(`Actions for ${cardName}`);
+    const openPanels = () => page.getByRole("button", { name: "Pie", exact: true }).count();
+
+    const menuChecks = [];
+    await trigger.click();
+    await page.waitForTimeout(300);
+    menuChecks.push(["opens", (await openPanels()) === 1]);
+
+    await page.locator("main").click({ position: { x: 700, y: 760 } });
+    await page.waitForTimeout(300);
+    menuChecks.push(["closes on an outside click", (await openPanels()) === 0]);
+
+    await trigger.click();
+    await page.waitForTimeout(250);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    menuChecks.push(["closes on Escape", (await openPanels()) === 0]);
+
+    const second = page.locator("article[aria-label]").nth(1);
+    const secondName = await second.getAttribute("aria-label");
+    if (secondName) {
+      await trigger.click();
+      await page.waitForTimeout(250);
+      await second.getByLabel(`Actions for ${secondName}`).click();
+      await page.waitForTimeout(350);
+      menuChecks.push(["only one open at a time", (await openPanels()) === 1]);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(250);
+    }
+
+    for (const [label, ok] of menuChecks) {
+      console.log(`${ok ? "ok  " : "FAIL"} menu    ${label}`);
+      if (!ok) failures.push(`card menu: ${label} failed`);
+    }
+  }
+
   // A card must never fail silently: no card should be showing an error state.
   const stale = await page.locator("text=/^Stale/").count();
   if (stale > 0) failures.push(`${stale} card(s) are in a stale/error state`);

@@ -4,49 +4,58 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError } from "@/services/api-client";
 import { useDashboards } from "@/services/dashboards";
+import { Popover, usePopoverClose } from "./Popover";
 
 /**
  * Put a saved query on a dashboard.
  *
- * Built on `<details>` so the popover is keyboard-operable and dismissible
- * without a focus trap of our own. Every item here writes to the engine, so
- * every item can fail, and a click that quietly did nothing would read as the
- * app being broken. Failures are named in the popover instead.
+ * Built on `Popover`, so it closes on a choice, on an outside click and on
+ * Escape. Every item here writes to the engine, so every item can fail, and a
+ * click that quietly did nothing would read as the app being broken. Failures
+ * are named in the popover, which is also why the menu only dismisses itself
+ * once the write has actually landed.
  */
 export function AddToDashboardMenu({ queryId }: { queryId: string }) {
+  return (
+    <Popover
+      label="Add to dashboard"
+      title="Add to dashboard"
+      trigger={<span aria-hidden="true">+</span>}
+      triggerClassName="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
+      panelClassName="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1"
+    >
+      <AddToDashboardPanel queryId={queryId} />
+    </Popover>
+  );
+}
+
+/** Inside the popover, so it can reach `usePopoverClose`. */
+function AddToDashboardPanel({ queryId }: { queryId: string }) {
+  const close = usePopoverClose();
   const { dashboards, addQueryTo, removeQueryFrom, create } = useDashboards();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Dismiss only once the engine has taken the change; a failure has to stay on
+  // screen, and this panel is where it is shown.
   const attempt = async (fallback: string, action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
+    let ok = false;
     try {
       await action();
+      ok = true;
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.displayMessage : fallback);
     } finally {
       setBusy(false);
     }
+    if (ok) close();
   };
 
   return (
-    <details
-      className="relative"
-      onToggle={(event) => {
-        if (!(event.currentTarget as HTMLDetailsElement).open) setError(null);
-      }}
-    >
-      <summary
-        className="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
-        aria-label="Add to dashboard"
-        title="Add to dashboard"
-      >
-        <span aria-hidden="true">+</span>
-      </summary>
-
-      <div className="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1">
+    <>
         <p className="px-2.5 pt-1 pb-1.5 text-[10px] tracking-widest text-muted uppercase">
           Dashboards
         </p>
@@ -111,7 +120,6 @@ export function AddToDashboardMenu({ queryId }: { queryId: string }) {
         {error ? (
           <p className="px-2.5 pt-1.5 text-[10px] leading-snug text-change">{error}</p>
         ) : null}
-      </div>
-    </details>
+    </>
   );
 }

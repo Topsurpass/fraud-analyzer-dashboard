@@ -159,4 +159,81 @@ describe("CardMenu", () => {
 
     expect(screen.getByRole("button", { name: "Remove from board" })).toBeInTheDocument();
   });
+
+  describe("dismissing", () => {
+    it("closes once the chart type has been written through", async () => {
+      const user = userEvent.setup();
+      render(<CardMenu query={query} />);
+      await openMenu(user);
+
+      await user.click(screen.getByRole("button", { name: "Pie" }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Pie" })).not.toBeInTheDocument(),
+      );
+      expect(updateQuery).toHaveBeenCalledWith("q1", { chart_type: "pie" });
+    });
+
+    it("stays open when that write fails, because it holds the error", async () => {
+      updateQuery.mockRejectedValue(
+        new ApiError({ kind: "network", message: "down", url: "/queries/q1" }),
+      );
+      const user = userEvent.setup();
+      render(<CardMenu query={query} />);
+      await openMenu(user);
+
+      await user.click(screen.getByRole("button", { name: "Pie" }));
+
+      expect(await screen.findByText("Cannot reach engine")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pie" })).toBeInTheDocument();
+    });
+
+    it("closes when the page behind it is clicked", async () => {
+      const user = userEvent.setup();
+      render(
+        <div>
+          <p>the card behind the menu</p>
+          <CardMenu query={query} />
+        </div>,
+      );
+      await openMenu(user);
+      expect(screen.getByRole("button", { name: "Pie" })).toBeInTheDocument();
+
+      await user.click(screen.getByText("the card behind the menu"));
+      expect(screen.queryByRole("button", { name: "Pie" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the delete confirmation on screen rather than closing on it", async () => {
+      const user = userEvent.setup();
+      render(<CardMenu query={query} />);
+      await openMenu(user);
+
+      await user.click(screen.getByRole("button", { name: "Delete query" }));
+      expect(screen.getByRole("button", { name: "Delete permanently" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("button", { name: "Delete query" })).toBeInTheDocument();
+    });
+
+    it("forgets a half-finished confirmation after it is dismissed", async () => {
+      const user = userEvent.setup();
+      render(
+        <div>
+          <p>the card behind the menu</p>
+          <CardMenu query={query} />
+        </div>,
+      );
+      await openMenu(user);
+      await user.click(screen.getByRole("button", { name: "Delete query" }));
+      expect(screen.getByRole("button", { name: "Delete permanently" })).toBeInTheDocument();
+
+      await user.click(screen.getByText("the card behind the menu"));
+      await openMenu(user);
+
+      // Reopening must not present a live "delete permanently" the analyst had
+      // already walked away from.
+      expect(screen.queryByRole("button", { name: "Delete permanently" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete query" })).toBeInTheDocument();
+    });
+  });
 });

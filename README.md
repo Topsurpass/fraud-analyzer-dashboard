@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 250 tests, ~70s
+npm test               # 265 tests, ~70s
 npm run lint
 npm run typecheck
 npm run build
@@ -86,7 +86,8 @@ Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
 asserts on the actual SVG geometry for all five chart types, checks that every
 card reporting a flagged series actually painted its hatch pattern, checks that
-no card sits in a stale state, and checks that the layout does not overflow at
+the card menu opens and then closes on an outside click, on Escape and when
+another menu opens, checks that no card sits in a stale state, and checks that the layout does not overflow at
 390px. The hatch check is there because the pattern reaches the chart as a
 `<defs>` child and Recharts decides what to do with children by scanning their
 component type - the same mechanism behind both of the blank-chart defects
@@ -169,6 +170,14 @@ available without leaving the page.
 - **Collapse the rail** with the toggle beside the app name. It becomes a 56px
   strip that still shows every connection's status light — an instrument panel
   should not lose its status lights to make room. See "The left rail" below.
+- **Both popovers dismiss properly.** `src/components/Popover.tsx` is the one
+  implementation: it closes on a choice, on a pointer down anywhere outside it,
+  and on Escape, which also hands focus back to the trigger. Opening one closes
+  any other. The panel is unmounted while shut, so a half-finished delete
+  confirmation is never waiting on the next open. Async items keep the menu open
+  until the write lands, because the panel is where the failure is reported -
+  closing on click would report "could not change the chart type" to an element
+  that is no longer on the page.
 - **Each card's `⋯` menu** carries the actions for the query behind it: pick how
   it is drawn (line, bar, pie, number, table), run it now, edit it, or delete
   it. Chart type is a property of the saved query rather than a view preference,
