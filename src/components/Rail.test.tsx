@@ -23,8 +23,11 @@ beforeEach(() => {
     reload: vi.fn(),
   });
   useDashboards.mockReturnValue({
-    dashboards: [{ id: "d1", name: "Card testing", queryIds: ["q1", "q2"] }],
-    hydrated: true,
+    dashboards: [{ id: "d1", name: "Card testing", query_ids: ["q1", "q2"] }],
+    initial: false,
+    loading: false,
+    error: null,
+    reload: vi.fn(),
   });
 });
 

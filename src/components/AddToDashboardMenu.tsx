@@ -34,7 +34,7 @@ export function AddToDashboardMenu({ queryId }: { queryId: string }) {
         ) : (
           <ul>
             {dashboards.map((dashboard) => {
-              const present = dashboard.queryIds.includes(queryId);
+              const present = dashboard.query_ids.includes(queryId);
               return (
                 <li key={dashboard.id}>
                   <button
@@ -66,8 +66,8 @@ export function AddToDashboardMenu({ queryId }: { queryId: string }) {
         <div className="mt-1 border-t border-line pt-1">
           <button
             type="button"
-            onClick={() => {
-              const dashboard = create("New dashboard", [queryId]);
+            onClick={async () => {
+              const dashboard = await create("New dashboard", [queryId]);
               router.push(`/dashboards/${dashboard.id}`);
             }}
             className="w-full px-2.5 py-1 text-left text-[12px] text-live transition-colors hover:bg-surface"
@@ -76,9 +76,7 @@ export function AddToDashboardMenu({ queryId }: { queryId: string }) {
           </button>
         </div>
 
-        <p className="px-2.5 pt-1.5 text-[10px] leading-snug text-muted">
-          Saved in this browser only.
-        </p>
+
       </div>
     </details>
   );

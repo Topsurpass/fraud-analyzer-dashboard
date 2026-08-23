@@ -1,0 +1,15 @@
+# The repo is 2-space, LF, 100 columns. This file exists because an editor
+# formatting on save with its own defaults rewrote whole files as tabs at 80
+# columns, which buried real changes in churn.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false

@@ -1,3 +1,7 @@
-export * from "./store";
-export { useDashboards } from "./useDashboards";
-export type { UseDashboards } from "./useDashboards";
+export * from "./arrange";
+export {
+  DashboardsProvider,
+  findDashboard,
+  useDashboards,
+} from "./DashboardsContext";
+export type { DashboardsValue } from "./DashboardsContext";

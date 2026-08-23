@@ -3,41 +3,37 @@
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SavedQueryRead } from "@/contracts/api";
-import { ApiError, getQuery } from "@/services/api-client";
+import { ApiError, getDashboard, getQuery } from "@/services/api-client";
 import { findDashboard, useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
+import { useExpandedCards } from "@/lib/useExpandedCards";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
 import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/ui";
-import { useExpandedCards } from "@/lib/useExpandedCards";
 
 /**
  * A curated board: saved queries from any connection, side by side.
  *
  * Query ids are resolved individually because the engine lists queries per
- * connection and a board may span several. A query that has been deleted
- * resolves to nothing and is pruned from the board rather than rendering a card
- * that can only ever error.
- */
-/**
- * Resolve a board's query ids. A 404 means the query was deleted on the engine
- * and the card should go; any other failure is a real error and must not
- * silently strip cards off the board.
+ * connection and a board may span several. The board itself is server-owned, so
+ * its membership is already reconciled - a query deleted anywhere is gone from
+ * every board by the time this list is fetched.
  */
 async function resolveQueries(
   key: string,
   signal: AbortSignal,
-): Promise<{ found: SavedQueryRead[]; missing: string[] }> {
+): Promise<{ found: SavedQueryRead[]; stale: boolean }> {
   const ids = key ? key.split(",") : [];
   const settled = await Promise.all(
     ids.map((queryId) =>
       getQuery(queryId, { signal }).then(
-        (query) => ({ queryId, query: query as SavedQueryRead | null }),
+        (query) => query as SavedQueryRead | null,
         (cause: unknown) => {
-          if (cause instanceof ApiError && cause.status === 404) {
-            return { queryId, query: null };
-          }
+          // Narrow race only: the query was deleted between this board being
+          // fetched and its cards being resolved. The engine has already taken
+          // it off the board, so the fix is to refetch, not to patch locally.
+          if (cause instanceof ApiError && cause.status === 404) return null;
           throw cause;
         },
       ),
@@ -45,23 +41,36 @@ async function resolveQueries(
   );
 
   return {
-    found: settled
-      .map((entry) => entry.query)
-      .filter((query): query is SavedQueryRead => query !== null),
-    missing: settled.filter((entry) => entry.query === null).map((entry) => entry.queryId),
+    found: settled.filter((query): query is SavedQueryRead => query !== null),
+    stale: settled.some((query) => query === null),
   };
 }
 
 export default function DashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { dashboards, hydrated, rename, remove, removeQueryFrom, prune } = useDashboards();
-  const dashboard = findDashboard({ version: 1, dashboards }, id);
+  const {
+    dashboards,
+    reload: reloadDashboards,
+    rename,
+    remove,
+    removeQueryFrom,
+  } = useDashboards();
+
+  // Fetched by id rather than read out of the rail's list, so a link to a board
+  // created on another machine resolves on first paint instead of 404-ing until
+  // the list happens to catch up. The list entry is the placeholder while that
+  // request is in flight.
+  const loadBoard = useCallback((signal: AbortSignal) => getDashboard(id, { signal }), [id]);
+  const board = useResource(loadBoard);
+  const dashboard = board.data ?? findDashboard(dashboards, id);
+  const dashboardsLoading = board.initial && !dashboard;
+  const notFound = board.error?.status === 404;
 
   // Keyed off a primitive so the loader below stays referentially stable: an
   // array literal rebuilt each render would re-fetch the whole board every time
   // anything on this page changed.
-  const key = dashboard ? dashboard.queryIds.join(",") : "";
+  const key = dashboard ? dashboard.query_ids.join(",") : "";
   const queryIds = useMemo(() => (key ? key.split(",") : []), [key]);
 
   const load = useCallback((signal: AbortSignal) => resolveQueries(key, signal), [key]);
@@ -72,24 +81,28 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   const [draftName, setDraftName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const missing = queries.data?.missing ?? [];
-
-  // Reconciling the board writes to storage and notifies every subscriber, so
-  // it belongs in an effect - doing it during render would update other
-  // components mid-render.
-  const found = queries.data?.found;
+  // A card that vanished mid-resolve means this board is behind the engine.
+  const stale = queries.data?.stale === true;
+  const reloadBoard = board.reload;
   useEffect(() => {
-    if (!found || missing.length === 0) return;
-    prune(found.map((query) => query.id));
-  }, [found, missing.length, prune]);
+    if (!stale) return;
+    reloadBoard();
+    reloadDashboards();
+  }, [stale, reloadBoard, reloadDashboards]);
 
-  if (hydrated && !dashboard) {
+  // Only a 404 means the board is gone. Any other failure is the engine being
+  // unreachable, which is a retry, not a headstone.
+  if (notFound) {
     return (
       <PageBody crumbs={[{ label: "Dashboards" }, { label: "Not found" }]}>
         <EmptyState
           title="This dashboard does not exist"
-          body="Dashboards are stored per browser. If this link came from another machine, its dashboards did not travel with it."
-          action={<LinkButton href="/dashboards/new" tone="primary">Create one</LinkButton>}
+          body="It may have been deleted from another machine."
+          action={
+            <LinkButton href="/dashboards/new" tone="primary">
+              Create one
+            </LinkButton>
+          }
         />
       </PageBody>
     );
@@ -104,9 +117,10 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
             {renaming ? (
               <form
                 className="flex items-center gap-2"
-                onSubmit={(event) => {
+                onSubmit={async (event) => {
                   event.preventDefault();
-                  rename(dashboard.id, draftName);
+                  await rename(dashboard.id, draftName);
+                  board.reload();
                   setRenaming(false);
                 }}
               >
@@ -138,8 +152,8 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
                   <>
                     <Button
                       tone="danger"
-                      onClick={() => {
-                        remove(dashboard.id);
+                      onClick={async () => {
+                        await remove(dashboard.id);
                         router.push("/");
                       }}
                     >
@@ -158,34 +172,37 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         ) : null
       }
     >
-      {missing.length > 0 ? (
-        <p className="mb-2 border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
-          {missing.length} {missing.length === 1 ? "query was" : "queries were"} deleted on the
-          engine and {missing.length === 1 ? "has" : "have"} been removed from this board.
-        </p>
-      ) : null}
-
-      {queries.error ? (
+      {board.error && !dashboard ? (
+        <ErrorState
+          title="Could not load this dashboard"
+          message={board.error.displayMessage}
+          onRetry={board.reload}
+        />
+      ) : queries.error ? (
         <ErrorState
           title="Could not load this dashboard's queries"
           message={queries.error.displayMessage}
           onRetry={queries.reload}
         />
-      ) : queryIds.length === 0 ? (
-        <EmptyState
-          title="This dashboard is empty"
-          body="Open a connection and use the + on any card to add it here."
-          action={<LinkButton href="/" tone="primary">Browse connections</LinkButton>}
-        />
-      ) : queries.initial ? (
+      ) : dashboardsLoading || queries.initial ? (
         <ChartGrid>
-          {queryIds.map((queryId) => (
+          {(queryIds.length > 0 ? queryIds : ["a", "b", "c"]).map((queryId) => (
             <div
               key={queryId}
               className={`skeleton-sweep border border-line bg-surface ${PENDING_CELL_CLASS}`}
             />
           ))}
         </ChartGrid>
+      ) : queryIds.length === 0 ? (
+        <EmptyState
+          title="This dashboard is empty"
+          body="Open a connection and use the + on any card to add it here."
+          action={
+            <LinkButton href="/" tone="primary">
+              Browse connections
+            </LinkButton>
+          }
+        />
       ) : (
         <ChartGrid>
           {(queries.data?.found ?? []).map((query) => (
@@ -196,17 +213,24 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
               expanded={expandedCards.isExpanded(query.id)}
               onToggleExpand={() => expandedCards.toggle(query.id)}
               onChanged={queries.reload}
-              onDeleted={queries.reload}
-              actions={
-                <button
-                  type="button"
-                  onClick={() => dashboard && removeQueryFrom(dashboard.id, query.id)}
-                  className="px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
-                  aria-label={`Remove ${query.name} from this dashboard`}
-                  title="Remove from this dashboard"
-                >
-                  <span aria-hidden="true">−</span>
-                </button>
+              onDeleted={() => {
+                board.reload();
+                reloadDashboards();
+                queries.reload();
+              }}
+              menuExtra={
+                dashboard ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await removeQueryFrom(dashboard.id, query.id);
+                      board.reload();
+                    }}
+                    className="block w-full px-2.5 py-1 text-left text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink"
+                  >
+                    Remove from this board
+                  </button>
+                ) : null
               }
             />
           ))}

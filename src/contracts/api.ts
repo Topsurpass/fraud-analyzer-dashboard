@@ -201,6 +201,32 @@ export interface ExecutionLogRead {
   error_message: string | null;
 }
 
+/**
+ * A named, ordered arrangement of saved queries. May span connections.
+ *
+ * `query_ids` is the display order. The engine keeps it honest: deleting a
+ * saved query removes it from every dashboard, so this list never names
+ * something that no longer exists.
+ */
+export interface DashboardRead {
+  id: string;
+  name: string;
+  query_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardCreate {
+  name: string;
+  query_ids?: string[];
+}
+
+export interface DashboardUpdate {
+  name?: string;
+  /** Replaces the whole arrangement rather than merging into it. */
+  query_ids?: string[];
+}
+
 /** Error envelope the engine returns on 4xx/5xx. */
 export interface ApiErrorBody {
   error_code?: string | null;

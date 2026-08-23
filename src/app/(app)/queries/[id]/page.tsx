@@ -16,7 +16,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
   const { id } = use(params);
   const router = useRouter();
   const { connections } = useConnections();
-  const { dashboards, removeQueryFrom } = useDashboards();
+  const { reload: reloadDashboards } = useDashboards();
 
   const load = useCallback((signal: AbortSignal) => getQuery(id, { signal }), [id]);
   const query = useResource(load);
@@ -53,11 +53,9 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
     setBusy(true);
     try {
       await deleteQuery(id);
-      // Drop the card from any dashboard holding it, so no board is left
-      // pointing at a query the engine no longer has.
-      for (const dashboard of dashboards) {
-        if (dashboard.queryIds.includes(id)) removeQueryFrom(dashboard.id, id);
-      }
+      // The engine cascades the delete through dashboard membership, so no
+      // board is left pointing at a query that no longer exists.
+      reloadDashboards();
       router.push(connectionId ? `/connections/${connectionId}` : "/");
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : null);
@@ -115,8 +113,8 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
               <Panel title="Danger zone">
                 <div className="p-3">
                   <p className="text-[12px] text-muted">
-                    Deleting removes the query and its execution history, and takes it off every
-                    dashboard in this browser.
+                    Deleting removes the query and its execution history, and takes it off
+                    every dashboard that showed it.
                   </p>
                   {confirmingDelete ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2">

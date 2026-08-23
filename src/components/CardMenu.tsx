@@ -38,7 +38,7 @@ export interface CardMenuProps {
 }
 
 export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) {
-  const { dashboards, removeQueryFrom } = useDashboards();
+  const { reload: reloadDashboards } = useDashboards();
   const [busy, setBusy] = useState<null | "chart" | "run" | "delete">(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -78,10 +78,9 @@ export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) 
     setError(null);
     try {
       await deleteQuery(query.id);
-      // Leave no dashboard pointing at a query the engine no longer has.
-      for (const dashboard of dashboards) {
-        if (dashboard.queryIds.includes(query.id)) removeQueryFrom(dashboard.id, query.id);
-      }
+      // No dashboard cleanup needed: the engine cascades the delete through
+      // dashboard membership, so no board is left pointing at a missing query.
+      reloadDashboards();
       onDeleted?.();
     } catch (cause) {
       fail(cause, "Could not delete the query");

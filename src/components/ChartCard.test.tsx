@@ -7,6 +7,10 @@ import { ChartCard } from "./ChartCard";
 
 const pollQuery = vi.hoisted(() => vi.fn());
 
+vi.mock("@/services/dashboards", () => ({
+  useDashboards: () => ({ reload: vi.fn() }),
+}));
+
 vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",

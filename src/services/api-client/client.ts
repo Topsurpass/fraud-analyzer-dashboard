@@ -1,5 +1,8 @@
 import type {
   ColumnList,
+  DashboardCreate,
+  DashboardRead,
+  DashboardUpdate,
   ConnectionCreate,
   ConnectionCreateResult,
   ConnectionRead,
@@ -293,6 +296,42 @@ export const listLogs = (queryId: string, limit = 20, options?: RequestOptions) 
     query: { limit },
     ...options,
   });
+
+/* ----------------------------------------------------------------- dashboards */
+
+export const listDashboards = (options?: RequestOptions) =>
+  request<DashboardRead[]>({ method: "GET", path: "/dashboards", ...options });
+
+export const createDashboard = (body: DashboardCreate, options?: RequestOptions) =>
+  request<DashboardRead>({ method: "POST", path: "/dashboards", body, ...options });
+
+export const getDashboard = (dashboardId: string, options?: RequestOptions) =>
+  request<DashboardRead>({
+    method: "GET",
+    path: `/dashboards/${encodeURIComponent(dashboardId)}`,
+    ...options,
+  });
+
+export const updateDashboard = (
+  dashboardId: string,
+  body: DashboardUpdate,
+  options?: RequestOptions,
+) =>
+  request<DashboardRead>({
+    method: "PUT",
+    path: `/dashboards/${encodeURIComponent(dashboardId)}`,
+    body,
+    ...options,
+  });
+
+export const deleteDashboard = (dashboardId: string, options?: RequestOptions) =>
+  request<void>({
+    method: "DELETE",
+    path: `/dashboards/${encodeURIComponent(dashboardId)}`,
+    ...options,
+  });
+
+/* ----------------------------------------------------------------------- meta */
 
 export const health = (options?: RequestOptions) =>
   request<Record<string, unknown>>({

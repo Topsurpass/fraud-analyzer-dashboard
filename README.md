@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 234 tests, ~45s
+npm test               # 228 tests, ~80s
 npm run lint
 npm run typecheck
 npm run build
@@ -73,7 +73,8 @@ npm run build
 
 ```bash
 node scripts/dev-seed.mjs && npm run dev   # in another shell
-npm run smoke
+npm run smoke                              # every chart type puts marks on screen
+npm run smoke:dashboards                   # a board is really server-owned
 npm run check:endpoints                    # every documented operation is used
 ```
 
@@ -85,6 +86,15 @@ Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
 asserts on the actual SVG geometry for all five chart types, checks that no card
 sits in a stale state, and checks that the layout does not overflow at 390px.
+
+`scripts/smoke-dashboards.mjs` is here for a related reason. The gate suite mocks
+the engine, so it can prove the client calls the right endpoints and no more.
+The claim worth proving is that a board created in one browser exists for every
+other one and keeps nothing in `localStorage`, and that is only testable across
+two real browser contexts: it creates a board, adds a card, opens it from a
+second context that has never listed it, renames it, empties it and deletes it,
+checking the engine's own state after each step. It cleans up its board even
+when it fails.
 
 ## How it is put together
 
@@ -99,7 +109,7 @@ contract at the boundary. Routes hold glue only.
 | `src/services/charts/` | Reshapes `columns` + `rows` + `ChartSpec` into what each chart type needs, including the long→wide pivot for multi-series. |
 | `src/services/anomaly/` | Decides which points get the alert colour. |
 | `src/services/format/` | Every number, duration, timestamp and hash the app renders. Pure functions; callers pass `now`. |
-| `src/services/dashboards/` | Client-side dashboards over query ids. |
+| `src/services/dashboards/` | Server-owned dashboards: the ordered-id arithmetic `PUT /dashboards/{id}` needs, and the one context that fetches and mutates them. |
 | `src/services/connections/` | The connection list, shared by the rail and every page. |
 
 ### The pulse line
@@ -164,27 +174,30 @@ still delivering the information the animation carried.
 
 ## Decisions worth knowing
 
-**Dashboards are stored in this browser, and cannot yet be anything else.** The
-engine models connections and saved queries; there is no dashboard resource. A
-dashboard here is a named, ordered set of query ids in `localStorage`, so it can
-span connections but does not follow the analyst to another machine. The UI says
-so where it matters. Everything a dashboard points at — the queries, the SQL,
-the results — is server-side and shared; only the grouping is local.
-
-This is the one piece of client-side state left, and it is not a preference: it
-is data, and it belongs on the engine. Moving it needs four endpoints the engine
-does not currently expose:
+**Dashboards live on the engine; nothing about them is in `localStorage`.** A
+dashboard is a named, ordered set of query ids, served by five endpoints:
 
 ```
 GET    /dashboards
 POST   /dashboards                      { name, query_ids }
+GET    /dashboards/{dashboard_id}
 PUT    /dashboards/{dashboard_id}       { name?, query_ids? }
 DELETE /dashboards/{dashboard_id}
 ```
 
-`src/services/dashboards/store.ts` is already written as pure functions over an
-explicit state value with `useDashboards` as the only binding to storage, so the
-swap is confined to that one module.
+Two consequences shape the client. `PUT` **replaces** `query_ids` rather than
+merging into them, so every membership change is a read-modify-write:
+`src/services/dashboards/arrange.ts` holds those as pure functions over an
+ordered id list (`withQuery`, `withoutQuery`, `moved`) and
+`DashboardsContext.tsx` is the only thing that talks to the engine. And
+membership is an association table with `ON DELETE CASCADE`, so deleting a query
+or a whole connection takes it off every board server-side — the client refetches
+instead of reconciling.
+
+`/dashboards/{id}` is fetched by id on the board page rather than read out of the
+already-loaded rail list. Reading it from the list is invisible on the machine
+that created the board and broken everywhere else: a link to a board created
+elsewhere would render "does not exist" until the list caught up.
 
 Session-only UI state — which cards are expanded, whether the rail is collapsed
 — is deliberately *not* persisted anywhere. Those are momentary gestures, and a
@@ -212,13 +225,24 @@ tooltip by scanning children **by component type and does not look inside a
 fragment** — `src/components/charts/CartesianChartView.tsx` passes them as a
 keyed array for that reason.
 
-**Every engine endpoint is used by the UI.** All eighteen, verified by
-`npm run check:endpoints`. Two were worth calling out because they are easy
-to leave stranded in a client: `GET /connections/{id}/tables/{table}/columns`
-powers the expandable schema browser in the query editor and connection
-settings, and `POST /queries/{id}/run` is the "Run now" action on a card's menu
-and above the execution history — distinct from a poll in that it always
-executes and always writes a history entry.
+**Every engine endpoint is used by the UI.** All twenty-three, verified by
+`npm run check:endpoints`, which reads the engine's live OpenAPI document,
+counts its operations against the wrappers in `src/services/api-client/client.ts`
+and fails if any wrapper is never called outside that directory. Three were
+worth calling out because they are easy to leave stranded in a client:
+`GET /connections/{id}/tables/{table}/columns` powers the expandable schema
+browser in the query editor and connection settings; `POST /queries/{id}/run` is
+the "Run now" action on a card's menu and above the execution history, distinct
+from a poll in that it always executes and always writes a history entry; and
+`GET /dashboards/{id}` is what makes a board link work on a machine that has
+never listed it. The check caught that last one stranded.
+
+**The deployed engine does not have `/dashboards` yet.** The endpoints exist on
+the engine repo's `feat/fraud-analyzer-engine` branch (commit `d004dac`: models,
+migration `0003_dashboards`, router, 24 API tests) but
+`https://fraud-analyzer-engine.fastapicloud.dev` still serves the build without
+them. Until it is redeployed, run the engine locally and point
+`.env.development.local` at it.
 
 **The deployed engine works, with one route failing.** `/connections`,
 `/queries`, `/tables` and `/columns` all answer correctly from

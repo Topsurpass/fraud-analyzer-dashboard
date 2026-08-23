@@ -9,6 +9,12 @@ const updateQuery = vi.hoisted(() => vi.fn());
 const deleteQuery = vi.hoisted(() => vi.fn());
 const runQuery = vi.hoisted(() => vi.fn());
 
+vi.mock("@/services/dashboards", () => ({
+  // The menu only asks dashboards to refetch after a delete; the engine
+  // cascades the membership change itself.
+  useDashboards: () => ({ reload: vi.fn() }),
+}));
+
 vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",
@@ -39,7 +45,6 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
   updateQuery.mockReset().mockResolvedValue(query);
   deleteQuery.mockReset().mockResolvedValue(undefined);
   runQuery.mockReset().mockResolvedValue({});

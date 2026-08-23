@@ -25,7 +25,7 @@ export function Rail({
 }) {
   const pathname = usePathname();
   const { connections, initial, error } = useConnections();
-  const { dashboards, hydrated } = useDashboards();
+  const { dashboards, initial: dashboardsLoading } = useDashboards();
 
   return (
     <nav
@@ -105,7 +105,7 @@ export function Rail({
           onNavigate={onNavigate}
           collapsed={collapsed}
         >
-          {!hydrated ? (
+          {dashboardsLoading ? (
             <RailSkeleton rows={2} collapsed={collapsed} />
           ) : dashboards.length === 0 ? (
             collapsed ? null : (
@@ -122,15 +122,15 @@ export function Rail({
                       active={pathname === href}
                       onNavigate={onNavigate}
                       collapsed={collapsed}
-                      title={`${dashboard.name} (${dashboard.queryIds.length})`}
+                      title={`${dashboard.name} (${dashboard.query_ids.length})`}
                     >
                       {collapsed ? (
-                        <span className="tnum text-[10px]">{dashboard.queryIds.length}</span>
+                        <span className="tnum text-[10px]">{dashboard.query_ids.length}</span>
                       ) : (
                         <>
                           <span className="truncate">{dashboard.name}</span>
                           <span className="tnum ml-auto shrink-0 text-[10px] text-muted">
-                            {dashboard.queryIds.length}
+                            {dashboard.query_ids.length}
                           </span>
                         </>
                       )}
