@@ -147,3 +147,39 @@ function parseIso(iso: string | null | undefined): Date | null {
 }
 
 export { parseIso };
+
+/** Acronyms and currency codes that should stay upper-case in a label. */
+const KEEP_UPPER = new Set([
+  "id", "usd", "eur", "gbp", "ngn", "url", "uri", "ip", "sql", "api", "utc", "avg", "sum",
+  "min", "max", "pct", "kyc", "atm", "pos", "iban", "bin", "mcc",
+]);
+
+/**
+ * Turn a database column name into something a person reads.
+ *
+ * A card that labels its readout `exposure_usd` is showing the analyst the
+ * schema rather than the number's meaning. Splitting on underscores and
+ * camelCase covers every naming convention this app actually meets, and the
+ * acronym list stops "usd" becoming "Usd", which reads worse than the raw
+ * column did.
+ */
+export function humanizeColumn(name: string): string {
+  const words = name
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[\s_\-.]+/)
+    .filter(Boolean);
+
+  if (words.length === 0) return name;
+
+  return words
+    .map((word, index) => {
+      const lower = word.toLowerCase();
+      if (KEEP_UPPER.has(lower)) return lower.toUpperCase();
+      // Something like SUM(AMOUNT) or a name that is already shouting stays as
+      // written; re-casing it would lose information the analyst put there.
+      if (word.length > 1 && word === word.toUpperCase() && /[A-Z]/.test(word)) return word;
+      return index === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
+    })
+    .join(" ");
+}

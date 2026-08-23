@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { NumberData } from "@/services/charts/shape";
-import { formatMetric } from "@/services/format";
+import { formatMetric, humanizeColumn } from "@/services/format";
 import { subscribeToTicker } from "@/lib/ticker";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
@@ -78,7 +78,7 @@ export function NumberCardView({ data, title }: NumberCardViewProps) {
   return (
     <div className="@container flex h-full flex-col justify-center px-4 py-2">
       <div
-        className="tnum leading-none font-medium"
+        className="tnum-display leading-none font-medium"
         style={{ fontSize: "clamp(2rem, 15cqw, 4.25rem)" }}
         // Animated digits must not be announced on every frame.
         aria-hidden="true"
@@ -86,7 +86,11 @@ export function NumberCardView({ data, title }: NumberCardViewProps) {
         {text}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="truncate text-[11px] text-muted">{data.label}</span>
+        {/* The column name is the schema's word for this number, not the
+            analyst's. */}
+        <span className="truncate text-[11px] text-muted" title={data.label}>
+          {humanizeColumn(data.label)}
+        </span>
         {data.extraRows > 0 ? (
           <span
             className="tnum text-[10px] text-change"

@@ -4,15 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDashboards } from "@/services/dashboards";
 import { useConnections } from "@/services/connections/ConnectionsContext";
+import { useEngineHealth } from "@/lib/useEngineHealth";
 import { StatusDot } from "./StatusDot";
 
 /**
  * The persistent left rail.
  *
- * Collapses to a 48px strip rather than disappearing: an instrument panel
- * should not lose its connection status lights just because the analyst wanted
- * more room for charts, so the collapsed form keeps every status dot and drops
- * only the labels.
+ * At 256px it is wide enough to be a status panel rather than a list of links:
+ * every connection shows what kind of database it is alongside whether it last
+ * answered, every dashboard shows how many cards are on it, and the foot of the
+ * rail carries the engine's own state. That is the point of the width - a rail
+ * that only holds names does not need it.
+ *
+ * Collapsed it becomes a 56px strip rather than disappearing. An instrument
+ * panel should not lose its status lights just because the analyst wanted more
+ * room for charts, so the collapsed form keeps every dot and drops only labels.
  */
 export function Rail({
   onNavigate,
@@ -27,53 +33,36 @@ export function Rail({
   const { connections, initial, error } = useConnections();
   const { dashboards, initial: dashboardsLoading } = useDashboards();
 
+  const liveCount = connections.filter((connection) => connection.status === "ok").length;
+
   return (
-    <nav
-      aria-label="Primary"
-      className="flex h-full min-h-0 flex-col bg-sunken"
-    >
-      <div
-        className={`flex shrink-0 items-start border-b border-line py-3 ${collapsed ? "justify-center px-1" : "gap-1 px-3"}`}
-      >
-        <Link
-          href="/"
-          onClick={onNavigate}
-          title={collapsed ? "Fraud Analyzer" : undefined}
-          className="display block min-w-0 text-[13px] leading-tight font-medium tracking-tight"
-        >
-          {collapsed ? (
-            <span aria-label="Fraud Analyzer">FA</span>
-          ) : (
-            <>
-              FRAUD
-              <br />
-              ANALYZER
-            </>
-          )}
-        </Link>
+    <nav aria-label="Primary" className="flex h-full min-h-0 flex-col bg-sunken">
+      <Wordmark
+        collapsed={collapsed}
+        onNavigate={onNavigate}
+        onToggleCollapse={onToggleCollapse}
+      />
 
-        {onToggleCollapse && !collapsed ? (
-          <CollapseButton collapsed={collapsed} onClick={onToggleCollapse} className="ml-auto" />
-        ) : null}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1">
         <Section
           title="Connections"
-          action={{ href: "/connections/new", label: "+ New" }}
+          /* The count is the reason to look here at all: how many of the
+             analyst's databases are actually answering right now. */
+          meta={
+            connections.length > 0 ? `${liveCount}/${connections.length}` : null
+          }
+          action={{ href: "/connections/new", label: "New" }}
           onNavigate={onNavigate}
           collapsed={collapsed}
         >
           {initial ? (
             <RailSkeleton rows={3} collapsed={collapsed} />
           ) : error ? (
-            collapsed ? null : (
-              <p className="px-3 py-1.5 text-[11px] text-muted">Engine unreachable</p>
-            )
+            <RailNote collapsed={collapsed}>Engine unreachable</RailNote>
           ) : connections.length === 0 ? (
-            collapsed ? null : (
-              <p className="px-3 py-1.5 text-[11px] text-muted">No connections yet</p>
-            )
+            <RailNote collapsed={collapsed} href="/connections/new" onNavigate={onNavigate}>
+              Connect a database
+            </RailNote>
           ) : (
             <ul>
               {connections.map((connection) => {
@@ -85,10 +74,17 @@ export function Rail({
                       active={pathname.startsWith(href)}
                       onNavigate={onNavigate}
                       collapsed={collapsed}
-                      title={connection.name}
+                      title={`${connection.name} · ${connection.db_type} · ${connection.status}`}
                     >
                       <StatusDot status={connection.status} />
-                      {collapsed ? null : <span className="truncate">{connection.name}</span>}
+                      {collapsed ? null : (
+                        <>
+                          <span className="truncate">{connection.name}</span>
+                          <span className="tnum ml-auto shrink-0 text-[9px] tracking-wider text-muted/70 uppercase">
+                            {connection.db_type}
+                          </span>
+                        </>
+                      )}
                     </RailLink>
                   </li>
                 );
@@ -97,24 +93,26 @@ export function Rail({
           )}
         </Section>
 
-        <div className="mx-3 my-1 border-t border-line" />
+        <div className="mx-3 my-2 border-t border-line" />
 
         <Section
           title="Dashboards"
-          action={{ href: "/dashboards/new", label: "+ New" }}
+          meta={dashboards.length > 0 ? String(dashboards.length) : null}
+          action={{ href: "/dashboards/new", label: "New" }}
           onNavigate={onNavigate}
           collapsed={collapsed}
         >
           {dashboardsLoading ? (
             <RailSkeleton rows={2} collapsed={collapsed} />
           ) : dashboards.length === 0 ? (
-            collapsed ? null : (
-              <p className="px-3 py-1.5 text-[11px] text-muted">No dashboards yet</p>
-            )
+            <RailNote collapsed={collapsed} href="/dashboards/new" onNavigate={onNavigate}>
+              Build your first board
+            </RailNote>
           ) : (
             <ul>
               {dashboards.map((dashboard) => {
                 const href = `/dashboards/${dashboard.id}`;
+                const count = dashboard.query_ids.length;
                 return (
                   <li key={dashboard.id}>
                     <RailLink
@@ -122,15 +120,15 @@ export function Rail({
                       active={pathname === href}
                       onNavigate={onNavigate}
                       collapsed={collapsed}
-                      title={`${dashboard.name} (${dashboard.query_ids.length})`}
+                      title={`${dashboard.name} (${count} ${count === 1 ? "card" : "cards"})`}
                     >
                       {collapsed ? (
-                        <span className="tnum text-[10px]">{dashboard.query_ids.length}</span>
+                        <span className="tnum text-[10px]">{count}</span>
                       ) : (
                         <>
                           <span className="truncate">{dashboard.name}</span>
-                          <span className="tnum ml-auto shrink-0 text-[10px] text-muted">
-                            {dashboard.query_ids.length}
+                          <span className="tnum ml-auto shrink-0 text-[10px] text-muted/70">
+                            {count}
                           </span>
                         </>
                       )}
@@ -143,12 +141,136 @@ export function Rail({
         </Section>
       </div>
 
-      {onToggleCollapse && collapsed ? (
-        <div className="shrink-0 border-t border-line p-1">
-          <CollapseButton collapsed={collapsed} onClick={onToggleCollapse} className="mx-auto" />
-        </div>
-      ) : null}
+      <EngineFoot collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </nav>
+  );
+}
+
+/**
+ * The wordmark, set as two stacked words in the display face.
+ *
+ * Stacked rather than on one line because the rail is a narrow column and the
+ * two-line block gives the top of the panel a squarer anchor, which the rules
+ * below it then hang off.
+ */
+function Wordmark({
+  collapsed,
+  onNavigate,
+  onToggleCollapse,
+}: {
+  collapsed: boolean;
+  onNavigate?: () => void;
+  onToggleCollapse?: () => void;
+}) {
+  return (
+    <div
+      className={`flex shrink-0 items-start border-b border-line ${
+        collapsed ? "justify-center px-1 py-3" : "gap-2 px-3 py-3"
+      }`}
+    >
+      <Link
+        href="/"
+        onClick={onNavigate}
+        title={collapsed ? "Fraud Analyzer" : undefined}
+        className="block min-w-0"
+      >
+        {collapsed ? (
+          <span className="display text-[13px] font-medium" aria-label="Fraud Analyzer">
+            FA
+          </span>
+        ) : (
+          <>
+            <span className="display block text-[15px] leading-[1.1] font-medium tracking-tight">
+              FRAUD
+              <br />
+              ANALYZER
+            </span>
+            <span className="tnum mt-1 block text-[9px] tracking-[0.18em] text-muted/70 uppercase">
+              instrument panel
+            </span>
+          </>
+        )}
+      </Link>
+
+      {onToggleCollapse && !collapsed ? (
+        <CollapseButton collapsed={collapsed} onClick={onToggleCollapse} className="ml-auto" />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The engine's own state, at the foot of the rail.
+ *
+ * Every card on the grid reports whether *its* query is moving; none of them
+ * says whether the engine is reachable at all, which is the difference between
+ * "nothing is happening" and "nothing is being asked". That belongs on the
+ * panel permanently, not in a toast.
+ */
+function EngineFoot({
+  collapsed,
+  onToggleCollapse,
+}: {
+  collapsed: boolean;
+  onToggleCollapse?: () => void;
+}) {
+  const { status, message, check } = useEngineHealth();
+
+  const label = status === "checking" ? "checking" : status === "ok" ? "live" : "no answer";
+  const tone =
+    status === "ok" ? "text-live" : status === "checking" ? "text-muted" : "text-change";
+
+  if (collapsed) {
+    return (
+      <div className="shrink-0 border-t border-line p-1">
+        <button
+          type="button"
+          onClick={check}
+          title={message ?? `Engine ${label}`}
+          aria-label={`Engine ${label}. Check again`}
+          className="mx-auto block p-1"
+        >
+          <EngineDot status={status} />
+        </button>
+        {onToggleCollapse ? (
+          <CollapseButton collapsed onClick={onToggleCollapse} className="mx-auto" />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="shrink-0 border-t border-line px-3 py-2">
+      <button
+        type="button"
+        onClick={check}
+        title={message ?? "Check the engine now"}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <EngineDot status={status} />
+        <span className="t-eyebrow">Engine</span>
+        <span className={`tnum ml-auto text-[10px] ${tone}`}>{label}</span>
+      </button>
+    </div>
+  );
+}
+
+function EngineDot({ status }: { status: "checking" | "ok" | "down" }) {
+  return (
+    <svg viewBox="0 0 10 10" width={8} height={8} aria-hidden="true" className="shrink-0">
+      <circle
+        cx={5}
+        cy={5}
+        r={3.25}
+        fill={status === "ok" ? "var(--signal-live)" : "none"}
+        stroke={status === "ok" ? "var(--signal-live)" : "var(--text-muted)"}
+        strokeWidth={1.25}
+      />
+      {/* A cross, not just a hollow dot: down and untested must not look alike. */}
+      {status === "down" ? (
+        <line x1={2.2} y1={7.8} x2={7.8} y2={2.2} stroke="var(--signal-change)" strokeWidth={1.25} />
+      ) : null}
+    </svg>
   );
 }
 
@@ -181,14 +303,7 @@ function CollapseButton({
           strokeWidth={1.25}
         />
         {/* The filled column shows which side the panel is on. */}
-        <rect
-          x={collapsed ? 1.5 : 1.5}
-          y={2}
-          width={3.5}
-          height={10}
-          fill="currentColor"
-          opacity={collapsed ? 0.35 : 1}
-        />
+        <rect x={1.5} y={2} width={3.5} height={10} fill="currentColor" opacity={collapsed ? 0.35 : 1} />
       </svg>
     </button>
   );
@@ -196,19 +311,21 @@ function CollapseButton({
 
 function Section({
   title,
+  meta,
   action,
   children,
   onNavigate,
   collapsed,
 }: {
   title: string;
+  meta?: string | null;
   action: { href: string; label: string };
   children: React.ReactNode;
   onNavigate?: () => void;
   collapsed: boolean;
 }) {
   return (
-    <section className="py-2">
+    <section className="py-1.5">
       {collapsed ? (
         <div className="flex justify-center pb-1">
           <Link
@@ -216,27 +333,56 @@ function Section({
             onClick={onNavigate}
             title={`${title}: ${action.label}`}
             aria-label={`${title}: ${action.label}`}
-            className="text-[11px] text-muted transition-colors hover:text-live"
+            className="text-[13px] leading-none text-muted transition-colors hover:text-live"
           >
             +
           </Link>
         </div>
       ) : (
-        <div className="flex items-center justify-between px-3 pb-1">
-          <h2 className="text-[10px] font-medium tracking-widest text-muted uppercase">
-            {title}
-          </h2>
+        <div className="flex items-center gap-2 px-3 pb-1.5">
+          <h2 className="t-eyebrow">{title}</h2>
+          {meta ? <span className="tnum text-[10px] text-muted/60">{meta}</span> : null}
           <Link
             href={action.href}
             onClick={onNavigate}
-            className="text-[10px] text-muted transition-colors hover:text-live"
+            className="ml-auto text-[10px] text-muted transition-colors hover:text-live"
           >
-            {action.label}
+            + {action.label}
           </Link>
         </div>
       )}
       {children}
     </section>
+  );
+}
+
+/**
+ * An empty section is a place to act, not a place to be told nothing is there,
+ * so the note is the link that fixes it.
+ */
+function RailNote({
+  children,
+  collapsed,
+  href,
+  onNavigate,
+}: {
+  children: React.ReactNode;
+  collapsed: boolean;
+  href?: string;
+  onNavigate?: () => void;
+}) {
+  if (collapsed) return null;
+  if (!href) {
+    return <p className="px-3 py-1.5 text-[11px] text-muted">{children}</p>;
+  }
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className="block px-3 py-1.5 text-[11px] text-muted transition-colors hover:text-live"
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -261,7 +407,7 @@ function RailLink({
       onClick={onNavigate}
       title={collapsed ? title : undefined}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2 border-l-2 py-1.5 text-[12px] transition-colors ${
+      className={`flex items-center gap-2 border-l-2 py-[7px] text-[12px] transition-colors ${
         collapsed ? "justify-center px-0" : "pr-3 pl-[10px]"
       } ${
         active
@@ -276,7 +422,7 @@ function RailLink({
 
 function RailSkeleton({ rows, collapsed }: { rows: number; collapsed: boolean }) {
   return (
-    <ul className={`skeleton-sweep space-y-1.5 py-1.5 ${collapsed ? "px-3" : "px-3"}`}>
+    <ul className="skeleton-sweep space-y-1.5 px-3 py-1.5">
       {Array.from({ length: rows }, (_, index) => (
         <li
           key={index}

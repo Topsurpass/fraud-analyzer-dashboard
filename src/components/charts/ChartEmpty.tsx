@@ -10,10 +10,28 @@
  */
 export function ChartEmpty({ label = "No rows in range" }: { label?: string }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">
-      <span aria-hidden="true" className="block h-px w-8 bg-line-strong" />
-      <p className="text-[12px] text-muted">{label}</p>
-      <p className="text-[10px] text-muted/70">The query ran and matched nothing.</p>
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+      {/*
+       * An empty pair of axes rather than a rule. A blank card and a card whose
+       * query matched nothing look identical otherwise, and this is the shape
+       * the card would have had with data in it - so the card still reads as a
+       * chart, just an empty one.
+       */}
+      <svg width={72} height={44} viewBox="0 0 72 44" aria-hidden="true" className="text-line-strong">
+        <path d="M3 2 V41 H69" fill="none" stroke="currentColor" strokeWidth={1} />
+        <path
+          d="M3 32 H69 M3 22 H69 M3 12 H69"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeDasharray="2 5"
+          opacity={0.45}
+        />
+      </svg>
+      <div>
+        <p className="text-[12px] text-muted">{label}</p>
+        <p className="mt-0.5 text-[10px] text-muted/70">The query ran and matched nothing.</p>
+      </div>
     </div>
   );
 }

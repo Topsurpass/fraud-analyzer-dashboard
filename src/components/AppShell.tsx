@@ -13,9 +13,12 @@ export function useOpenNav(): () => void {
   return useContext(NavContext);
 }
 
-/** Widths of the desktop rail in each state. */
-const RAIL_WIDTH = 184;
-const RAIL_WIDTH_COLLAPSED = 48;
+/**
+ * Widths of the desktop rail in each state, read from the tokens in
+ * `globals.css` so the CSS and this component cannot drift apart.
+ */
+const RAIL_WIDTH = "var(--rail-width)";
+const RAIL_WIDTH_COLLAPSED = "var(--rail-width-collapsed)";
 
 /**
  * Rail plus content. The rail is permanent from `md` up and becomes a drawer
@@ -71,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => setNavOpen(false)}
               className="absolute inset-0 bg-bg/80"
             />
-            <div className="absolute inset-y-0 left-0 w-[220px] border-r border-line">
+            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line">
               <Rail onNavigate={() => setNavOpen(false)} />
             </div>
           </div>

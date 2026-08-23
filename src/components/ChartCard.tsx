@@ -98,14 +98,34 @@ export function ChartCard({
     <article
       aria-label={query.name}
       style={style}
-      className={`flex min-h-0 min-w-0 flex-col overflow-hidden border border-line bg-surface ${className ?? ""}`}
+      className={`group flex min-h-0 min-w-0 flex-col overflow-hidden border border-line bg-surface transition-colors hover:border-line-strong ${className ?? ""}`}
     >
       <header className="shrink-0">
-        <div className="flex items-start gap-2 px-3 pt-2.5 pb-1.5">
+        {/*
+         * One hairline at the top of the card, coloured by the poll's own
+         * state. It is the pulse line's reading at a glance: from across the
+         * room a grid of cards shows which ones just moved without any of their
+         * text being legible. Live and change only - the alert colour stays
+         * inside chart data.
+         */}
+        <div
+          aria-hidden="true"
+          className="h-px w-full transition-colors duration-300"
+          style={{
+            background:
+              poll.phase === "error"
+                ? "var(--border)"
+                : justChanged
+                  ? "var(--signal-change)"
+                  : "var(--signal-live-dim)",
+          }}
+        />
+
+        <div className="flex items-start gap-2 px-3 pt-2 pb-1">
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[13px] leading-tight font-medium">{query.name}</h3>
+            <h3 className="t-card truncate">{query.name}</h3>
             {query.description ? (
-              <p className="mt-0.5 truncate text-[11px] text-muted">{query.description}</p>
+              <p className="t-sub mt-0.5 truncate">{query.description}</p>
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -199,7 +219,7 @@ function StatusLine({
   const snapshot = poll.snapshot;
 
   return (
-    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-b border-line px-3 pb-1.5 text-[10px] text-muted">
+    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-b border-line px-3 pt-0.5 pb-1.5 text-[10px] text-muted">
       <span className="tnum shrink-0">
         {snapshot ? `${formatInteger(snapshot.row_count)} rows` : "-- rows"}
       </span>

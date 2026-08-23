@@ -63,7 +63,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 234 tests, ~60s
+npm test               # 246 tests, ~70s
 npm run lint
 npm run typecheck
 npm run build
@@ -84,8 +84,13 @@ under jsdom a chart that renders zero bars and one that renders ten are
 indistinguishable - both are "a `<BarChart />` that mounted without throwing".
 Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
-asserts on the actual SVG geometry for all five chart types, checks that no card
-sits in a stale state, and checks that the layout does not overflow at 390px.
+asserts on the actual SVG geometry for all five chart types, checks that every
+card reporting a flagged series actually painted its hatch pattern, checks that
+no card sits in a stale state, and checks that the layout does not overflow at
+390px. The hatch check is there because the pattern reaches the chart as a
+`<defs>` child and Recharts decides what to do with children by scanning their
+component type - the same mechanism behind both of the blank-chart defects
+above.
 
 `scripts/smoke-dashboards.mjs` is here for a related reason. The gate suite mocks
 the engine, so it can prove the client calls the right endpoints and no more.
@@ -109,7 +114,7 @@ contract at the boundary. Routes hold glue only.
 | `src/services/polling/` | `useQueryPolling` — one card's live loop. Sends `since_hash`, adopts the engine's cadence, backs off on failure, pauses on a hidden tab. |
 | `src/services/charts/` | Reshapes `columns` + `rows` + `ChartSpec` into what each chart type needs, including the long→wide pivot for multi-series. |
 | `src/services/anomaly/` | Decides which points get the alert colour. |
-| `src/services/format/` | Every number, duration, timestamp and hash the app renders. Pure functions; callers pass `now`. |
+| `src/services/format/` | Every number, duration, timestamp and hash the app renders, plus the column-name-to-label pass. Pure functions; callers pass `now`. |
 | `src/services/dashboards/` | Server-owned dashboards: the ordered-id arithmetic `PUT /dashboards/{id}` needs, and the one context that fetches and mutates them. |
 | `src/services/connections/` | The connection list, shared by the rail and every page. |
 
@@ -129,6 +134,21 @@ The trace scrolls right to left at a fixed rate, so its horizontal axis is
 genuinely time. Every pulse line on the page shares one `requestAnimationFrame`
 ticker (`src/lib/ticker.ts`) rather than starting its own.
 
+### Type and rhythm
+
+Three faces, three jobs, per the brief: Space Grotesk for the wordmark and page
+titles, Inter for interface text, JetBrains Mono for **every** number, timestamp,
+hash and axis value. The scale that sits on top of them lives in `globals.css`
+as `.t-page` / `.t-card` / `.t-sub` / `.t-eyebrow`, because everything used to
+sit within a point of 13px and a grid with no hierarchy gives the eye nowhere to
+land first.
+
+One monospace detail worth knowing: JetBrains Mono's dotted zero is the face's
+own default glyph, not an opt-in OpenType feature, so `font-feature-settings:
+"zero" 0` does not remove it. `.tnum-display` exists for large readouts and only
+adjusts tracking - the default `-0.01em` is set for 10-13px status text and
+leaves 4rem digits looking loose.
+
 ### Working the grid
 
 The grid is for scanning; reading one chart properly needs more room. Both are
@@ -137,9 +157,18 @@ available without leaving the page.
 - **Expand a card** with the arrows in its header. It takes a second column and
   more rows, keeps polling throughout, and the default size is unchanged for
   everything else. Several cards can be expanded at once.
-- **Collapse the rail** with the toggle beside the app name. It becomes a 48px
+- **The grid packs densely.** Cards have different row spans - a number readout
+  is shorter than a plot - and the default grid flow leaves the resulting holes
+  unfilled, which reads as broken rather than as sparse. Three columns at the
+  top end rather than four: at four, a card on a 1600px screen is about 325px
+  wide, and a plot plus its legend does not fit in that.
+- **Each card carries a state hairline** along its top edge, in the live colour
+  at rest and the change colour when the last poll brought new data. It is the
+  pulse line's reading at a glance: across a full grid you can see which cards
+  moved without any of their text being legible.
+- **Collapse the rail** with the toggle beside the app name. It becomes a 56px
   strip that still shows every connection's status light — an instrument panel
-  should not lose its status lights to make room.
+  should not lose its status lights to make room. See "The left rail" below.
 - **Each card's `⋯` menu** carries the actions for the query behind it: pick how
   it is drawn (line, bar, pie, number, table), run it now, edit it, or delete
   it. Chart type is a property of the saved query rather than a view preference,
@@ -152,6 +181,17 @@ available without leaving the page.
   and from a screen reader with no pointer gestures to reproduce, and
   "earlier/later" stays true in the single-column mobile layout where
   "left/right" would not.
+
+### The left rail
+
+256px, and wide enough to be a status panel rather than a list of links. Every
+connection shows its database kind beside whether it last answered, every
+dashboard shows how many cards are on it, and the foot of the rail carries the
+engine's own state - the difference between "nothing is happening" and "nothing
+is being asked", which no individual card can tell you.
+
+Collapsed it becomes a 56px strip that still shows every status light. An
+instrument panel should not lose its lights to make room for charts.
 
 ### What `--signal-alert` means
 
@@ -168,9 +208,24 @@ in priority order:
    the wrong tools here: a fraud spike is exactly the kind of point that inflates
    a standard deviation enough to hide itself.
 
-Colour is never the only signal. Anomalous points also get a distinct
-hollow-ring marker, flagged table rows get a left rule, and the tooltip says
-"Anomalous" in words.
+Colour is never the only signal, and on a categorical chart it is not the
+*primary* one either. A flagged bar or wedge **keeps its own series colour** and
+gains an alert-coloured diagonal hatch plus an alert outline; the legend keeps
+its swatch and gains an alert glyph. Repainting the mark solid alert, which is
+the obvious move and what this used to do, backfires: with three of five
+countries flagged it left three identically red wedges and three identical
+legend swatches, so the alert colour destroyed the one reading a composition
+chart exists for. Identity is hue; status is texture. Line charts already worked
+this way - the anomalous *point* gets a hollow ring, not the whole series.
+
+Two more places the same principle applies. A flagged table row gets a left rule
+rather than a tinted background, because tinting a row makes its own values
+harder to read. And when *every* row in a result is flagged, none of them is
+marked: a flag that is true for the whole result separates nothing inside it, so
+the footer says it once instead of painting fifty rows red.
+
+`src/components/charts/AlertHatch.tsx` owns the patterns, and its tests exist
+specifically to fail if anyone reintroduces a recolour.
 
 ### Accessibility
 

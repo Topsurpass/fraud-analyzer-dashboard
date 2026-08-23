@@ -1,5 +1,7 @@
 "use client";
 
+import { AlertGlyph } from "./AlertHatch";
+
 /**
  * Legend for multi-series charts.
  *
@@ -7,9 +9,13 @@
  * button: reachable by keyboard, focusable with the app's focus ring, and
  * carrying the hover-to-highlight behaviour on focus as well as on hover. A
  * mouse-only highlight would be an interaction the keyboard cannot reach.
+ *
+ * A flagged series keeps its own swatch colour and gains a separate alert
+ * glyph. Recolouring the swatch would make two flagged series look identical,
+ * which is exactly what the legend exists to prevent.
  */
 export interface SeriesLegendProps {
-  series: { key: string; color: string }[];
+  series: { key: string; color: string; alert?: boolean }[];
   /** Currently highlighted series key, or null when nothing is hovered. */
   active: string | null;
   onActiveChange: (key: string | null) => void;
@@ -40,6 +46,8 @@ export function SeriesLegend({ series, active, onActiveChange }: SeriesLegendPro
                 style={{ background: entry.color }}
               />
               <span className="tnum text-muted">{entry.key}</span>
+              {entry.alert ? <AlertGlyph /> : null}
+              {entry.alert ? <span className="sr-only">anomalous</span> : null}
             </button>
           </li>
         );

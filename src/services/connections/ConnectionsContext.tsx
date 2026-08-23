@@ -13,40 +13,37 @@ import { useResource } from "@/lib/useResource";
  * navigation. One fetch at the shell, one reload path after a mutation.
  */
 export interface ConnectionsValue {
-  connections: ConnectionRead[];
-  loading: boolean;
-  initial: boolean;
-  error: ApiError | null;
-  reload: () => void;
+	connections: ConnectionRead[];
+	loading: boolean;
+	initial: boolean;
+	error: ApiError | null;
+	reload: () => void;
 }
 
 const ConnectionsContext = createContext<ConnectionsValue | null>(null);
 
 export function ConnectionsProvider({ children }: { children: React.ReactNode }) {
-  const load = useCallback(
-    (signal: AbortSignal) => listConnections({ signal }),
-    [],
-  );
-  const resource = useResource(load);
+	const load = useCallback((signal: AbortSignal) => listConnections({ signal }), []);
+	const resource = useResource(load);
 
-  const value = useMemo<ConnectionsValue>(
-    () => ({
-      connections: resource.data ?? [],
-      loading: resource.loading,
-      initial: resource.initial,
-      error: resource.error,
-      reload: resource.reload,
-    }),
-    [resource.data, resource.loading, resource.initial, resource.error, resource.reload],
-  );
+	const value = useMemo<ConnectionsValue>(
+		() => ({
+			connections: resource.data ?? [],
+			loading: resource.loading,
+			initial: resource.initial,
+			error: resource.error,
+			reload: resource.reload,
+		}),
+		[resource.data, resource.loading, resource.initial, resource.error, resource.reload],
+	);
 
-  return <ConnectionsContext.Provider value={value}>{children}</ConnectionsContext.Provider>;
+	return <ConnectionsContext.Provider value={value}>{children}</ConnectionsContext.Provider>;
 }
 
 export function useConnections(): ConnectionsValue {
-  const value = useContext(ConnectionsContext);
-  if (!value) {
-    throw new Error("useConnections must be used inside <ConnectionsProvider>");
-  }
-  return value;
+	const value = useContext(ConnectionsContext);
+	if (!value) {
+		throw new Error("useConnections must be used inside <ConnectionsProvider>");
+	}
+	return value;
 }

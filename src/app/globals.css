@@ -30,6 +30,13 @@
   /* Motion. Short enough that the panel still reads as fast. */
   --tween-fast: 140ms;
   --tween-data: 360ms;
+
+  /*
+   * Rail widths, here rather than in the component so the CSS that reserves
+   * space and the JS that animates it cannot drift apart.
+   */
+  --rail-width: 256px;
+  --rail-width-collapsed: 56px;
 }
 
 @theme inline {
@@ -80,9 +87,58 @@ body {
   letter-spacing: -0.01em;
 }
 
+/*
+ * Tabular figures tuned for display sizes.
+ *
+ * Same face - the brief puts every number in JetBrains Mono and a 4rem readout
+ * is the last place to break that - but tracking that works large. The default
+ * -0.01em is set for 10-13px status text and leaves display digits looking
+ * loose. Note the dotted zero is JetBrains Mono's own default glyph rather than
+ * an opt-in feature, so it stays; it is the face the brief chose.
+ */
+.tnum-display {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.03em;
+}
+
 .display {
   font-family: var(--font-display);
   letter-spacing: -0.01em;
+}
+
+/*
+ * Type scale. Everything used to sit within a point of 13px, which left the
+ * grid with no hierarchy: a card title, its description and its axis labels all
+ * carried the same weight, so the eye had nowhere to land first.
+ */
+.t-page {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+.t-card {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.t-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.t-eyebrow {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 /* One focus treatment across the app, in the live signal colour. */
@@ -124,6 +180,16 @@ body {
  * The default sizes are the dense scanning layout. Expanding is opt-in per
  * card: more rows always, and a second column once there is one to take.
  */
+/*
+ * `grid-auto-flow: dense` on the grid itself, because cards have different row
+ * spans: a two-row number card next to a three-row plot leaves a one-row hole
+ * that the default flow will never backfill, and a panel with a ragged void in
+ * it reads as broken rather than as sparse.
+ */
+.chart-grid {
+  grid-auto-flow: dense;
+}
+
 .card-cell {
   grid-row: span 3;
 }

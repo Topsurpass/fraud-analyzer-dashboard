@@ -54,11 +54,30 @@ describe("TableView", () => {
     // The accessible name carries the same fact for screen readers.
     expect(screen.getByRole("table")).toHaveAccessibleName(/2 flagged rows/);
 
-    // And the rows themselves are marked, so it is not text-only.
-    const flaggedRows = screen
+    // And the rows themselves carry a left rule, so it is not text-only. The
+    // rule rather than a row tint: a tinted row makes its own values harder to
+    // read, which is the opposite of what marking it was for.
+    const rules = screen
       .getAllByRole("row")
-      .filter((row) => row.className.includes("signal-alert-dim"));
-    expect(flaggedRows).toHaveLength(2);
+      .filter((row) => row.querySelector(".bg-alert") !== null);
+    expect(rules).toHaveLength(2);
+  });
+
+  it("marks nothing when every row is flagged, and says so once", () => {
+    // A flag that is true for the whole result separates nothing inside it.
+    // Painting all 50 rows of a 50-row result was the old behaviour and it
+    // turned the card into an unreadable block.
+    render(
+      <TableView data={table(["id", "is_flagged"], [[1, 1], [2, 1], [3, 1]])} title="T" />,
+    );
+    // The visible footer, not the screen-reader caption.
+    expect(screen.getByText(/row flagged by is_flagged/)).toBeInTheDocument();
+    expect(screen.getByRole("table")).toHaveAccessibleName(/every row flagged/);
+
+    const rules = screen
+      .getAllByRole("row")
+      .filter((row) => row.querySelector(".bg-alert") !== null);
+    expect(rules).toHaveLength(0);
   });
 
   it("does not claim any flagged rows when the data is clean", () => {

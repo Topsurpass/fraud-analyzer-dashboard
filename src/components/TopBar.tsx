@@ -6,9 +6,9 @@ import { useEngineHealth } from "@/lib/useEngineHealth";
 import { useNow } from "@/lib/useNow";
 
 /**
- * Breadcrumb location plus one global engine readout. Deliberately not a busy
- * header: the cards below carry per-query status, so the only thing that
- * belongs up here is where you are and whether the engine is answering at all.
+ * Breadcrumb location and the page's own actions. Deliberately not a busy
+ * header: the cards below carry per-query status and the rail carries the
+ * engine's, so the only thing that always belongs up here is where you are.
  */
 export interface Crumb {
   label: string;
@@ -43,7 +43,11 @@ export function TopBar({
 
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {actions}
-        <EngineReadout />
+        {/* The rail carries this permanently. Below `md` the rail is a drawer,
+            so the readout moves up here rather than being two places at once. */}
+        <span className="md:hidden">
+          <EngineReadout />
+        </span>
       </div>
     </header>
   );
@@ -56,7 +60,13 @@ function Breadcrumb({ crumbs }: { crumbs: Crumb[] }) {
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1;
           return (
-            <li key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
+            <li
+              key={`${crumb.label}-${index}`}
+              /* On a phone the actions leave the crumb about 90px, which is not
+                 enough for two truncated labels. The ancestors drop out and the
+                 page keeps its own name; the rail drawer is the way back up. */
+              className={`min-w-0 items-center gap-1.5 ${last ? "flex" : "hidden sm:flex"}`}
+            >
               {index > 0 ? (
                 <span aria-hidden="true" className="shrink-0 text-line-strong">
                   ›
@@ -71,7 +81,7 @@ function Breadcrumb({ crumbs }: { crumbs: Crumb[] }) {
                 </Link>
               ) : (
                 <span
-                  className={`truncate ${last ? "text-ink" : "text-muted"}`}
+                  className={`truncate ${last ? "t-page text-ink" : "text-muted"}`}
                   aria-current={last ? "page" : undefined}
                 >
                   {crumb.label}

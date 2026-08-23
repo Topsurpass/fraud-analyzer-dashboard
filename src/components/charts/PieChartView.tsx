@@ -5,6 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type TooltipProps } 
 import type { PieData, PieSlice } from "@/services/charts/shape";
 import { formatInteger, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { useAlertHatch } from "./AlertHatch";
 import { ChartEmpty } from "./ChartEmpty";
 import { ChartTooltip } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
@@ -66,6 +67,9 @@ export function PieChartView({ data, title }: PieChartViewProps) {
   const slices = useMemo(() => foldSlices(data.slices), [data.slices]);
   const total = data.total;
 
+  // One hatch pattern per wedge colour actually on this chart.
+  const hatch = useAlertHatch(slices.map((slice) => slice.color));
+
   // An empty donut is just a ring of nothing; say so instead.
   const empty = slices.length === 0 || total <= 0;
 
@@ -102,6 +106,7 @@ export function PieChartView({ data, title }: PieChartViewProps) {
       >
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
+            {hatch.defs}
             <Tooltip content={renderTooltip} isAnimationActive={false} />
             <Pie
               /*
@@ -125,10 +130,18 @@ export function PieChartView({ data, title }: PieChartViewProps) {
               isAnimationActive={!reducedMotion}
               animationDuration={DATA_TWEEN_MS}
             >
+              {/*
+               * A flagged wedge keeps its own colour and takes the hatch plus
+               * an alert outline. Repainting it solid alert used to leave three
+               * of five wedges identically red, which destroyed the one thing a
+               * composition chart is for: telling the categories apart.
+               */}
               {slices.map((slice) => (
                 <Cell
                   key={slice.name}
-                  fill={slice.alert ? ALERT_COLOR : slice.color}
+                  fill={hatch.fill(slice.color, slice.alert)}
+                  stroke={slice.alert ? ALERT_COLOR : "var(--surface)"}
+                  strokeWidth={slice.alert ? 1.5 : 2}
                   fillOpacity={active === null || active === slice.name ? 1 : 0.25}
                 />
               ))}
@@ -146,7 +159,8 @@ export function PieChartView({ data, title }: PieChartViewProps) {
       <SeriesLegend
         series={slices.map((slice) => ({
           key: slice.name,
-          color: slice.alert ? "var(--signal-alert)" : slice.color,
+          color: slice.color,
+          alert: slice.alert,
         }))}
         active={active}
         onActiveChange={setActive}

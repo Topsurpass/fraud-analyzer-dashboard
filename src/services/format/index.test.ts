@@ -9,6 +9,7 @@ import {
   formatInterval,
   formatMetric,
   formatRelative,
+  humanizeColumn,
   parseIso,
 } from "./index";
 
@@ -175,5 +176,33 @@ describe("formatCell", () => {
   it("renders booleans and objects legibly", () => {
     expect(formatCell(true)).toBe("true");
     expect(formatCell({ a: 1 })).toBe('{"a":1}');
+  });
+});
+
+describe("humanizeColumn", () => {
+  it("turns a snake_case column into a label", () => {
+    expect(humanizeColumn("exposure_usd")).toBe("Exposure USD");
+    expect(humanizeColumn("last_tested_at")).toBe("Last tested at");
+  });
+
+  it("splits camelCase too", () => {
+    expect(humanizeColumn("declineCount")).toBe("Decline count");
+  });
+
+  it("keeps acronyms and currency codes upper-case", () => {
+    // "Usd" reads worse than the raw column did, which would make the whole
+    // exercise a downgrade.
+    expect(humanizeColumn("total_usd")).toBe("Total USD");
+    expect(humanizeColumn("merchant_id")).toBe("Merchant ID");
+  });
+
+  it("leaves a name the analyst already shouted alone", () => {
+    // SUM(AMOUNT) is the analyst's own SQL; re-casing it loses information.
+    expect(humanizeColumn("SUM(AMOUNT)")).toBe("SUM(AMOUNT)");
+  });
+
+  it("returns the input when there is nothing to split", () => {
+    expect(humanizeColumn("")).toBe("");
+    expect(humanizeColumn("__")).toBe("__");
   });
 });

@@ -117,6 +117,35 @@ async function main() {
     if (!ok) failures.push(`${query.name} (${query.chart_type}) has ${rows} rows but drew nothing`);
   }
 
+  /*
+   * The alert hatch has to actually paint.
+   *
+   * It is delivered as a `<defs><pattern>` handed to Recharts as a child, and
+   * Recharts decides what to do with its children by scanning their component
+   * type - this project has already been bitten twice by marks that silently
+   * never rendered. jsdom cannot tell a painted pattern from a dropped one, so
+   * the check belongs here: if any card reports a flagged series in its legend,
+   * that card's SVG must carry the patterns behind it.
+   */
+  const hatched = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("article[aria-label]"));
+    return cards
+      .filter((card) => card.querySelector("svg path[stroke='#e5484d'], svg path[stroke='var(--signal-alert)']"))
+      .map((card) => ({
+        name: card.getAttribute("aria-label"),
+        patterns: card.querySelectorAll("pattern").length,
+        hatchedMarks: Array.from(card.querySelectorAll("path[fill^='url(#hatch-']")).length,
+      }));
+  });
+  for (const card of hatched) {
+    const ok = card.patterns > 0 && card.hatchedMarks > 0;
+    console.log(
+      `${ok ? "ok  " : "FAIL"} hatch  ${String(card.name).padEnd(28)} ${card.patterns} pattern(s), ${card.hatchedMarks} hatched mark(s)`,
+    );
+    if (!ok) failures.push(`${card.name} reports a flagged series but painted no hatch`);
+  }
+  if (hatched.length === 0) console.log("note: no card has a flagged series right now");
+
   // A card must never fail silently: no card should be showing an error state.
   const stale = await page.locator("text=/^Stale/").count();
   if (stale > 0) failures.push(`${stale} card(s) are in a stale/error state`);
