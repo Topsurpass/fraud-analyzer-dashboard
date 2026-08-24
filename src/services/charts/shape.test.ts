@@ -29,6 +29,7 @@ function caught(name: string, indices: number[]): FlagOutcome {
     rows: indices.map((index) => ({ index, rule_ids: ["r1"] })),
     rules: [{ id: "r1", name, severity: "high", matched: indices.length }],
     warnings: [],
+    dismissed_count: 0,
   };
 }
 

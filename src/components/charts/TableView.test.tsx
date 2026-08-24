@@ -123,12 +123,18 @@ describe("TableView", () => {
 
 import type { FlagOutcome } from "@/contracts/api";
 
-function ruleTable(columns: string[], rows: Row[], flags: FlagOutcome) {
+function ruleTable(
+  columns: string[],
+  rows: Row[],
+  flags: Omit<FlagOutcome, "dismissed_count"> & { dismissed_count?: number },
+) {
   return buildTable({
     columns,
     rows,
     chart: { type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
-    flags,
+    // Dismissed rows are removed by the engine before the payload is served,
+    // so the view never sees one and the fixtures need not model it.
+    flags: { dismissed_count: 0, ...flags },
   });
 }
 

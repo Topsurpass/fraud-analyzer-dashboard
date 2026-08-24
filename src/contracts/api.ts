@@ -272,6 +272,11 @@ export interface FlagRuleSetUpdate {
 export interface RowFlag {
 	index: number;
 	rule_ids: string[];
+	/**
+	 * Hash of the row's values, and how a dismissal addresses it. Absent only
+	 * on a payload the engine cached before the field existed.
+	 */
+	fingerprint?: string | null;
 }
 
 export interface RuleHit {
@@ -292,6 +297,12 @@ export interface FlagOutcome {
 	rows: RowFlag[];
 	rules: RuleHit[];
 	warnings: string[];
+	/**
+	 * Rows that matched a rule but have been reviewed and dismissed. Already
+	 * removed from `rows` by the engine, so a dismissed row is never marked on
+	 * a chart: this is only here so a view can say how many are hidden.
+	 */
+	dismissed_count: number;
 }
 
 export const EMPTY_FLAGS: FlagOutcome = {
@@ -299,6 +310,7 @@ export const EMPTY_FLAGS: FlagOutcome = {
 	rows: [],
 	rules: [],
 	warnings: [],
+	dismissed_count: 0,
 };
 
 /** One query's section of a connection's flagged view. */
