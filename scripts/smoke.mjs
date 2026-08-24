@@ -175,8 +175,17 @@ async function main() {
     await page.waitForTimeout(250);
     menuChecks.push(["closes on Escape", (await openPanels()) === 0]);
 
+    /*
+     * Only meaningful with a second card to open. Counting first rather than
+     * reading `nth(1)` straight: on a connection with one saved query that
+     * read blocks for the full timeout and then throws, which killed the whole
+     * lane over a check that simply did not apply.
+     */
     const second = page.locator("article[aria-label]").nth(1);
-    const secondName = await second.getAttribute("aria-label");
+    const secondName =
+      (await page.locator("article[aria-label]").count()) > 1
+        ? await second.getAttribute("aria-label")
+        : null;
     if (secondName) {
       await trigger.click();
       await page.waitForTimeout(250);
@@ -205,6 +214,116 @@ async function main() {
   );
   console.log(`${overflow ? "FAIL" : "ok  "} mobile  no horizontal overflow at 390px`);
   if (overflow) failures.push("horizontal overflow at 390px");
+
+  /*
+   * The preview panel has to clip.
+   *
+   * `max-h-80` alone capped the panel's box and clipped nothing, so a 100-row
+   * preview painted straight down over the Flag rules panel below it - heading,
+   * help text and all. jsdom cannot see this: it has no layout, so a table that
+   * overflows its parent and one that scrolls inside it are the same DOM. Only
+   * a real browser can say whether one panel is covering another.
+   */
+  {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.goto(`${BASE}/connections/${connection.id}/queries/new`, {
+      waitUntil: "networkidle",
+    });
+    // A fill before hydration lands on the DOM node only, never on React state,
+    // and Preview then no-ops on empty SQL.
+    await page.waitForTimeout(1500);
+
+    const runPreview = async (sql) => {
+      await page.locator("#query-sql").fill(sql);
+      await page.waitForTimeout(150);
+      await page.getByRole("button", { name: "Preview" }).first().click();
+      await page.locator("table").first().waitFor({ timeout: 30000 });
+      await page.waitForTimeout(300);
+    };
+
+    const measure = () =>
+      page.evaluate(() => {
+        const sections = [...document.querySelectorAll("section")];
+        const byTitle = (title) =>
+          sections.find(
+            (section) =>
+              section.querySelector(":scope > header h2")?.textContent?.trim() === title,
+          );
+        const preview = byTitle("Preview");
+        const rules = byTitle("Flag rules");
+        // A capped box that clips nothing still reports scrollHeight past its
+        // clientHeight, so overflowing and scrolling look identical here unless
+        // the overflow style is part of what makes something a scroller.
+        const scroller = [...preview.querySelectorAll("div")].find(
+          (node) =>
+            node.scrollHeight > node.clientHeight + 1 &&
+            getComputedStyle(node).overflowY !== "visible",
+        );
+
+        // What is actually on screen where the Flag rules panel is: if a preview
+        // cell answers at those coordinates, it is painting over the rules.
+        const box = rules.getBoundingClientRect();
+        let coveredPoints = 0;
+        for (let y = box.top + 4; y < Math.min(box.bottom, innerHeight) - 4; y += 12) {
+          for (let x = box.left + 8; x < box.right - 8; x += 40) {
+            const at = document.elementFromPoint(x, y);
+            if (at && preview.contains(at)) coveredPoints += 1;
+          }
+        }
+
+        let scrolled = false;
+        if (scroller) {
+          scroller.scrollTop = 120;
+          scrolled = scroller.scrollTop > 0;
+          scroller.scrollTop = 0;
+        }
+
+        return {
+          previewHeight: Math.round(preview.getBoundingClientRect().height),
+          rulesOnScreen: box.top < innerHeight,
+          coveredPoints,
+          scroller: scroller
+            ? {
+                clientHeight: scroller.clientHeight,
+                scrollHeight: scroller.scrollHeight,
+                focusable: scroller.tabIndex >= 0,
+                scrolled,
+              }
+            : null,
+        };
+      });
+
+    await runPreview(
+      "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 120)" +
+        " SELECT n AS row_no, n * 7 AS amount FROM seq",
+    );
+    await page
+      .locator('section:has(> header h2:text-is("Flag rules"))')
+      .scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    const many = await measure();
+
+    const previewChecks = [
+      ["long preview scrolls instead of overflowing", many.scroller !== null && many.scroller.scrolled],
+      ["long preview never covers the Flag rules panel", many.coveredPoints === 0],
+      ["the scroll area is keyboard reachable", many.scroller !== null && many.scroller.focusable],
+    ];
+
+    // The cap is a max, not a height: a two-row preview stays two rows tall.
+    await runPreview("SELECT 1 AS row_no, 2 AS amount");
+    const few = await measure();
+    previewChecks.push(["a short preview is not padded to the cap", few.previewHeight < 200]);
+
+    for (const [label, ok] of previewChecks) {
+      console.log(`${ok ? "ok  " : "FAIL"} preview ${label}`);
+      if (!ok) failures.push(`preview panel: ${label} failed`);
+    }
+    if (many.scroller) {
+      console.log(
+        `     preview ${many.scroller.clientHeight}px visible of ${many.scroller.scrollHeight}px, short preview ${few.previewHeight}px tall`,
+      );
+    }
+  }
 
   await browser.close();
 

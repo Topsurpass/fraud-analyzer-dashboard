@@ -53,7 +53,9 @@ export function TableView({ data, title }: TableViewProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* `tabIndex` because this scrolls: a region a mouse can scroll and a
+          keyboard cannot is unreachable content, not a styling detail. */}
+      <div tabIndex={0} className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-[12px]">
           <caption className="sr-only">
             {title}

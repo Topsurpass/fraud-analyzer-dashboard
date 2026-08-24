@@ -436,7 +436,16 @@ function PreviewPanel({
           Run a preview to see the columns and rows this SQL returns.
         </p>
       ) : (
-        <div className="max-h-80">
+        /*
+         * `max-h-80` on its own was the bug: it capped the panel's own box but
+         * clipped nothing, so a 100-row preview painted straight down over the
+         * Flag rules panel underneath it. The cap needs a flex column and
+         * `overflow-hidden` to mean anything - that pair is what shrinks
+         * TableView to the cap and lets its internal `flex-1 overflow-auto`
+         * resolve against a real height and scroll. It is a max, not a height,
+         * so a three-row preview is still three rows tall.
+         */
+        <div className="flex max-h-80 flex-col overflow-hidden">
           <TableView data={table} title="Preview" />
         </div>
       )}
