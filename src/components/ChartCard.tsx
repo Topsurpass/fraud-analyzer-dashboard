@@ -3,7 +3,10 @@
 import { useMemo } from "react";
 import type { SavedQueryRead } from "@/contracts/api";
 import { buildCartesian, buildNumber, buildPie, buildTable } from "@/services/charts/shape";
+import Link from "next/link";
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
+import { useFlagged } from "@/services/flagged/FlaggedContext";
+import { FlaggedBadge } from "./FlaggedBadge";
 import { formatDuration, formatHash, formatInteger, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
@@ -53,6 +56,9 @@ export function ChartCard({
   className,
   style,
 }: ChartCardProps) {
+  const flagged = useFlagged();
+  const flaggedCount = flagged.countForQuery(query.id);
+  const flaggedSeverity = flagged.severityForQuery(query.id);
   const poll = useQueryPolling(query.id, {
     enabled,
     fallbackIntervalMs: query.poll_interval_ms ?? undefined,
@@ -129,6 +135,17 @@ export function ChartCard({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* Findings waiting on this query. Links into the review queue,
+                  because seeing the count is only useful if the next step is
+                  one click away. */}
+            {flaggedCount > 0 ? (
+              <Link
+                href={`/connections/${query.connection_id}/flagged`}
+                aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
+               >
+                <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
+              </Link>
+            ) : null}
             {/* Colour plus a word: the change state is never colour alone. */}
             {justChanged ? (
               <span className="tnum text-[9px] tracking-widest text-change uppercase">

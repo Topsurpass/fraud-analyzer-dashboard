@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import { DashboardsProvider } from "@/services/dashboards";
+import { FlaggedProvider } from "@/services/flagged/FlaggedContext";
 import { Rail } from "./Rail";
 
 /** Lets a page's own TopBar open the mobile drawer that the shell owns. */
@@ -55,6 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ConnectionsProvider>
       <DashboardsProvider>
+        <FlaggedProvider>
       <div className="flex h-dvh min-h-0 w-full">
         <aside
           className="hidden shrink-0 border-r border-line transition-[width] duration-150 md:block"
@@ -84,6 +86,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NavContext.Provider value={openNav}>{children}</NavContext.Provider>
         </div>
       </div>
+        </FlaggedProvider>
       </DashboardsProvider>
     </ConnectionsProvider>
   );

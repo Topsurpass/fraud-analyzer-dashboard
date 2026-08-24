@@ -323,7 +323,18 @@ export interface FlaggedQuery {
 	 * The index cannot serve: it is a position in one run's result and points
 	 * somewhere else after the next run.
 	 */
-	rows: { index: number; rule_ids: string[]; values: Row; fingerprint: string }[];
+	rows: {
+		/** Display ordinal within this section. Not a position in any result. */
+		index: number;
+		rule_ids: string[];
+		rule_names: string[];
+		values: Row;
+		fingerprint: string;
+		severity: FlagSeverity;
+		/** When this finding first appeared. What "waiting three days" reads off. */
+		first_seen_at: string;
+		last_seen_at: string;
+	}[];
 	rules: RuleHit[];
 	warnings: string[];
 	/** Rows still to review. Falls as they are dismissed. */
@@ -345,6 +356,22 @@ export interface ConnectionFlagged {
 	refreshed: boolean;
 	/** True when FAE_FLAGGED_REFRESH_MAX_QUERIES capped the refresh. */
 	refresh_truncated: boolean;
+}
+
+/** One line of the flagged summary, for a connection or for a query. */
+export interface FlaggedTally {
+	connection_id?: string;
+	query_id?: string;
+	flagged_count: number;
+	/** Highest severity among the findings being counted. */
+	severity: FlagSeverity;
+}
+
+/** Flagged totals across everything, in one request. Drives the badges. */
+export interface FlaggedSummary {
+	connections: FlaggedTally[];
+	queries: FlaggedTally[];
+	flagged_count: number;
 }
 
 export interface FlagDismissalResult {

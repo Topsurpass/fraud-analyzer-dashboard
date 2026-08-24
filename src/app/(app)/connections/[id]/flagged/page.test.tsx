@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionFlagged, FlaggedQuery } from "@/contracts/api";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
+import { FlaggedProvider } from "@/services/flagged/FlaggedContext";
 import FlaggedPage, { bySeverityThenCount } from "./page";
 
 /**
@@ -31,6 +32,10 @@ vi.mock("@/services/api-client", async () => {
     restoreFlaggedRows,
     putFlagRules,
     listConnections: vi.fn().mockResolvedValue([]),
+    getFlaggedSummary: vi
+      .fn()
+      .mockResolvedValue({ connections: [], queries: [], flagged_count: 0 }),
+    deleteFlaggedRows: vi.fn().mockResolvedValue({ query_id: "q1", changed: 0 }),
   };
 });
 
@@ -39,14 +44,27 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/connections/c1/flagged",
 }));
 
+function finding(index: number, values: (string | number)[], fingerprint: string) {
+  return {
+    index,
+    rule_ids: ["r1"],
+    rule_names: ["Large"],
+    values,
+    fingerprint,
+    severity: "high" as const,
+    first_seen_at: "2026-08-24T08:00:00Z",
+    last_seen_at: "2026-08-24T09:00:00Z",
+  };
+}
+
 function section(over: Partial<FlaggedQuery> = {}): FlaggedQuery {
   return {
     query_id: "q1",
     query_name: "Large transfers",
     columns: ["day", "amount"],
     rows: [
-      { index: 1, rule_ids: ["r1"], values: ["2026-08-21", 900], fingerprint: "a".repeat(64) },
-      { index: 2, rule_ids: ["r1"], values: ["2026-08-22", 950], fingerprint: "b".repeat(64) },
+      finding(0, ["2026-08-21", 900], "a".repeat(64)),
+      finding(1, ["2026-08-22", 950], "b".repeat(64)),
     ],
     rules: [{ id: "r1", name: "Large", severity: "high", matched: 2 }],
     warnings: [],
@@ -76,9 +94,11 @@ async function open() {
   await act(async () => {
     render(
       <ConnectionsProvider>
-        <Suspense fallback={null}>
-          <FlaggedPage params={Promise.resolve({ id: "c1" })} />
-        </Suspense>
+        <FlaggedProvider>
+          <Suspense fallback={null}>
+            <FlaggedPage params={Promise.resolve({ id: "c1" })} />
+          </Suspense>
+        </FlaggedProvider>
       </ConnectionsProvider>,
     );
   });
@@ -99,8 +119,9 @@ describe("dismissing rows", () => {
     await open();
     await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
 
+    // Row 2 is the second finding in the section, whose fingerprint is "bbb...".
     await userEvent.click(screen.getByRole("button", { name: /dismiss flagged row 2/i }));
-    expect(dismissFlaggedRows).toHaveBeenCalledWith("q1", ["a".repeat(64)]);
+    expect(dismissFlaggedRows).toHaveBeenCalledWith("q1", ["b".repeat(64)]);
   });
 
   it("dismisses the whole section in one call", async () => {

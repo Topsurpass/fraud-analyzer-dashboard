@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useDashboards } from "@/services/dashboards";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { useEngineHealth } from "@/lib/useEngineHealth";
+import { useFlagged } from "@/services/flagged/FlaggedContext";
+import { FlaggedBadge } from "./FlaggedBadge";
 import { StatusDot } from "./StatusDot";
 
 /**
@@ -32,6 +34,7 @@ export function Rail({
   const pathname = usePathname();
   const { connections, initial, error } = useConnections();
   const { dashboards, initial: dashboardsLoading } = useDashboards();
+  const flagged = useFlagged();
 
   const liveCount = connections.filter((connection) => connection.status === "ok").length;
 
@@ -80,6 +83,10 @@ export function Rail({
                       {collapsed ? null : (
                         <>
                           <span className="truncate">{connection.name}</span>
+                          <FlaggedBadge
+                            count={flagged.countForConnection(connection.id)}
+                            severity={flagged.severityForConnection(connection.id)}
+                          />
                           <span className="tnum ml-auto shrink-0 text-[9px] tracking-wider text-muted/70 uppercase">
                             {connection.db_type}
                           </span>

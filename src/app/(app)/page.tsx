@@ -6,6 +6,8 @@ import { useDashboards } from "@/services/dashboards";
 import { PageBody } from "@/components/PageBody";
 import { StatusDot } from "@/components/StatusDot";
 import { EmptyState, ErrorState, LinkButton } from "@/components/ui";
+import { FlaggedBadge } from "@/components/FlaggedBadge";
+import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { formatDateTime, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 
@@ -211,6 +213,7 @@ function ConnectionCard({
 	connection: ReturnType<typeof useConnections>["connections"][number];
 	now: number;
 }) {
+	const flagged = useFlagged();
 	const target =
 		connection.db_type === "sqlite"
 			? (connection.sqlite_path ?? "--")
@@ -239,6 +242,13 @@ function ConnectionCard({
 				<span className="flex items-center gap-2">
 					<StatusDot status={connection.status} />
 					<span className="t-card truncate">{connection.name}</span>
+					{/* Findings waiting on this connection. The point of the card is
+						    to be scannable, so this sits with the name rather than in the
+						    detail line below it. */}
+					<FlaggedBadge
+						count={flagged.countForConnection(connection.id)}
+						severity={flagged.severityForConnection(connection.id)}
+					/>
 					<span className="tnum ml-auto shrink-0 text-[9px] tracking-wider text-muted uppercase">
 						{connection.db_type}
 					</span>

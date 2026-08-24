@@ -13,6 +13,7 @@ import type {
 	FlagDismissalResult,
 	FlagRuleSetRead,
 	FlagRuleSetUpdate,
+	FlaggedSummary,
 	PollResponse,
 	PreviewRequest,
 	PreviewResponse,
@@ -433,6 +434,46 @@ export const restoreFlaggedRows = (
 	return request<FlagDismissalResult>({
 		method: "DELETE",
 		path: `/queries/${encodeURIComponent(queryId)}/flag-dismissals${query ? `?${query}` : ""}`,
+		...options,
+	});
+};
+
+/**
+ * Flagged totals per connection and per query, in one request.
+ *
+ * Read on every page to drive the badges, so it is deliberately one call: a
+ * count endpoint per card would be the same data fetched once per thing on
+ * screen.
+ */
+export const getFlaggedSummary = (options?: RequestOptions) =>
+	request<FlaggedSummary>({
+		method: "GET",
+		path: "/flagged/summary",
+		...options,
+	});
+
+/**
+ * Delete stored findings without recording a dismissal.
+ *
+ * Different from dismissing on purpose. Dismissing is a decision and is
+ * remembered, so the next scheduled run will not re-flag the row. Deleting only
+ * clears what is stored now, for tidying up after a rule change; a row that
+ * still matches comes back on the next run.
+ *
+ * Either way this only removes the engine's copy. The row in the target
+ * database is untouched - those connections are opened read-only.
+ */
+export const deleteFlaggedRows = (
+	queryId: string,
+	fingerprints?: string[],
+	options?: RequestOptions,
+) => {
+	const query = (fingerprints ?? [])
+		.map((value) => `fingerprint=${encodeURIComponent(value)}`)
+		.join("&");
+	return request<FlagDismissalResult>({
+		method: "DELETE",
+		path: `/queries/${encodeURIComponent(queryId)}/flagged-rows${query ? `?${query}` : ""}`,
 		...options,
 	});
 };

@@ -13,6 +13,7 @@
 import { use, useCallback, useState } from "react";
 import {
 	ApiError,
+	deleteFlaggedRows,
 	dismissFlaggedRows,
 	getConnectionFlagged,
 	putFlagRules,
@@ -21,6 +22,7 @@ import {
 } from "@/services/api-client";
 import type { FlaggedQuery, FlagSeverity, RuleHit } from "@/contracts/api";
 import { useConnections } from "@/services/connections/ConnectionsContext";
+import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { useResource } from "@/lib/useResource";
 import { PageBody } from "@/components/PageBody";
 import { Button, EmptyState, ErrorState, LinkButton, Panel } from "@/components/ui";
@@ -87,6 +89,10 @@ function Section({
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	const [confirmingRules, setConfirmingRules] = useState(false);
+	// The badges elsewhere read a summary of this same queue, so anything that
+	// changes it has to refresh them or the rail keeps claiming work that is
+	// already done.
+	const flaggedSummary = useFlagged();
 
 	// Every action here is a write followed by a reload, and every one of them
 	// can fail the same way, so they share one wrapper rather than three copies
@@ -97,6 +103,7 @@ function Section({
 		try {
 			await action();
 			onChanged();
+			flaggedSummary.reload();
 		} catch (cause) {
 			setProblem(
 				cause instanceof ApiError ? cause.displayMessage : `Could not ${what}.`,
@@ -115,6 +122,7 @@ function Section({
 						<Button
 							type="button"
 							disabled={busy}
+							title="Stop suppressing these rows. Dismissing deleted them, so they reappear when this query next runs."
 							onClick={() =>
 								run("restore these rows", () => restoreFlaggedRows(section.query_id))
 							}
@@ -124,20 +132,36 @@ function Section({
 					) : null}
 
 					{section.rows.length > 0 ? (
-						<Button
-							type="button"
-							disabled={busy}
-							onClick={() =>
-								run("dismiss these rows", () =>
-									dismissFlaggedRows(
-										section.query_id,
-										section.rows.map((row) => row.fingerprint),
-									),
-								)
-							}
-						>
-							Dismiss all {section.rows.length}
-						</Button>
+						<>
+							<Button
+								type="button"
+								disabled={busy}
+								onClick={() =>
+									run("dismiss these rows", () =>
+										dismissFlaggedRows(
+											section.query_id,
+											section.rows.map((row) => row.fingerprint),
+										),
+									)
+								}
+							>
+								Dismiss all {section.rows.length}
+							</Button>
+							{/* Deliberately not the same as dismissing. Dismissing is a
+							    decision and is remembered; clearing only empties the
+							    queue, and anything still matching returns on the next
+							    run. Useful right after changing a rule. */}
+							<Button
+								type="button"
+								disabled={busy}
+								title="Empty this queue without marking the rows reviewed. Anything still matching comes back on the next run."
+								onClick={() =>
+									run("clear this queue", () => deleteFlaggedRows(section.query_id))
+								}
+							>
+								Clear
+							</Button>
+						</>
 					) : null}
 
 					{confirmingRules ? (
