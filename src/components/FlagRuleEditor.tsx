@@ -38,6 +38,16 @@ export function takesTwoValues(operator: FlagOperator): boolean {
 	return BINARY_OPERATORS.includes(operator);
 }
 
+/**
+ * A new condition, with no column chosen.
+ *
+ * Deliberately not seeded with the first result column. Doing that put a real
+ * column name in the field before the analyst had picked anything, so a rule
+ * built by setting only the comparison and the value silently tested whichever
+ * column happened to come first. It evaluated cleanly and matched nothing, with
+ * no error anywhere to say the column was the problem. An empty field fails the
+ * editor's own validation instead, which is the point.
+ */
 export function emptyCondition(column = ""): FlagCondition {
 	return { column_name: column, operator: "gt", value: "" };
 }
@@ -196,7 +206,7 @@ export function FlagRuleEditor({
 					<Button
 						type="button"
 						disabled={disabled}
-						onClick={() => onChange([...rules, emptyRule(rules.length, columns[0] ?? "")])}
+						onClick={() => onChange([...rules, emptyRule(rules.length)])}
 					>
 						Add rule
 					</Button>
@@ -422,7 +432,7 @@ export function FlagRuleEditor({
 									disabled={disabled}
 									onClick={() =>
 										patchRule(ruleIndex, {
-											conditions: [...rule.conditions, emptyCondition(columns[0] ?? "")],
+											conditions: [...rule.conditions, emptyCondition()],
 										})
 									}
 								>

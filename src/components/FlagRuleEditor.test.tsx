@@ -114,7 +114,12 @@ describe("FlagRuleEditor", () => {
     expect(screen.getByText(/nothing on this query will be flagged/i)).toBeInTheDocument();
   });
 
-  it("adds a rule seeded with the first preview column", async () => {
+  it("adds a rule with no column chosen, so one has to be picked", async () => {
+    // Regression: it used to seed the first result column. That put a real
+    // column name in the field before anyone had chosen anything, so a rule
+    // built by setting only the comparison and the value silently tested
+    // whichever column came first - it evaluated cleanly, matched nothing, and
+    // nothing on screen suggested the column was the problem.
     const onChange = vi.fn();
     render(
       <FlagRuleEditor rules={[]} onChange={onChange} columns={["day", "amount"]} />,
@@ -122,7 +127,9 @@ describe("FlagRuleEditor", () => {
     await userEvent.click(screen.getByRole("button", { name: /add rule/i }));
     expect(onChange).toHaveBeenCalledTimes(1);
     const [next] = onChange.mock.calls[0] as [FlagRule[]];
-    expect(next[0].conditions[0].column_name).toBe("day");
+    expect(next[0].conditions[0].column_name).toBe("");
+    // And the editor refuses to let it save that way.
+    expect(validateRules(next).get("cond:0:0")).toMatch(/pick a column/i);
   });
 
   it("offers the preview columns as a dropdown", () => {
