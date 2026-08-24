@@ -15,6 +15,8 @@
  * enough to hide itself. Same input, same output - no model in this path.
  */
 
+import type { FlagOutcome, FlagSeverity } from "@/contracts/api";
+
 /** Column names that mean "this row is already known-bad". */
 const FLAG_COLUMNS = [
   "is_flagged",
@@ -220,23 +222,99 @@ export interface RowAnomalyInput {
   rows: unknown[][];
   /** Column plotted on the value axis; only used for the statistical path. */
   valueColumn?: string | null;
+  /**
+   * The engine's flag-rule outcome, when the query has rules. Outranks both
+   * heuristics below: the analyst stated what counts, so nothing here should
+   * be inferring it.
+   */
+  flags?: FlagOutcome | null;
 }
 
 export interface RowAnomalyResult {
   /** Parallel to `rows`. */
   flags: boolean[];
   /** How each anomaly was decided, for the "why is this red" tooltip. */
-  reason: "flag-column" | "outlier" | "none";
+  reason: "flag-rule" | "flag-column" | "outlier" | "none";
   /** Name of the flag column, when that path was used. */
   source: string | null;
+  /**
+   * Parallel to `rows`: names of the rules that caught each row. Empty arrays
+   * everywhere unless `reason` is "flag-rule". This is what lets a tooltip say
+   * "Large transfer" instead of only colouring the mark.
+   */
+  ruleNames: string[][];
+  /** Parallel to `rows`: highest severity among matching rules, else null. */
+  severities: (FlagSeverity | null)[];
+}
+
+function unlabelled(count: number): Pick<RowAnomalyResult, "ruleNames" | "severities"> {
+  return {
+    ruleNames: Array.from({ length: count }, () => [] as string[]),
+    severities: Array.from({ length: count }, () => null as FlagSeverity | null),
+  };
+}
+
+/** Highest severity wins when several rules catch the same row. */
+const SEVERITY_RANK: Record<FlagSeverity, number> = { low: 0, medium: 1, high: 2 };
+
+export function highestSeverity(
+  severities: readonly FlagSeverity[],
+): FlagSeverity | null {
+  let best: FlagSeverity | null = null;
+  for (const severity of severities) {
+    if (best === null || SEVERITY_RANK[severity] > SEVERITY_RANK[best]) best = severity;
+  }
+  return best;
+}
+
+/**
+ * Turn the engine's outcome into the parallel arrays the charts consume.
+ *
+ * The wire format carries only flagged rows, which keeps a 10,000-row payload
+ * from hauling 10,000 mostly-empty entries. Charts want a mask, so this is
+ * where the sparse form is expanded, once, rather than at four call sites.
+ */
+export function maskFromFlagOutcome(
+  outcome: FlagOutcome,
+  rowCount: number,
+): RowAnomalyResult {
+  const mask = Array.from({ length: rowCount }, () => false);
+  const { ruleNames, severities } = unlabelled(rowCount);
+  const ruleById = new Map(outcome.rules.map((rule) => [rule.id, rule]));
+
+  for (const flagged of outcome.rows) {
+    // A row index past the end means the rows and the outcome came from
+    // different runs. Dropping it beats painting an unrelated row red.
+    if (flagged.index < 0 || flagged.index >= rowCount) continue;
+    mask[flagged.index] = true;
+    const hits = flagged.rule_ids
+      .map((id) => ruleById.get(id))
+      .filter((rule): rule is NonNullable<typeof rule> => rule !== undefined);
+    ruleNames[flagged.index] = hits.map((rule) => rule.name);
+    severities[flagged.index] = highestSeverity(hits.map((rule) => rule.severity));
+  }
+
+  return { flags: mask, reason: "flag-rule", source: null, ruleNames, severities };
 }
 
 /**
  * Top-level entry point: given a result set, say which rows deserve the alert
  * colour and be explicit about why.
+ *
+ * Priority, highest first:
+ *   1. Flag rules the analyst wrote. An explicit statement beats any guess.
+ *   2. A conventionally-named boolean column in the result.
+ *   3. A robust outlier test on the plotted values.
  */
 export function detectRowAnomalies(input: RowAnomalyInput): RowAnomalyResult {
-  const { columns, rows, valueColumn } = input;
+  const { columns, rows, valueColumn, flags: outcome } = input;
+
+  // Only when the query actually has rules. An outcome with no rules at all
+  // means "this query defines none", not "these rules matched nothing", and
+  // must not switch off the heuristics below.
+  if (outcome && outcome.rules.length > 0) {
+    return maskFromFlagOutcome(outcome, rows.length);
+  }
 
   const flagIndex = findFlagColumn(columns, rows, valueColumn);
   if (flagIndex !== null) {
@@ -244,6 +322,7 @@ export function detectRowAnomalies(input: RowAnomalyInput): RowAnomalyResult {
       flags: rows.map((row) => isTruthyFlag(row[flagIndex])),
       reason: "flag-column",
       source: columns[flagIndex],
+      ...unlabelled(rows.length),
     };
   }
 
@@ -256,10 +335,18 @@ export function detectRowAnomalies(input: RowAnomalyInput): RowAnomalyResult {
         return typeof cell === "number" ? cell : Number(cell);
       });
       const flags = detectOutliers(values);
-      if (flags.some(Boolean)) return { flags, reason: "outlier", source: valueColumn };
-      return { flags, reason: "none", source: null };
+      const labels = unlabelled(rows.length);
+      if (flags.some(Boolean)) {
+        return { flags, reason: "outlier", source: valueColumn, ...labels };
+      }
+      return { flags, reason: "none", source: null, ...labels };
     }
   }
 
-  return { flags: rows.map(() => false), reason: "none", source: null };
+  return {
+    flags: rows.map(() => false),
+    reason: "none",
+    source: null,
+    ...unlabelled(rows.length),
+  };
 }

@@ -2,7 +2,7 @@
 
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, createQuery } from "@/services/api-client";
+import { ApiError, createQuery, putFlagRules } from "@/services/api-client";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { PageBody } from "@/components/PageBody";
 import { QueryEditor, type QueryEditorValues } from "@/components/QueryEditor";
@@ -20,7 +20,12 @@ export default function NewQueryPage({ params }: { params: Promise<{ id: string 
     setBusy(true);
     setError(null);
     try {
-      await createQuery(id, values);
+      const { flag_rules: rules, ...query } = values;
+      const created = await createQuery(id, query);
+      // Two calls because rules hang off a query id that does not exist until
+      // the POST returns. Saving them second means a rule failure cannot lose
+      // the query the analyst just wrote.
+      if (rules.length > 0) await putFlagRules(created.id, { rules });
       router.push(`/connections/${id}`);
     } catch (cause) {
       setError(

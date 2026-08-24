@@ -31,6 +31,7 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
       crumbs={[{ label: "Connections", href: "/" }, { label: name }]}
       actions={
         <div className="flex items-center gap-2">
+          <LinkButton href={`/connections/${id}/flagged`}>Flagged</LinkButton>
           <LinkButton href={`/connections/${id}/settings`}>Settings</LinkButton>
           <LinkButton href={`/connections/${id}/queries/new`} tone="primary">
             New query

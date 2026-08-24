@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PollResponse, SavedQueryRead } from "@/contracts/api";
+import { EMPTY_FLAGS } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { ChartCard } from "./ChartCard";
 
@@ -52,7 +53,8 @@ function changed(hash: string, value: number): PollResponse {
       series_field: null,
       warnings: [],
     },
-    poll_interval_ms: 3000,
+    flags: EMPTY_FLAGS,
+  poll_interval_ms: 3000,
   };
 }
 
@@ -110,7 +112,8 @@ describe("ChartCard", () => {
         query_id: "q1",
         changed: false,
         data_hash: "sha256:aaa",
-        poll_interval_ms: 3000,
+        flags: EMPTY_FLAGS,
+  poll_interval_ms: 3000,
         from_cache: true,
       } as PollResponse);
 

@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PollResponse } from "@/contracts/api";
+import { EMPTY_FLAGS } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { backoffFor, useQueryPolling } from "./useQueryPolling";
 
@@ -25,6 +26,7 @@ function changed(hash: string, rows: unknown[][] = [[1]], intervalMs = 3000): Po
     columns: ["n"],
     rows: rows as never,
     chart: { type: "number", x_field: null, y_field: "n", series_field: null, warnings: [] },
+      flags: EMPTY_FLAGS,
     poll_interval_ms: intervalMs,
   };
 }

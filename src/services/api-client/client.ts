@@ -1,14 +1,17 @@
 import type {
 	ColumnList,
-	DashboardCreate,
-	DashboardRead,
-	DashboardUpdate,
 	ConnectionCreate,
 	ConnectionCreateResult,
+	ConnectionFlagged,
 	ConnectionRead,
 	ConnectionTestResult,
 	ConnectionUpdate,
+	DashboardCreate,
+	DashboardRead,
+	DashboardUpdate,
 	ExecutionLogRead,
+	FlagRuleSetRead,
+	FlagRuleSetUpdate,
 	PollResponse,
 	PreviewRequest,
 	PreviewResponse,
@@ -337,5 +340,58 @@ export const health = (options?: RequestOptions) =>
 		method: "GET",
 		path: "/health",
 		timeoutMs: 8_000,
+		...options,
+	});
+
+/* ------------------------------------------------------------------ flag rules */
+
+export const getFlagRules = (queryId: string, options?: RequestOptions) =>
+	request<FlagRuleSetRead>({
+		method: "GET",
+		path: `/queries/${encodeURIComponent(queryId)}/flag-rules`,
+		...options,
+	});
+
+/**
+ * Replace a query's whole rule set. An empty array removes every rule.
+ *
+ * Whole-set replace is what the engine offers, and it matches the editor:
+ * position is the index in this array, so reordering needs no separate call.
+ */
+export const putFlagRules = (
+	queryId: string,
+	body: FlagRuleSetUpdate,
+	options?: RequestOptions,
+) =>
+	request<FlagRuleSetRead>({
+		method: "PUT",
+		path: `/queries/${encodeURIComponent(queryId)}/flag-rules`,
+		body,
+		...options,
+	});
+
+/** Flagged rows across a connection. Reads the engine's cache, runs nothing. */
+export const getConnectionFlagged = (connectionId: string, options?: RequestOptions) =>
+	request<ConnectionFlagged>({
+		method: "GET",
+		path: `/connections/${encodeURIComponent(connectionId)}/flagged`,
+		...options,
+	});
+
+/**
+ * Re-run this connection's rule-bearing queries, then flag them.
+ *
+ * The only call here that touches the target database, so it gets the long
+ * timeout: it runs every rule-bearing query on the connection, one after
+ * another, and the engine caps how many with FAE_FLAGGED_REFRESH_MAX_QUERIES.
+ */
+export const refreshConnectionFlagged = (
+	connectionId: string,
+	options?: RequestOptions,
+) =>
+	request<ConnectionFlagged>({
+		method: "POST",
+		path: `/connections/${encodeURIComponent(connectionId)}/flagged/refresh`,
+		timeoutMs: 60_000,
 		...options,
 	});

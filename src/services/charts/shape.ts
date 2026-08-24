@@ -8,13 +8,19 @@
  * tell the analyst that the axis was guessed rather than configured.
  */
 
-import type { Cell, ChartSpec, Row } from "@/contracts/api";
+import type { Cell, ChartSpec, FlagOutcome, FlagSeverity, Row } from "@/contracts/api";
 import { detectOutliers, detectRowAnomalies } from "@/services/anomaly";
 
 export interface ResultSet {
   columns: string[];
   rows: Row[];
   chart: ChartSpec;
+  /**
+   * The engine's flag-rule outcome. Optional so a caller holding only a bare
+   * result (a preview, a test fixture) still type-checks; when present and
+   * non-empty it outranks every heuristic in `@/services/anomaly`.
+   */
+  flags?: FlagOutcome | null;
 }
 
 export interface ResolvedFields {
@@ -154,7 +160,7 @@ export interface CartesianData {
   /** True when at least one point is flagged or anomalous. */
   hasAlerts: boolean;
   /** How alerts were decided, for the card's inline explanation. */
-  alertReason: "flag-column" | "outlier" | "none";
+  alertReason: "flag-rule" | "flag-column" | "outlier" | "none";
   alertSource: string | null;
 }
 
@@ -185,7 +191,7 @@ export function buildCartesian(result: ResultSet): CartesianData {
   const yIndex = columns.indexOf(fields.yKey);
 
   if (!fields.seriesKey) {
-    const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey });
+    const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
     const data: ChartPoint[] = rows.map((row, index) => ({
       [fields.xKey as string]: row[xIndex] ?? null,
       [fields.yKey as string]: toNumber(row[yIndex]),
@@ -281,7 +287,7 @@ export function buildPie(result: ResultSet): PieData {
 
   const nameIndex = columns.indexOf(fields.xKey);
   const valueIndex = columns.indexOf(fields.yKey);
-  const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey });
+  const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
 
   const slices = rows.map((row, index) => ({
     name: row[nameIndex] === null || row[nameIndex] === undefined
@@ -342,15 +348,19 @@ export interface TableData {
   rows: Row[];
   /** Parallel to rows: which ones the analyst should look at first. */
   alerts: boolean[];
-  alertReason: "flag-column" | "outlier" | "none";
+  alertReason: "flag-rule" | "flag-column" | "outlier" | "none";
   alertSource: string | null;
+  /** Per row: which rules caught it. Empty unless alertReason is "flag-rule". */
+  alertRuleNames: string[][];
+  /** Per row: highest severity among the matching rules, else null. */
+  alertSeverities: (FlagSeverity | null)[];
   numericColumns: boolean[];
 }
 
 export function buildTable(result: ResultSet): TableData {
   const { columns, rows } = result;
   const fields = resolveFields(result);
-  const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey });
+  const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
   const any = anomalies.flags.some(Boolean);
 
   return {
@@ -359,6 +369,8 @@ export function buildTable(result: ResultSet): TableData {
     alerts: anomalies.flags,
     alertReason: any ? anomalies.reason : "none",
     alertSource: any ? anomalies.source : null,
+    alertRuleNames: anomalies.ruleNames,
+    alertSeverities: anomalies.severities,
     // Right-align numeric columns; a column of figures is unreadable ragged.
     numericColumns: columns.map((_, index) => columnIsNumeric(rows, index)),
   };

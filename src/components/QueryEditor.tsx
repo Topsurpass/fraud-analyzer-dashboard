@@ -6,6 +6,7 @@ import type {
   PreviewResponse,
   SavedQueryCreate,
   SavedQueryRead,
+  FlagRule,
 } from "@/contracts/api";
 import { CHART_TYPES } from "@/contracts/api";
 import { ApiError, previewQuery } from "@/services/api-client";
@@ -14,6 +15,7 @@ import { Button, Field, Input, Panel, Select, Textarea } from "./ui";
 import { TableView } from "./charts/TableView";
 import { buildTable } from "@/services/charts/shape";
 import { SchemaBrowser } from "./SchemaBrowser";
+import { FlagRuleEditor } from "./FlagRuleEditor";
 
 /**
  * Write SQL, see what it returns, then say how to draw it.
@@ -25,6 +27,12 @@ import { SchemaBrowser } from "./SchemaBrowser";
 
 export interface QueryEditorValues extends SavedQueryCreate {
   chart_type: ChartType;
+  /**
+   * Saved separately from the query itself: the engine stores rules under
+   * PUT /queries/{id}/flag-rules, and on create the query has no id until the
+   * POST returns. The caller sequences the two.
+   */
+  flag_rules: FlagRule[];
 }
 
 const NEEDS_X: ChartType[] = ["line", "bar", "pie"];
@@ -33,6 +41,7 @@ const NEEDS_Y: ChartType[] = ["line", "bar", "pie", "number"];
 export function QueryEditor({
   connectionId,
   initial,
+  initialRules,
   submitLabel,
   busy,
   error,
@@ -42,6 +51,7 @@ export function QueryEditor({
 }: {
   connectionId: string;
   initial?: SavedQueryRead | null;
+  initialRules?: FlagRule[];
   submitLabel: string;
   busy: boolean;
   error?: ApiError | null;
@@ -62,6 +72,7 @@ export function QueryEditor({
   const [pollInterval, setPollInterval] = useState(
     initial?.poll_interval_ms != null ? String(initial.poll_interval_ms) : "",
   );
+  const [rules, setRules] = useState<FlagRule[]>(initialRules ?? []);
   const [touched, setTouched] = useState(false);
 
   const sqlRef = useRef<HTMLTextAreaElement>(null);
@@ -100,6 +111,14 @@ export function QueryEditor({
     );
   }, [preview, initial]);
 
+  const previewMatchCounts = useMemo(() => {
+    if (!preview?.flags?.rules.length) return null;
+    // Preview reports unsaved rules under their index in the submitted array.
+    return new Map(
+      preview.flags.rules.map((hit) => [Number(hit.id), hit.matched] as const),
+    );
+  }, [preview]);
+
   const nameError = touched && !name.trim() ? "A name is required." : null;
   const sqlError = touched && !sql.trim() ? "Some SQL is required." : null;
 
@@ -111,7 +130,10 @@ export function QueryEditor({
     setPreviewing(true);
     setPreviewError(null);
     try {
-      const result = await previewQuery(connectionId, { sql_text: sql });
+      const result = await previewQuery(connectionId, {
+        sql_text: sql,
+        flag_rules: rules,
+      });
       setPreview(result);
       // Offer sensible axes the moment the columns are known.
       if (!xField && result.columns.length > 0) setXField(result.columns[0]);
@@ -144,6 +166,7 @@ export function QueryEditor({
       series_field: chartType === "line" || chartType === "bar" ? seriesField || null : null,
       row_limit: rowLimit.trim() ? Number(rowLimit) : null,
       poll_interval_ms: pollInterval.trim() ? Number(pollInterval) : null,
+      flag_rules: rules,
     });
   };
 
@@ -201,6 +224,14 @@ export function QueryEditor({
           preview={preview}
           error={previewError}
           previewing={previewing}
+        />
+
+        <FlagRuleEditor
+          rules={rules}
+          onChange={setRules}
+          columns={columns}
+          matchCounts={previewMatchCounts}
+          disabled={busy}
         />
       </div>
 

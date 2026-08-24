@@ -17,6 +17,17 @@ import { formatCell } from "@/services/format";
  * a flag that is true for the whole result set separates nothing inside that
  * result, so the honest place to say it is once, in the footer.
  */
+/** Distinct rule names that caught anything, in first-seen order. */
+function ruleSummary(data: TableData): string {
+  const seen: string[] = [];
+  for (const names of data.alertRuleNames ?? []) {
+    for (const name of names) if (!seen.includes(name)) seen.push(name);
+  }
+  if (seen.length === 0) return "your rules";
+  if (seen.length <= 2) return seen.join(" and ");
+  return `${seen.slice(0, 2).join(", ")} and ${seen.length - 2} more`;
+}
+
 export interface TableViewProps {
   data: TableData;
   title: string;
@@ -69,6 +80,14 @@ export function TableView({ data, title }: TableViewProps) {
           <tbody>
             {data.rows.map((row, rowIndex) => {
               const flagged = discriminating && data.alerts[rowIndex] === true;
+              // Naming the rule is the point of writing one: "Flagged row"
+              // tells an analyst nothing they cannot already see from the mark.
+              const caught = data.alertRuleNames?.[rowIndex] ?? [];
+              const why = flagged
+                ? caught.length > 0
+                  ? `Flagged by ${caught.join(", ")}`
+                  : "Flagged row"
+                : undefined;
               return (
                 <tr key={rowIndex} className={flagged ? "text-ink" : undefined}>
                   <td className="p-0 align-middle">
@@ -83,7 +102,7 @@ export function TableView({ data, title }: TableViewProps) {
                   {row.map((cell, cellIndex) => (
                     <td
                       key={cellIndex}
-                      title={flagged && cellIndex === 0 ? "Flagged row" : undefined}
+                      title={cellIndex === 0 ? why : undefined}
                       className={`tnum border-b border-line/60 px-2.5 py-1.5 whitespace-nowrap ${
                         data.numericColumns[cellIndex] ? "text-right" : "text-left"
                       } ${cell === null ? "text-muted italic" : ""} ${
@@ -117,7 +136,11 @@ export function TableView({ data, title }: TableViewProps) {
               <span className="text-alert">every</span> row flagged
             </>
           )}
-          {data.alertSource ? ` by ${data.alertSource}` : ""}
+          {data.alertReason === "flag-rule"
+            ? ` by ${ruleSummary(data)}`
+            : data.alertSource
+              ? ` by ${data.alertSource}`
+              : ""}
         </p>
       ) : null}
     </div>

@@ -133,9 +133,161 @@ export type SavedQueryUpdate = Partial<SavedQueryCreate>;
 export type Cell = string | number | boolean | null;
 export type Row = Cell[];
 
+/* -------------------------------------------------------------------------
+ * Flag rules
+ *
+ * A rule is a named set of conditions the analyst attaches to a saved query.
+ * A rule matches a row when ALL its conditions match; a row is flagged when
+ * ANY enabled rule matches. The engine evaluates them in Python over rows the
+ * database already returned, so none of this is ever spliced into SQL.
+ * ---------------------------------------------------------------------- */
+
+export type FlagSeverity = "low" | "medium" | "high";
+
+export const FLAG_SEVERITIES: readonly FlagSeverity[] = ["low", "medium", "high"];
+
+export type FlagOperator =
+	| "gt"
+	| "gte"
+	| "lt"
+	| "lte"
+	| "eq"
+	| "neq"
+	| "contains"
+	| "not_contains"
+	| "starts_with"
+	| "in"
+	| "not_in"
+	| "is_null"
+	| "is_not_null"
+	| "between";
+
+/** Operators that read no value at all. */
+export const NULLARY_OPERATORS: readonly FlagOperator[] = ["is_null", "is_not_null"];
+/** Operators that need both `value` and `value2`. */
+export const BINARY_OPERATORS: readonly FlagOperator[] = ["between"];
+
+/** Labels for the operator dropdown, in the order they should be offered. */
+export const OPERATOR_LABELS: Record<FlagOperator, string> = {
+	gt: "greater than",
+	gte: "at least",
+	lt: "less than",
+	lte: "at most",
+	eq: "equals",
+	neq: "does not equal",
+	between: "between",
+	contains: "contains",
+	not_contains: "does not contain",
+	starts_with: "starts with",
+	in: "is one of",
+	not_in: "is not one of",
+	is_null: "is empty",
+	is_not_null: "is not empty",
+};
+
+export interface FlagCondition {
+	column_name: string;
+	operator: FlagOperator;
+	value?: string | null;
+	value2?: string | null;
+}
+
+export interface FlagConditionRead extends FlagCondition {
+	id: string;
+	position: number;
+}
+
+export interface FlagRule {
+	name: string;
+	severity: FlagSeverity;
+	enabled: boolean;
+	conditions: FlagCondition[];
+}
+
+export interface FlagRuleRead {
+	id: string;
+	query_id: string;
+	name: string;
+	severity: FlagSeverity;
+	enabled: boolean;
+	position: number;
+	conditions: FlagConditionRead[];
+	created_at: string;
+	updated_at: string;
+}
+
+export interface FlagRuleSetRead {
+	query_id: string;
+	rules: FlagRuleRead[];
+}
+
+export interface FlagRuleSetUpdate {
+	rules: FlagRule[];
+}
+
+/** One flagged row. `index` is a position in the result's `rows`. */
+export interface RowFlag {
+	index: number;
+	rule_ids: string[];
+}
+
+export interface RuleHit {
+	id: string;
+	name: string;
+	severity: FlagSeverity;
+	matched: number;
+}
+
+/**
+ * Always present on a run, empty when the query defines no rules.
+ *
+ * `rows` carries ONLY flagged rows, so its length is the flagged count rather
+ * than the result size.
+ */
+export interface FlagOutcome {
+	flagged_count: number;
+	rows: RowFlag[];
+	rules: RuleHit[];
+	warnings: string[];
+}
+
+export const EMPTY_FLAGS: FlagOutcome = {
+	flagged_count: 0,
+	rows: [],
+	rules: [],
+	warnings: [],
+};
+
+/** One query's section of a connection's flagged view. */
+export interface FlaggedQuery {
+	query_id: string;
+	query_name: string;
+	columns: string[];
+	rows: { index: number; rule_ids: string[]; values: Row }[];
+	rules: RuleHit[];
+	warnings: string[];
+	flagged_count: number;
+	executed_at: string | null;
+	/** No cached result: never run, or the entry aged out. Not an error. */
+	stale: boolean;
+	error_code: string | null;
+	error_message: string | null;
+}
+
+export interface ConnectionFlagged {
+	connection_id: string;
+	queries: FlaggedQuery[];
+	flagged_count: number;
+	refreshed: boolean;
+	/** True when FAE_FLAGGED_REFRESH_MAX_QUERIES capped the refresh. */
+	refresh_truncated: boolean;
+}
+
 export interface PreviewRequest {
 	sql_text: string;
 	row_limit?: number | null;
+	/** Unsaved rules, evaluated against the preview rows and discarded. */
+	flag_rules?: FlagRule[];
 }
 
 export interface PreviewResponse {
@@ -146,6 +298,7 @@ export interface PreviewResponse {
 	truncated: boolean;
 	columns: string[];
 	rows: Row[];
+	flags: FlagOutcome;
 }
 
 export interface RunResponse {
@@ -158,6 +311,7 @@ export interface RunResponse {
 	columns: string[];
 	rows: Row[];
 	chart: ChartSpec;
+	flags: FlagOutcome;
 	poll_interval_ms: number;
 }
 

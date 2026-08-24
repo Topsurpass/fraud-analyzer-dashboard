@@ -2,7 +2,14 @@
 
 import { use, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, deleteQuery, getQuery, updateQuery } from "@/services/api-client";
+import {
+  ApiError,
+  deleteQuery,
+  getFlagRules,
+  getQuery,
+  putFlagRules,
+  updateQuery,
+} from "@/services/api-client";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
@@ -21,6 +28,12 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
   const load = useCallback((signal: AbortSignal) => getQuery(id, { signal }), [id]);
   const query = useResource(load);
 
+  const loadRules = useCallback(
+    (signal: AbortSignal) => getFlagRules(id, { signal }),
+    [id],
+  );
+  const rules = useResource(loadRules);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
@@ -35,8 +48,14 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
     setError(null);
     setSaved(false);
     try {
-      await updateQuery(id, values);
+      const { flag_rules: nextRules, ...patch } = values;
+      await updateQuery(id, patch);
+      // Always sent, including when empty: that is how the last rule is
+      // removed, and skipping the call when the list is empty would make
+      // deleting a rule silently do nothing.
+      await putFlagRules(id, { rules: nextRules });
       query.reload();
+      rules.reload();
       setSaved(true);
     } catch (cause) {
       setError(
@@ -92,9 +111,22 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
         </div>
       ) : (
         <QueryEditor
-          key={query.data.updated_at}
+          // Remount when either half of the saved state changes, so the editor
+          // picks up freshly loaded rules instead of keeping its first render.
+          key={`${query.data.updated_at}:${rules.data?.rules.length ?? "loading"}`}
           connectionId={connectionId}
           initial={query.data}
+          initialRules={rules.data?.rules.map((rule) => ({
+            name: rule.name,
+            severity: rule.severity,
+            enabled: rule.enabled,
+            conditions: rule.conditions.map((condition) => ({
+              column_name: condition.column_name,
+              operator: condition.operator,
+              value: condition.value ?? "",
+              value2: condition.value2 ?? "",
+            })),
+          }))}
           submitLabel="Save changes"
           busy={busy}
           error={error}
