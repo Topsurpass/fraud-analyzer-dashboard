@@ -94,6 +94,22 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
     );
   }
 
+  // A rules request that failed must not fall through to the editor. The editor
+  // would show an empty rule list, which is indistinguishable from a query that
+  // genuinely has none, and the next save PUTs that empty list - deleting the
+  // rules that are actually stored. Refusing to render is the only safe answer.
+  if (rules.error) {
+    return (
+      <PageBody crumbs={[{ label: "Connections", href: "/" }, { label: "Query" }]}>
+        <ErrorState
+          title="Could not load this query's flag rules"
+          message={`${rules.error.displayMessage} Editing is blocked until they load, so that saving cannot erase rules this page never saw.`}
+          onRetry={rules.reload}
+        />
+      </PageBody>
+    );
+  }
+
   return (
     <PageBody
       crumbs={[
@@ -104,16 +120,21 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
         { label: query.data?.name ?? "Query" },
       ]}
     >
-      {query.initial || !query.data || !connectionId ? (
+      {/* Both resources must settle before the editor mounts. It seeds its rule
+          state once, from `initialRules`, so mounting it against a half-loaded
+          page means seeding it wrong. */}
+      {query.initial || rules.initial || !query.data || !connectionId ? (
         <div className="skeleton-sweep grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="h-96 border border-line bg-surface" />
           <div className="h-64 border border-line bg-surface" />
         </div>
       ) : (
         <QueryEditor
-          // Remount when either half of the saved state changes, so the editor
-          // picks up freshly loaded rules instead of keeping its first render.
-          key={`${query.data.updated_at}:${rules.data?.rules.length ?? "loading"}`}
+          // Keyed on the query being edited, nothing finer. Both resources have
+          // settled by now, so there is nothing left to pick up, and remounting
+          // on anything that a save changes - `updated_at`, the rule count -
+          // throws away the editor's state the moment the reloads land.
+          key={id}
           connectionId={connectionId}
           initial={query.data}
           initialRules={rules.data?.rules.map((rule) => ({
