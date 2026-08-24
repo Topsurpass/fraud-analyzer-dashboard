@@ -107,9 +107,11 @@ describe("FlagRuleEditor", () => {
     expect(blurb.textContent).toMatch(/all/);
   });
 
-  it("says what happens without rules", () => {
+  it("says that no rules means nothing is flagged", () => {
+    // The app used to guess here. Saying so plainly matters: an empty editor
+    // must not read as "the defaults will handle it".
     render(<FlagRuleEditor rules={[]} onChange={() => {}} columns={[]} />);
-    expect(screen.getByText(/falls back to guessing/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing on this query will be flagged/i)).toBeInTheDocument();
   });
 
   it("adds a rule seeded with the first preview column", async () => {
@@ -240,6 +242,38 @@ describe("FlagRuleEditor", () => {
   it("offers no remove button for a lone condition", () => {
     render(<FlagRuleEditor rules={[rule()]} onChange={() => {}} columns={["amount"]} />);
     expect(screen.queryByRole("button", { name: /remove condition/i })).toBeNull();
+  });
+
+  it("clears every rule at once, but only on a second press", async () => {
+    // Removing one rule is obvious to undo by retyping it; removing eight is
+    // not, and the control sits beside "Add rule" where a misclick is cheap.
+    const onChange = vi.fn();
+    render(
+      <FlagRuleEditor
+        rules={[rule({ name: "One" }), rule({ name: "Two" })]}
+        onChange={onChange}
+        columns={["amount"]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^remove all$/i }));
+    expect(onChange).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /remove all 2/i }));
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+
+  it("lets the clear be called off", async () => {
+    const onChange = vi.fn();
+    render(<FlagRuleEditor rules={[rule()]} onChange={onChange} columns={["amount"]} />);
+    await userEvent.click(screen.getByRole("button", { name: /^remove all$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /keep/i }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^remove all$/i })).toBeInTheDocument();
+  });
+
+  it("offers no clear when there is nothing to clear", () => {
+    render(<FlagRuleEditor rules={[]} onChange={() => {}} columns={[]} />);
+    expect(screen.queryByRole("button", { name: /remove all/i })).toBeNull();
   });
 
   it("removes a rule", async () => {

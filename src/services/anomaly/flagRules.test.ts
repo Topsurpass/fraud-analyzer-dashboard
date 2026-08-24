@@ -8,11 +8,12 @@ import {
 } from "@/services/anomaly";
 
 /**
- * Server-supplied flag rules against the two heuristics they replace.
+ * Server-supplied flag rules, which are now the only thing that flags a row.
  *
- * The heuristics still exist and still matter for a query with no rules. What
- * must never happen is a rule the analyst wrote losing to a guess about column
- * names or a z-score.
+ * The two heuristics these replaced - a conventionally-named boolean column,
+ * and a modified z-score over the plotted values - have been deleted rather
+ * than demoted. index.test.ts guards their absence; this file covers what the
+ * rules themselves do.
  */
 
 function outcome(partial: Partial<FlagOutcome>): FlagOutcome {
@@ -147,9 +148,9 @@ describe("priority against the heuristics", () => {
     expect(result.flags).toEqual([false, false]);
   });
 
-  it("an outcome with no rules leaves the heuristics switched on", () => {
-    // Every query without rules sends this, so treating it as "flagged nothing"
-    // would silently disable flag-column detection for the whole app.
+  it("an outcome with no rules flags nothing", () => {
+    // Every query without rules sends this. There is no heuristic left for it
+    // to fall through to; see index.test.ts for why that is deliberate.
     const columns = ["is_fraud", "amount"];
     const rows = [
       [1, 10],
@@ -161,17 +162,18 @@ describe("priority against the heuristics", () => {
       valueColumn: "amount",
       flags: EMPTY_FLAGS,
     });
-    expect(result.reason).toBe("flag-column");
-    expect(result.flags).toEqual([true, false]);
+    expect(result.reason).toBe("none");
+    expect(result.flags).toEqual([false, false]);
   });
 
-  it("no flags field at all behaves exactly as before", () => {
+  it("no flags field at all flags nothing either", () => {
+    // An unsaved query previewing for the first time sends no outcome at all.
     const result = detectRowAnomalies({
       columns: ["is_fraud"],
       rows: [[1], [0]],
     });
-    expect(result.reason).toBe("flag-column");
-    expect(result.flags).toEqual([true, false]);
+    expect(result.reason).toBe("none");
+    expect(result.flags).toEqual([false, false]);
   });
 
   it("every path returns label arrays the length of the rows", () => {

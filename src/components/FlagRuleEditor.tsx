@@ -24,6 +24,7 @@ import {
 	type FlagRule,
 	type FlagSeverity,
 } from "@/contracts/api";
+import { useState } from "react";
 import { Button, Field, Input, Panel, Select } from "@/components/ui";
 
 /** Offered in this order: the comparisons people reach for first come first. */
@@ -117,6 +118,10 @@ export function FlagRuleEditor({
 	disabled = false,
 }: FlagRuleEditorProps) {
 	const problems = validateRules(rules);
+	// Clearing every rule at once is worth a second press. Removing one rule is
+	// obvious to undo by retyping it; removing eight is not, and the button sits
+	// next to "Add rule" where a misclick is cheap to make.
+	const [confirmingClear, setConfirmingClear] = useState(false);
 
 	const patchRule = (index: number, patch: Partial<FlagRule>) => {
 		onChange(rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
@@ -155,13 +160,47 @@ export function FlagRuleEditor({
 		<Panel
 			title="Flag rules"
 			actions={
-				<Button
-					type="button"
-					disabled={disabled}
-					onClick={() => onChange([...rules, emptyRule(rules.length, columns[0] ?? "")])}
-				>
-					Add rule
-				</Button>
+				<div className="flex items-center gap-2">
+					{rules.length > 0 ? (
+						confirmingClear ? (
+							<>
+								<Button
+									type="button"
+									tone="danger"
+									disabled={disabled}
+									onClick={() => {
+										onChange([]);
+										setConfirmingClear(false);
+									}}
+								>
+									Remove all {rules.length}
+								</Button>
+								<Button
+									type="button"
+									disabled={disabled}
+									onClick={() => setConfirmingClear(false)}
+								>
+									Keep
+								</Button>
+							</>
+						) : (
+							<Button
+								type="button"
+								disabled={disabled}
+								onClick={() => setConfirmingClear(true)}
+							>
+								Remove all
+							</Button>
+						)
+					) : null}
+					<Button
+						type="button"
+						disabled={disabled}
+						onClick={() => onChange([...rules, emptyRule(rules.length, columns[0] ?? "")])}
+					>
+						Add rule
+					</Button>
+				</div>
 			}
 		>
 			<div className="space-y-3 p-3">
@@ -173,9 +212,8 @@ export function FlagRuleEditor({
 
 				{rules.length === 0 ? (
 					<p className="border border-dashed border-line px-3 py-4 text-[11px] text-text-secondary">
-						No rules yet. Without them the dashboard falls back to guessing, by
-						looking for a boolean column with a name like <code>is_fraud</code> and
-						otherwise testing the plotted values for outliers.
+						No rules yet, so nothing on this query will be flagged. The dashboard
+						does not guess: a row is marked only when a rule here says so.
 					</p>
 				) : null}
 

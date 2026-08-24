@@ -13,8 +13,11 @@
 import { use, useCallback, useState } from "react";
 import {
 	ApiError,
+	dismissFlaggedRows,
 	getConnectionFlagged,
+	putFlagRules,
 	refreshConnectionFlagged,
+	restoreFlaggedRows,
 } from "@/services/api-client";
 import type { FlaggedQuery, FlagSeverity, RuleHit } from "@/contracts/api";
 import { useConnections } from "@/services/connections/ConnectionsContext";
@@ -73,14 +76,98 @@ function RuleLegend({ rules }: { rules: RuleHit[] }) {
 	);
 }
 
-function Section({ section }: { section: FlaggedQuery }) {
+function Section({
+	section,
+	onChanged,
+}: {
+	section: FlaggedQuery;
+	onChanged: () => void;
+}) {
 	const ruleById = new Map(section.rules.map((rule) => [rule.id, rule]));
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	const [confirmingRules, setConfirmingRules] = useState(false);
+
+	// Every action here is a write followed by a reload, and every one of them
+	// can fail the same way, so they share one wrapper rather than three copies
+	// of the same try/catch with three slightly different error messages.
+	const run = async (what: string, action: () => Promise<unknown>) => {
+		setBusy(true);
+		setProblem(null);
+		try {
+			await action();
+			onChanged();
+		} catch (cause) {
+			setProblem(
+				cause instanceof ApiError ? cause.displayMessage : `Could not ${what}.`,
+			);
+		} finally {
+			setBusy(false);
+		}
+	};
 
 	return (
 		<Panel
 			title={section.query_name}
 			actions={
-				<LinkButton href={`/queries/${section.query_id}`}>Edit rules</LinkButton>
+				<div className="flex flex-wrap items-center gap-2">
+					{section.dismissed_count > 0 ? (
+						<Button
+							type="button"
+							disabled={busy}
+							onClick={() =>
+								run("restore these rows", () => restoreFlaggedRows(section.query_id))
+							}
+						>
+							Restore {section.dismissed_count}
+						</Button>
+					) : null}
+
+					{section.rows.length > 0 ? (
+						<Button
+							type="button"
+							disabled={busy}
+							onClick={() =>
+								run("dismiss these rows", () =>
+									dismissFlaggedRows(
+										section.query_id,
+										section.rows.map((row) => row.fingerprint),
+									),
+								)
+							}
+						>
+							Dismiss all {section.rows.length}
+						</Button>
+					) : null}
+
+					{confirmingRules ? (
+						<>
+							<Button
+								type="button"
+								tone="danger"
+								disabled={busy}
+								onClick={() =>
+									run("delete these rules", async () => {
+										await putFlagRules(section.query_id, { rules: [] });
+										setConfirmingRules(false);
+									})
+								}
+							>
+								Delete {section.rules.length}{" "}
+								{section.rules.length === 1 ? "rule" : "rules"}
+							</Button>
+							<Button type="button" disabled={busy} onClick={() => setConfirmingRules(false)}>
+								Keep
+							</Button>
+						</>
+					) : (
+						<Button type="button" disabled={busy} onClick={() => setConfirmingRules(true)}>
+							Delete rules
+						</Button>
+					)}
+
+					<LinkButton href={`/queries/${section.query_id}`}>Edit rules</LinkButton>
+				</div>
 			}
 		>
 			<div className="space-y-2 p-3">
@@ -92,6 +179,12 @@ function Section({ section }: { section: FlaggedQuery }) {
 							: "not run yet"}
 					</span>
 				</div>
+
+				{problem ? (
+					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
+						{problem}
+					</p>
+				) : null}
 
 				{section.error_code ? (
 					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
@@ -113,7 +206,11 @@ function Section({ section }: { section: FlaggedQuery }) {
 					</p>
 				) : section.flagged_count === 0 ? (
 					<p className="border border-dashed border-line px-3 py-4 text-[11px] text-muted">
-						Nothing matched on the last run.
+						{section.dismissed_count > 0
+							? `All ${section.dismissed_count} flagged ${
+								section.dismissed_count === 1 ? "row has" : "rows have"
+							} been reviewed and dismissed.`
+							: "Nothing matched on the last run."}
 					</p>
 				) : (
 					<div className="overflow-auto">
@@ -128,6 +225,9 @@ function Section({ section }: { section: FlaggedQuery }) {
 										className="border-b border-line px-2.5 py-1.5 text-left text-[10px] font-medium tracking-wide text-muted uppercase"
 									>
 										Caught by
+									</th>
+									<th scope="col" className="border-b border-line px-2.5 py-1.5">
+										<span className="sr-only">Dismiss</span>
 									</th>
 									{section.columns.map((column) => (
 										<th
@@ -146,7 +246,7 @@ function Section({ section }: { section: FlaggedQuery }) {
 										.map((id) => ruleById.get(id))
 										.filter((rule): rule is RuleHit => rule !== undefined);
 									return (
-										<tr key={row.index}>
+										<tr key={row.fingerprint}>
 											<td className="border-b border-line/60 px-2.5 py-1.5 align-top">
 												<div className="flex flex-wrap items-center gap-1">
 													{hits.map((rule) => (
@@ -156,6 +256,20 @@ function Section({ section }: { section: FlaggedQuery }) {
 														</span>
 													))}
 												</div>
+											</td>
+											<td className="border-b border-line/60 px-2.5 py-1.5 align-top">
+												<Button
+													type="button"
+													disabled={busy}
+													aria-label={`Dismiss flagged row ${row.index + 1}`}
+													onClick={() =>
+														run("dismiss this row", () =>
+															dismissFlaggedRows(section.query_id, [row.fingerprint]),
+														)
+													}
+												>
+													Dismiss
+												</Button>
 											</td>
 											{row.values.map((cell, cellIndex) => (
 												<td
@@ -237,7 +351,7 @@ export default function FlaggedPage({ params }: { params: Promise<{ id: string }
 			) : sections.length === 0 ? (
 				<EmptyState
 					title="No flag rules on this connection"
-					body="A flag rule is a named set of conditions on a saved query. Rows that match are collected here. Without rules the dashboard falls back to guessing which rows look anomalous."
+					body="A flag rule is a named set of conditions on a saved query. Rows that match are collected here. Until a query has rules, nothing on it is flagged: the dashboard never guesses which rows look anomalous."
 					action={
 						<LinkButton href={`/connections/${id}`} tone="primary">
 							Pick a query to add rules to
@@ -263,11 +377,19 @@ export default function FlaggedPage({ params }: { params: Promise<{ id: string }
 					<p className="text-[11px] text-muted">
 						<span className="tnum text-ink">{formatInteger(data?.flagged_count ?? 0)}</span>{" "}
 						flagged {data?.flagged_count === 1 ? "row" : "rows"} across{" "}
-						{sections.length} {sections.length === 1 ? "query" : "queries"}.
+						{sections.length} {sections.length === 1 ? "query" : "queries"}
+						{data?.dismissed_count
+							? `, with ${data.dismissed_count} dismissed`
+							: ""}
+						.
 					</p>
 
 					{sections.map((section) => (
-						<Section key={section.query_id} section={section} />
+						<Section
+							key={section.query_id}
+							section={section}
+							onChanged={flagged.reload}
+						/>
 					))}
 				</div>
 			)}

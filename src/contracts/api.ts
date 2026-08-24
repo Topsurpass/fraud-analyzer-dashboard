@@ -306,10 +306,18 @@ export interface FlaggedQuery {
 	query_id: string;
 	query_name: string;
 	columns: string[];
-	rows: { index: number; rule_ids: string[]; values: Row }[];
+	/**
+	 * `fingerprint` is a hash of the row's values and is how a row is dismissed.
+	 * The index cannot serve: it is a position in one run's result and points
+	 * somewhere else after the next run.
+	 */
+	rows: { index: number; rule_ids: string[]; values: Row; fingerprint: string }[];
 	rules: RuleHit[];
 	warnings: string[];
+	/** Rows still to review. Falls as they are dismissed. */
 	flagged_count: number;
+	/** Rows already reviewed and hidden. What "Restore" would bring back. */
+	dismissed_count: number;
 	executed_at: string | null;
 	/** No cached result: never run, or the entry aged out. Not an error. */
 	stale: boolean;
@@ -321,9 +329,16 @@ export interface ConnectionFlagged {
 	connection_id: string;
 	queries: FlaggedQuery[];
 	flagged_count: number;
+	dismissed_count: number;
 	refreshed: boolean;
 	/** True when FAE_FLAGGED_REFRESH_MAX_QUERIES capped the refresh. */
 	refresh_truncated: boolean;
+}
+
+export interface FlagDismissalResult {
+	query_id: string;
+	/** Rows newly dismissed, or newly restored. Zero means it already was. */
+	changed: number;
 }
 
 export interface PreviewRequest {

@@ -9,7 +9,7 @@
  */
 
 import type { Cell, ChartSpec, FlagOutcome, FlagSeverity, Row } from "@/contracts/api";
-import { detectOutliers, detectRowAnomalies } from "@/services/anomaly";
+import { detectRowAnomalies } from "@/services/anomaly";
 
 export interface ResultSet {
   columns: string[];
@@ -18,7 +18,7 @@ export interface ResultSet {
   /**
    * The engine's flag-rule outcome. Optional so a caller holding only a bare
    * result (a preview, a test fixture) still type-checks; when present and
-   * non-empty it outranks every heuristic in `@/services/anomaly`.
+   * When it names no rules nothing is flagged: the app never guesses.
    */
   flags?: FlagOutcome | null;
 }
@@ -160,7 +160,7 @@ export interface CartesianData {
   /** True when at least one point is flagged or anomalous. */
   hasAlerts: boolean;
   /** How alerts were decided, for the card's inline explanation. */
-  alertReason: "flag-rule" | "flag-column" | "outlier" | "none";
+  alertReason: "flag-rule" | "none";
   alertSource: string | null;
 }
 
@@ -215,7 +215,18 @@ export function buildCartesian(result: ResultSet): CartesianData {
   const seriesKeys: string[] = [];
   const seriesValues = new Map<string, number[]>();
 
-  for (const row of rows) {
+  // The same outcome the single-series branch uses. This path used to ignore
+  // flag rules entirely and run its own outlier test per series, so a chart
+  // with a series field showed guesses instead of what the analyst wrote.
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+  let hasAlerts = false;
+
+  for (const [rowIndex, row] of rows.entries()) {
     const xRaw = row[xIndex] ?? null;
     const xLabel = String(xRaw);
     const seriesName = String(row[seriesIndex] ?? "unknown");
@@ -223,6 +234,13 @@ export function buildCartesian(result: ResultSet): CartesianData {
 
     if (!byX.has(xLabel)) {
       byX.set(xLabel, { [fields.xKey]: xRaw, __alert: {} });
+    }
+    if (anomalies.flags[rowIndex] === true) {
+      // A flagged row marks its own cell. Rows are summed into a cell, so one
+      // flagged row among several is enough to mark it: the alert says "there
+      // is something here to look at", not "every contribution matched".
+      hasAlerts = true;
+      (byX.get(xLabel) as ChartPoint).__alert![seriesName] = true;
     }
     // Repeated x/series pairs are summed: the analyst asked for a grouping the
     // SQL did not fully collapse, and dropping rows would understate volume.
@@ -238,21 +256,6 @@ export function buildCartesian(result: ResultSet): CartesianData {
 
   const data = [...byX.values()];
 
-  // Outliers are judged per series: a spike in `api` volume should not be
-  // measured against the scale of `web` volume.
-  let hasAlerts = false;
-  for (const seriesName of seriesKeys) {
-    const values = data.map((point) =>
-      typeof point[seriesName] === "number" ? (point[seriesName] as number) : Number.NaN,
-    );
-    const flags = detectOutliers(values);
-    flags.forEach((flag, index) => {
-      if (!flag) return;
-      hasAlerts = true;
-      (data[index].__alert as Record<string, boolean>)[seriesName] = true;
-    });
-  }
-
   return {
     data,
     seriesKeys,
@@ -260,8 +263,8 @@ export function buildCartesian(result: ResultSet): CartesianData {
     yKey: fields.yKey,
     warnings: fields.warnings,
     hasAlerts,
-    alertReason: hasAlerts ? "outlier" : "none",
-    alertSource: hasAlerts ? fields.yKey : null,
+    alertReason: hasAlerts ? anomalies.reason : "none",
+    alertSource: hasAlerts ? anomalies.source : null,
   };
 }
 
@@ -348,7 +351,7 @@ export interface TableData {
   rows: Row[];
   /** Parallel to rows: which ones the analyst should look at first. */
   alerts: boolean[];
-  alertReason: "flag-rule" | "flag-column" | "outlier" | "none";
+  alertReason: "flag-rule" | "none";
   alertSource: string | null;
   /** Per row: which rules caught it. Empty unless alertReason is "flag-rule". */
   alertRuleNames: string[][];

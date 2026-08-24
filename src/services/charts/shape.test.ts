@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChartSpec } from "@/contracts/api";
+import type { ChartSpec, FlagOutcome } from "@/contracts/api";
 import {
   buildCartesian,
   buildNumber,
@@ -17,6 +17,20 @@ const spec = (overrides: Partial<ChartSpec> = {}): ChartSpec => ({
   warnings: [],
   ...overrides,
 });
+
+/**
+ * A flag outcome naming one rule. Nothing else flags a row any more: the
+ * column-name guess and the outlier test were both removed, so every alert in
+ * these tests has to come from here.
+ */
+function caught(name: string, indices: number[]): FlagOutcome {
+  return {
+    flagged_count: indices.length,
+    rows: indices.map((index) => ({ index, rule_ids: ["r1"] })),
+    rules: [{ id: "r1", name, severity: "high", matched: indices.length }],
+    warnings: [],
+  };
+}
 
 describe("toNumber", () => {
   it("passes numbers through and coerces the strings SQL drivers return", () => {
@@ -140,7 +154,28 @@ describe("buildCartesian", () => {
     expect(built.data[0].web).toBe(5);
   });
 
-  it("marks a spike with the alert mask and says why", () => {
+  it("marks the rows a rule caught and says so", () => {
+    const built = buildCartesian({
+      columns: ["bucket", "flagged"],
+      rows: [
+        ["09:00", 3],
+        ["09:05", 4],
+        ["09:10", 3],
+        ["09:15", 5],
+        ["09:20", 4],
+        ["09:25", 140],
+      ],
+      chart: spec({ x_field: "bucket", y_field: "flagged" }),
+      flags: caught("Spike", [5]),
+    });
+    expect(built.hasAlerts).toBe(true);
+    expect(built.alertReason).toBe("flag-rule");
+    expect(built.data[5].__alert).toEqual({ flagged: true });
+    expect(built.data[0].__alert).toEqual({ flagged: false });
+  });
+
+  it("leaves the same obvious spike alone when no rule names it", () => {
+    // 140 among single digits is exactly what the deleted z-score caught.
     const built = buildCartesian({
       columns: ["bucket", "flagged"],
       rows: [
@@ -153,10 +188,8 @@ describe("buildCartesian", () => {
       ],
       chart: spec({ x_field: "bucket", y_field: "flagged" }),
     });
-    expect(built.hasAlerts).toBe(true);
-    expect(built.alertReason).toBe("outlier");
-    expect(built.data[5].__alert).toEqual({ flagged: true });
-    expect(built.data[0].__alert).toEqual({ flagged: false });
+    expect(built.hasAlerts).toBe(false);
+    expect(built.alertReason).toBe("none");
   });
 
   it("leaves a calm series entirely unalerted", () => {
@@ -169,9 +202,10 @@ describe("buildCartesian", () => {
     expect(built.alertReason).toBe("none");
   });
 
-  it("judges each pivoted series on its own scale", () => {
-    // `web` runs an order of magnitude higher than `api`; the api spike must be
-    // caught and no web point should be flagged just for being large.
+  it("marks the pivoted cell belonging to the flagged row", () => {
+    // Regression: this path used to ignore flag rules entirely and run its own
+    // outlier test per series, so a chart with a series field showed guesses
+    // instead of what the analyst wrote.
     const rows: [string, string, number][] = [];
     const buckets = ["01", "02", "03", "04", "05", "06"];
     buckets.forEach((bucket, index) => {
@@ -182,9 +216,30 @@ describe("buildCartesian", () => {
       columns: ["bucket", "channel", "n"],
       rows,
       chart: spec({ x_field: "bucket", y_field: "n", series_field: "channel" }),
+      // Row 11 is bucket "06", channel "api".
+      flags: caught("Api spike", [11]),
     });
+    expect(built.hasAlerts).toBe(true);
+    expect(built.alertReason).toBe("flag-rule");
     expect(built.data[5].__alert).toMatchObject({ api: true });
     expect(built.data[5].__alert?.web).toBeUndefined();
+  });
+
+  it("marks no pivoted cell when the query has no rules", () => {
+    const rows: [string, string, number][] = [];
+    ["01", "02", "03", "04", "05", "06"].forEach((bucket, index) => {
+      rows.push([bucket, "web", 900 + index]);
+      rows.push([bucket, "api", index === 5 ? 400 : 10 + index]);
+    });
+    const built = buildCartesian({
+      columns: ["bucket", "channel", "n"],
+      rows,
+      chart: spec({ x_field: "bucket", y_field: "n", series_field: "channel" }),
+    });
+    expect(built.hasAlerts).toBe(false);
+    expect(built.data.every((point) => Object.keys(point.__alert ?? {}).length === 0)).toBe(
+      true,
+    );
   });
 });
 
@@ -274,15 +329,25 @@ describe("buildTable", () => {
     expect(built.rows).toHaveLength(2);
   });
 
-  it("marks rows the flag column already condemned", () => {
+  it("marks the rows a rule caught", () => {
+    const built = buildTable({
+      columns: ["id", "amount", "is_flagged"],
+      rows: [[1, 10, 0], [2, 20, 1]],
+      chart: spec({ type: "table" }),
+      flags: caught("Large", [1]),
+    });
+    expect(built.alerts).toEqual([false, true]);
+    expect(built.alertReason).toBe("flag-rule");
+  });
+
+  it("ignores a column called is_flagged when no rule mentions it", () => {
     const built = buildTable({
       columns: ["id", "amount", "is_flagged"],
       rows: [[1, 10, 0], [2, 20, 1]],
       chart: spec({ type: "table" }),
     });
-    expect(built.alerts).toEqual([false, true]);
-    expect(built.alertReason).toBe("flag-column");
-    expect(built.alertSource).toBe("is_flagged");
+    expect(built.alerts).toEqual([false, false]);
+    expect(built.alertReason).toBe("none");
   });
 
   it("identifies numeric columns so figures can be right-aligned", () => {

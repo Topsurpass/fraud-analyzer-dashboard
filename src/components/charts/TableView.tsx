@@ -7,15 +7,18 @@ import { formatCell } from "@/services/format";
  * The raw result view - the one an analyst opens a case from, so it shows the
  * data verbatim: no compaction, no rounding, NULL spelled out.
  *
- * Rows the anomaly pass flagged get a left rule and a marker glyph; the glyph is
- * what carries the meaning without colour.
+ * Rows a flag rule matched get a left rule and a marker dot; the dot is what
+ * carries the meaning without colour.
  *
- * Two things this deliberately does not do. It does not tint the row's
- * background - at 50 flagged rows that turned the whole card into a red block
- * and made the values inside it harder to read, which is the opposite of what
- * marking them was for. And when *every* row is flagged it marks none of them:
- * a flag that is true for the whole result set separates nothing inside that
- * result, so the honest place to say it is once, in the footer.
+ * One thing this deliberately does not do: tint the row background. At 50
+ * flagged rows that turned the whole card into a red block and made the values
+ * inside it harder to read, which is the opposite of what marking them was for.
+ *
+ * It used to suppress every mark when *all* rows were flagged, on the grounds
+ * that a flag true for the whole result separates nothing within it. That was
+ * right while flags could be guessed from a column name. Now a flag only ever
+ * comes from a rule the analyst wrote, and hiding every mark on a rule that
+ * matches everything reads as the rule having failed to save.
  */
 /** Distinct rule names that caught anything, in first-seen order. */
 function ruleSummary(data: TableData): string {
@@ -43,13 +46,6 @@ export function TableView({ data, title }: TableViewProps) {
   }
 
   const alertCount = data.alerts.filter(Boolean).length;
-  const byRule = data.alertReason === "flag-rule";
-  // A flag every row shares carries no information *within* this result, so a
-  // guessed one is not worth marking 50 times. An explicit rule is different:
-  // the analyst asked for exactly this, and showing nothing where they expect
-  // every row marked reads as the rule having failed to save.
-  const discriminating =
-    alertCount > 0 && (byRule || alertCount < data.rows.length);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -59,11 +55,7 @@ export function TableView({ data, title }: TableViewProps) {
         <table className="w-full border-collapse text-[12px]">
           <caption className="sr-only">
             {title}
-            {alertCount > 0
-              ? discriminating
-                ? `, ${alertCount} flagged rows`
-                : ", every row flagged"
-              : ""}
+            {alertCount > 0 ? `, ${alertCount} flagged rows` : ""}
           </caption>
           <thead className="sticky top-0 z-10 bg-sunken">
             <tr>
@@ -89,7 +81,7 @@ export function TableView({ data, title }: TableViewProps) {
           </thead>
           <tbody>
             {data.rows.map((row, rowIndex) => {
-              const flagged = discriminating && data.alerts[rowIndex] === true;
+              const flagged = data.alerts[rowIndex] === true;
               // Naming the rule is the point of writing one: "Flagged row"
               // tells an analyst nothing they cannot already see from the mark.
               const caught = data.alertRuleNames?.[rowIndex] ?? [];
@@ -146,22 +138,9 @@ export function TableView({ data, title }: TableViewProps) {
 
       {alertCount > 0 ? (
         <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">
-          {discriminating ? (
-            <>
-              <span className="text-alert">{alertCount}</span> flagged{" "}
-              {alertCount === 1 ? "row" : "rows"}
-            </>
-          ) : (
-            // Every row: worth knowing, not worth marking 50 times.
-            <>
-              <span className="text-alert">every</span> row flagged
-            </>
-          )}
-          {data.alertReason === "flag-rule"
-            ? ` by ${ruleSummary(data)}`
-            : data.alertSource
-              ? ` by ${data.alertSource}`
-              : ""}
+          <span className="text-alert">{alertCount}</span> flagged{" "}
+          {alertCount === 1 ? "row" : "rows"}
+          {` by ${ruleSummary(data)}`}
         </p>
       ) : null}
     </div>

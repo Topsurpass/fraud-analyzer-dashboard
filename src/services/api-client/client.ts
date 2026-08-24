@@ -10,6 +10,7 @@ import type {
 	DashboardRead,
 	DashboardUpdate,
 	ExecutionLogRead,
+	FlagDismissalResult,
 	FlagRuleSetRead,
 	FlagRuleSetUpdate,
 	PollResponse,
@@ -395,3 +396,43 @@ export const refreshConnectionFlagged = (
 		timeoutMs: 60_000,
 		...options,
 	});
+
+/**
+ * Stop showing flagged rows that have been reviewed.
+ *
+ * Addressed by fingerprint rather than row index: the index is a position in
+ * one run's result and points somewhere else after the next run. Dismissing an
+ * already-dismissed row is a no-op, not an error.
+ */
+export const dismissFlaggedRows = (
+	queryId: string,
+	fingerprints: string[],
+	options?: RequestOptions,
+) =>
+	request<FlagDismissalResult>({
+		method: "POST",
+		path: `/queries/${encodeURIComponent(queryId)}/flag-dismissals`,
+		body: { fingerprints },
+		...options,
+	});
+
+/**
+ * Undo dismissals: the named rows, or every one on the query when none given.
+ *
+ * Dismissed rows are listed nowhere - the engine stores their hashes, not the
+ * rows - so this is the only way back from a mis-click.
+ */
+export const restoreFlaggedRows = (
+	queryId: string,
+	fingerprints?: string[],
+	options?: RequestOptions,
+) => {
+	const query = (fingerprints ?? [])
+		.map((value) => `fingerprint=${encodeURIComponent(value)}`)
+		.join("&");
+	return request<FlagDismissalResult>({
+		method: "DELETE",
+		path: `/queries/${encodeURIComponent(queryId)}/flag-dismissals${query ? `?${query}` : ""}`,
+		...options,
+	});
+};

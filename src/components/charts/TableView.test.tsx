@@ -40,16 +40,26 @@ describe("TableView", () => {
     expect(screen.getByText("10")).toHaveClass("text-right");
   });
 
-  it("marks flagged rows and reports how many, with the column that decided", () => {
-    render(
+  it("marks flagged rows and reports how many, naming the rule", () => {
+    const { container } = render(
       <TableView
-        data={table(["id", "is_flagged"], [[1, 0], [2, 1], [3, 1]])}
+        data={ruleTable(
+          ["id", "amount"],
+          [[1, 10], [2, 900], [3, 950]],
+          {
+            flagged_count: 2,
+            rows: [
+              { index: 1, rule_ids: ["r1"] },
+              { index: 2, rule_ids: ["r1"] },
+            ],
+            rules: [{ ...LARGE, matched: 2 }],
+            warnings: [],
+          },
+        )}
         title="T"
       />,
     );
-    // The visible footer names the count and the column that decided it.
-    const footer = screen.getByText(/flagged\s+rows\s+by is_flagged/);
-    expect(footer).toHaveTextContent("2 flagged rows by is_flagged");
+    expect(footerOf(container)).toHaveTextContent("2 flagged rows by Large transfer");
 
     // The accessible name carries the same fact for screen readers.
     expect(screen.getByRole("table")).toHaveAccessibleName(/2 flagged rows/);
@@ -57,27 +67,20 @@ describe("TableView", () => {
     // And the rows themselves carry a left rule, so it is not text-only. The
     // rule rather than a row tint: a tinted row makes its own values harder to
     // read, which is the opposite of what marking it was for.
-    const rules = screen
+    const marked = screen
       .getAllByRole("row")
       .filter((row) => row.querySelector(".bg-alert") !== null);
-    expect(rules).toHaveLength(2);
+    expect(marked).toHaveLength(2);
   });
 
-  it("marks nothing when every row is flagged, and says so once", () => {
-    // A flag that is true for the whole result separates nothing inside it.
-    // Painting all 50 rows of a 50-row result was the old behaviour and it
-    // turned the card into an unreadable block.
-    render(
-      <TableView data={table(["id", "is_flagged"], [[1, 1], [2, 1], [3, 1]])} title="T" />,
+  it("flags nothing at all when the query has no rules", () => {
+    // The column is called is_flagged and every value in it is 1. Nothing is
+    // marked, because no rule said to. The app does not guess any more.
+    const { container } = render(
+      <TableView data={table(["id", "is_flagged"], [[1, 1], [2, 1]])} title="T" />,
     );
-    // The visible footer, not the screen-reader caption.
-    expect(screen.getByText(/row flagged by is_flagged/)).toBeInTheDocument();
-    expect(screen.getByRole("table")).toHaveAccessibleName(/every row flagged/);
-
-    const rules = screen
-      .getAllByRole("row")
-      .filter((row) => row.querySelector(".bg-alert") !== null);
-    expect(rules).toHaveLength(0);
+    expect(container.querySelectorAll("span.rounded-full")).toHaveLength(0);
+    expect(container.querySelector("p.border-t")).toBeNull();
   });
 
   it("does not claim any flagged rows when the data is clean", () => {
@@ -179,8 +182,9 @@ describe("TableView flag rules", () => {
   });
 
   it("still marks every row when an explicit rule matches all of them", () => {
-    // A guessed flag column that is true everywhere is noise worth suppressing.
-    // A rule the analyst wrote is not: showing nothing reads as a failed save.
+    // Marks used to be suppressed when everything matched, which made sense
+    // while a flag could be guessed from a column name. A rule the analyst
+    // wrote is different: showing nothing reads as a failed save.
     const { container } = render(
       <TableView
         data={ruleTable(
@@ -201,16 +205,6 @@ describe("TableView flag rules", () => {
     );
     expect(container.querySelectorAll("span.rounded-full")).toHaveLength(2);
     expect(footerOf(container)).toHaveTextContent("2 flagged rows by Large transfer");
-  });
-
-  it("keeps suppressing a guessed flag column that is true for every row", () => {
-    const { container } = render(
-      // Paired with the test above: same "every row matches" shape, opposite
-      // treatment, because a guessed column separates nothing and a rule does.
-      <TableView data={table(["id", "is_flagged"], [[1, 1], [2, 1]])} title="T" />,
-    );
-    expect(container.querySelectorAll("span.rounded-full")).toHaveLength(0);
-    expect(footerOf(container)).toHaveTextContent("every row flagged");
   });
 
   it("names the rules in the footer rather than a column name", () => {
