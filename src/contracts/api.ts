@@ -12,6 +12,45 @@ export type ConnectionStatus = "untested" | "ok" | "failed";
 export type ChartType = "line" | "bar" | "pie" | "number" | "table";
 
 export const DB_TYPES: readonly DbType[] = ["postgres", "mysql", "sqlite"];
+
+/**
+ * How much TLS a target connection insists on. libpq's vocabulary, which the
+ * engine passes through verbatim for Postgres and maps onto pymysql's flags for
+ * MySQL. Ordered weakest to strongest.
+ */
+export type SslMode =
+	| "disable"
+	| "allow"
+	| "prefer"
+	| "require"
+	| "verify-ca"
+	| "verify-full";
+
+export const SSL_MODES: readonly SslMode[] = [
+	"disable",
+	"allow",
+	"prefer",
+	"require",
+	"verify-ca",
+	"verify-full",
+];
+
+/** The modes that check the server's certificate, so can read a root cert. */
+export const VERIFYING_SSL_MODES: readonly SslMode[] = ["verify-ca", "verify-full"];
+
+/** What a new connection gets. Deliberately not libpq's own "prefer". */
+export const DEFAULT_SSL_MODE: SslMode = "require";
+
+/** One line each, for the form. `require` vs `verify-full` is the one thing a
+ *  user can get wrong here with no error to tell them. */
+export const SSL_MODE_HINTS: Record<SslMode, string> = {
+	disable: "Never use TLS. Plaintext over the wire.",
+	allow: "Plaintext first, TLS only if the server insists.",
+	prefer: "TLS if the server offers it, plaintext if not. No guarantee either way.",
+	require: "Always encrypted, but the server's identity is not checked.",
+	"verify-ca": "Encrypted, and the server's certificate must be signed by a CA you trust.",
+	"verify-full": "Encrypted, certificate checked, and the hostname must match it.",
+};
 export const CHART_TYPES: readonly ChartType[] = ["line", "bar", "pie", "number", "table"];
 
 /** Default ports the engine expects, used to prefill the connection form. */
@@ -30,6 +69,8 @@ export interface ConnectionRead {
 	database: string | null;
 	username: string | null;
 	sqlite_path: string | null;
+	ssl_mode: SslMode;
+	ssl_root_cert: string | null;
 	status: ConnectionStatus;
 	last_tested_at: string | null;
 	last_test_error: string | null;
@@ -46,6 +87,8 @@ export interface ConnectionCreate {
 	username?: string | null;
 	sqlite_path?: string | null;
 	password?: string | null;
+	ssl_mode?: SslMode;
+	ssl_root_cert?: string | null;
 }
 
 export type ConnectionUpdate = Partial<Omit<ConnectionCreate, "db_type">>;

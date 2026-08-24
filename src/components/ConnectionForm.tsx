@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { ConnectionCreate, ConnectionRead, DbType } from "@/contracts/api";
-import { DB_TYPES, DEFAULT_PORTS } from "@/contracts/api";
+import type { ConnectionCreate, ConnectionRead, DbType, SslMode } from "@/contracts/api";
+import {
+  DB_TYPES,
+  DEFAULT_PORTS,
+  DEFAULT_SSL_MODE,
+  SSL_MODES,
+  SSL_MODE_HINTS,
+  VERIFYING_SSL_MODES,
+} from "@/contracts/api";
 import { Button, Field, Input, Select } from "./ui";
 
 /**
@@ -42,9 +49,15 @@ export function ConnectionForm({
   const [username, setUsername] = useState(initial?.username ?? "");
   const [password, setPassword] = useState("");
   const [sqlitePath, setSqlitePath] = useState(initial?.sqlite_path ?? "");
+  const [sslMode, setSslMode] = useState<SslMode>(initial?.ssl_mode ?? DEFAULT_SSL_MODE);
+  const [sslRootCert, setSslRootCert] = useState(initial?.ssl_root_cert ?? "");
   const [touched, setTouched] = useState(false);
 
   const isSqlite = dbType === "sqlite";
+  // Only the verifying modes read a certificate. The engine rejects one sent
+  // under any other mode, so the field goes away rather than sending something
+  // that will be refused.
+  const verifies = VERIFYING_SSL_MODES.includes(sslMode);
   const nameError = touched && !name.trim() ? "A name is required." : null;
   const targetError =
     touched && isSqlite && !sqlitePath.trim()
@@ -78,6 +91,13 @@ export function ConnectionForm({
           username: isSqlite ? null : username.trim() || null,
           sqlite_path: isSqlite ? sqlitePath.trim() : null,
           password: password,
+          // Meaningless for a local file, and the engine ignores it there.
+          ...(isSqlite
+            ? {}
+            : {
+                ssl_mode: sslMode,
+                ssl_root_cert: verifies ? sslRootCert.trim() || null : null,
+              }),
         });
       }}
     >
@@ -182,6 +202,37 @@ export function ConnectionForm({
               autoComplete="new-password"
             />
           </Field>
+
+          <Field label="TLS" htmlFor="conn-ssl" hint={SSL_MODE_HINTS[sslMode]}>
+            <Select
+              id="conn-ssl"
+              value={sslMode}
+              onChange={(event) => setSslMode(event.target.value as SslMode)}
+            >
+              {SSL_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {mode}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {verifies ? (
+            <Field
+              label="Root certificate"
+              htmlFor="conn-ssl-ca"
+              hint="Leave empty to use the system CA bundle, which covers Neon, RDS and other public certificates. Set a path for an internal CA."
+            >
+              <Input
+                id="conn-ssl-ca"
+                value={sslRootCert}
+                onChange={(event) => setSslRootCert(event.target.value)}
+                placeholder="/etc/ssl/certs/internal-ca.crt"
+                autoComplete="off"
+                className="tnum"
+              />
+            </Field>
+          ) : null}
         </>
       )}
 
