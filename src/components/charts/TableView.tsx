@@ -43,8 +43,13 @@ export function TableView({ data, title }: TableViewProps) {
   }
 
   const alertCount = data.alerts.filter(Boolean).length;
-  // A flag every row shares carries no information *within* this result.
-  const discriminating = alertCount > 0 && alertCount < data.rows.length;
+  const byRule = data.alertReason === "flag-rule";
+  // A flag every row shares carries no information *within* this result, so a
+  // guessed one is not worth marking 50 times. An explicit rule is different:
+  // the analyst asked for exactly this, and showing nothing where they expect
+  // every row marked reads as the rule having failed to save.
+  const discriminating =
+    alertCount > 0 && (byRule || alertCount < data.rows.length);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -61,8 +66,11 @@ export function TableView({ data, title }: TableViewProps) {
           <thead className="sticky top-0 z-10 bg-sunken">
             <tr>
               {/* Marker gutter, kept in the header so columns stay aligned. */}
-              <th scope="col" className="w-5 border-b border-line p-0">
-                <span className="sr-only">Flagged</span>
+              <th
+                scope="col"
+                className="w-8 border-b border-line px-1.5 py-1.5 text-left text-[10px] font-medium tracking-wide text-muted uppercase"
+              >
+                {alertCount > 0 ? "!" : <span className="sr-only">Flagged</span>}
               </th>
               {data.columns.map((column, index) => (
                 <th
@@ -90,13 +98,24 @@ export function TableView({ data, title }: TableViewProps) {
                 : undefined;
               return (
                 <tr key={rowIndex} className={flagged ? "text-ink" : undefined}>
-                  <td className="p-0 align-middle">
+                  <td
+                    title={why}
+                    className={`border-b border-line/60 px-1.5 py-1.5 align-middle ${
+                      flagged ? "border-l-2 border-l-alert" : ""
+                    }`}
+                  >
                     {flagged ? (
-                      <span
-                        className="block h-full w-[3px] bg-alert"
-                        // The row is already announced as flagged by the cell title.
-                        aria-hidden="true"
-                      />
+                      <>
+                        {/* A dot with real dimensions. The previous marker was
+                            a `block h-full` span, and a span in a table cell
+                            has no height to fill, so it painted nothing. */}
+                        <span
+                          className="inline-block h-2 w-2 rounded-full bg-alert align-middle"
+                          aria-hidden="true"
+                        />
+                        {/* Colour alone is not a signal. */}
+                        <span className="sr-only">{why}</span>
+                      </>
                     ) : null}
                   </td>
                   {row.map((cell, cellIndex) => (

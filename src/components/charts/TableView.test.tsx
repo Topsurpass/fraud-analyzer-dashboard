@@ -108,3 +108,140 @@ describe("TableView", () => {
     }
   });
 });
+
+/**
+ * Flag-rule marking.
+ *
+ * The first version of this marker was a `block h-full` span inside a table
+ * cell. A span has no height to fill, so it painted nothing at all and the only
+ * evidence a row was flagged was the sentence in the footer. Every test here
+ * asserts something a user can actually perceive.
+ */
+
+import type { FlagOutcome } from "@/contracts/api";
+
+function ruleTable(columns: string[], rows: Row[], flags: FlagOutcome) {
+  return buildTable({
+    columns,
+    rows,
+    chart: { type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
+    flags,
+  });
+}
+
+const LARGE = { id: "r1", name: "Large transfer", severity: "high" as const, matched: 1 };
+
+/**
+ * The visible summary line under the table.
+ *
+ * The <caption> states the same count for screen readers and every marker cell
+ * carries its own "Flagged by ..." text, so a bare text query for /flagged/
+ * matches three different things. Asking for the footer by position keeps each
+ * assertion about the one element it means.
+ */
+function footerOf(container: HTMLElement): HTMLElement {
+  const footer = container.querySelector("p.border-t");
+  if (!footer) throw new Error("TableView rendered no summary footer");
+  return footer as HTMLElement;
+}
+
+describe("TableView flag rules", () => {
+  it("marks a flagged row with something that has real dimensions", () => {
+    const { container } = render(
+      <TableView
+        data={ruleTable(
+          ["amount"],
+          [[10], [900]],
+          { flagged_count: 1, rows: [{ index: 1, rule_ids: ["r1"] }], rules: [LARGE], warnings: [] },
+        )}
+        title="T"
+      />,
+    );
+    const dots = container.querySelectorAll("span.rounded-full");
+    expect(dots).toHaveLength(1);
+    // h-full on a span is the bug this guards: it must carry its own size.
+    expect(dots[0].className).toMatch(/\bh-2\b/);
+    expect(dots[0].className).not.toMatch(/h-full/);
+  });
+
+  it("names the rule where a screen reader and a hover can both reach it", () => {
+    render(
+      <TableView
+        data={ruleTable(
+          ["amount"],
+          [[900]],
+          { flagged_count: 1, rows: [{ index: 0, rule_ids: ["r1"] }], rules: [LARGE], warnings: [] },
+        )}
+        title="T"
+      />,
+    );
+    expect(screen.getByText("Flagged by Large transfer")).toBeInTheDocument();
+  });
+
+  it("still marks every row when an explicit rule matches all of them", () => {
+    // A guessed flag column that is true everywhere is noise worth suppressing.
+    // A rule the analyst wrote is not: showing nothing reads as a failed save.
+    const { container } = render(
+      <TableView
+        data={ruleTable(
+          ["amount"],
+          [[900], [950]],
+          {
+            flagged_count: 2,
+            rows: [
+              { index: 0, rule_ids: ["r1"] },
+              { index: 1, rule_ids: ["r1"] },
+            ],
+            rules: [{ ...LARGE, matched: 2 }],
+            warnings: [],
+          },
+        )}
+        title="T"
+      />,
+    );
+    expect(container.querySelectorAll("span.rounded-full")).toHaveLength(2);
+    expect(footerOf(container)).toHaveTextContent("2 flagged rows by Large transfer");
+  });
+
+  it("keeps suppressing a guessed flag column that is true for every row", () => {
+    const { container } = render(
+      // Paired with the test above: same "every row matches" shape, opposite
+      // treatment, because a guessed column separates nothing and a rule does.
+      <TableView data={table(["id", "is_flagged"], [[1, 1], [2, 1]])} title="T" />,
+    );
+    expect(container.querySelectorAll("span.rounded-full")).toHaveLength(0);
+    expect(footerOf(container)).toHaveTextContent("every row flagged");
+  });
+
+  it("names the rules in the footer rather than a column name", () => {
+    const { container } = render(
+      <TableView
+        data={ruleTable(
+          ["amount"],
+          [[10], [900]],
+          { flagged_count: 1, rows: [{ index: 1, rule_ids: ["r1"] }], rules: [LARGE], warnings: [] },
+        )}
+        title="T"
+      />,
+    );
+    // "by amount" would be the heuristic's answer. The rule the analyst wrote
+    // is the useful one, and it is the only thing named here.
+    expect(footerOf(container)).toHaveTextContent("1 flagged row by Large transfer");
+    expect(footerOf(container).textContent).not.toMatch(/amount/);
+  });
+
+  it("marks nothing when no row is flagged", () => {
+    const { container } = render(
+      <TableView
+        data={ruleTable(["amount"], [[10], [20]], {
+          flagged_count: 0,
+          rows: [],
+          rules: [{ ...LARGE, matched: 0 }],
+          warnings: [],
+        })}
+        title="T"
+      />,
+    );
+    expect(container.querySelectorAll("span.rounded-full")).toHaveLength(0);
+  });
+});
