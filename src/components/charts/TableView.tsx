@@ -1,7 +1,16 @@
 "use client";
 
+import { useMemo, useRef } from "react";
 import type { TableData } from "@/services/charts/shape";
 import { formatCell } from "@/services/format";
+import { useVirtualRows } from "@/lib/useVirtualRows";
+
+/** Fixed row height, in pixels. The virtualiser needs one number it can trust,
+ *  and every cell in this table is a single line by design. */
+const ROW_HEIGHT = 30;
+
+/** Below this, windowing costs more than it saves. */
+const VIRTUALISE_ABOVE = 80;
 
 /**
  * The raw result view - the one an analyst opens a case from, so it shows the
@@ -37,22 +46,41 @@ export interface TableViewProps {
 }
 
 export function TableView({ data, title }: TableViewProps) {
+  // Every hook runs before the empty-columns return below. React identifies
+  // hooks by call order, so returning early above them would change that order
+  // the first time a query came back with no columns.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // filter().length walks every row on every render; a poll re-renders this
+  // several times a second and the answer only changes when the data does.
+  const alertCount = useMemo(
+    () => data.alerts.reduce((total, flagged) => (flagged ? total + 1 : total), 0),
+    [data.alerts],
+  );
+
+  const virtualise = data.rows.length > VIRTUALISE_ABOVE;
+  const rowWindow = useVirtualRows(
+    scrollRef,
+    virtualise ? data.rows.length : 0,
+    ROW_HEIGHT,
+  );
+  const first = virtualise ? rowWindow.start : 0;
+  const last = virtualise ? rowWindow.end : data.rows.length;
+
   if (data.columns.length === 0) {
     return (
-      <p className="px-4 py-6 text-center text-[12px] text-muted">
+      <p className="px-4 py-6 text-center text-[12.5px] text-muted">
         The query returned no columns.
       </p>
     );
   }
 
-  const alertCount = data.alerts.filter(Boolean).length;
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* `tabIndex` because this scrolls: a region a mouse can scroll and a
           keyboard cannot is unreachable content, not a styling detail. */}
-      <div tabIndex={0} className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-[12px]">
+      <div ref={scrollRef} tabIndex={0} className="min-h-0 flex-1 overflow-auto">
+        <table className="data-dense w-full border-collapse">
           <caption className="sr-only">
             {title}
             {alertCount > 0 ? `, ${alertCount} flagged rows` : ""}
@@ -80,7 +108,14 @@ export function TableView({ data, title }: TableViewProps) {
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((row, rowIndex) => {
+            {/* Spacers stand in for the rows above and below the window, so the
+                scrollbar describes the whole result rather than the slice that
+                happens to be rendered. */}
+            {virtualise && rowWindow.padTop > 0 ? (
+              <tr aria-hidden="true" style={{ height: rowWindow.padTop }} />
+            ) : null}
+            {data.rows.slice(first, last).map((row, offset) => {
+              const rowIndex = first + offset;
               const flagged = data.alerts[rowIndex] === true;
               // Naming the rule is the point of writing one: "Flagged row"
               // tells an analyst nothing they cannot already see from the mark.
@@ -91,7 +126,13 @@ export function TableView({ data, title }: TableViewProps) {
                   : "Flagged row"
                 : undefined;
               return (
-                <tr key={rowIndex} className={flagged ? "text-ink" : undefined}>
+                <tr
+                  key={rowIndex}
+                  style={{ height: ROW_HEIGHT }}
+                  className={`transition-colors hover:bg-raised/60 ${
+                    flagged ? "bg-alert/[0.04] text-ink" : ""
+                  }`}
+                >
                   <td
                     title={why}
                     className={`border-b border-line/60 px-1.5 py-1.5 align-middle ${
@@ -128,6 +169,9 @@ export function TableView({ data, title }: TableViewProps) {
                 </tr>
               );
             })}
+            {virtualise && rowWindow.padBottom > 0 ? (
+              <tr aria-hidden="true" style={{ height: rowWindow.padBottom }} />
+            ) : null}
           </tbody>
         </table>
 

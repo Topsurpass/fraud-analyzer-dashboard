@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <FlaggedProvider>
       <div className="flex h-dvh min-h-0 w-full">
         <aside
-          className="hidden shrink-0 border-r border-line transition-[width] duration-150 md:block"
+          className="hidden shrink-0 border-r border-line bg-sunken transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
           style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}
         >
           <Rail
@@ -74,9 +74,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               aria-label="Close navigation"
               onClick={() => setNavOpen(false)}
-              className="absolute inset-0 bg-bg/80"
+              className="absolute inset-0 bg-bg/70 backdrop-blur-sm"
             />
-            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line">
+            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line bg-sunken shadow-lg">
               <Rail onNavigate={() => setNavOpen(false)} />
             </div>
           </div>

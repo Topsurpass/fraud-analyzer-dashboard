@@ -414,12 +414,15 @@ function RailLink({
       onClick={onNavigate}
       title={collapsed ? title : undefined}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2 border-l-2 py-[7px] text-[12px] transition-colors ${
-        collapsed ? "justify-center px-0" : "pr-3 pl-[10px]"
+      /* A filled pill rather than a left rule: the accent marks "you are here",
+         which is interaction, and must not borrow the signal vocabulary that
+         means "this data is alive". */
+      className={`mx-2 flex items-center gap-2 rounded-[var(--radius-sm)] py-[7px] text-[12.5px] transition-all duration-[var(--tween-fast)] ${
+        collapsed ? "justify-center px-0" : "px-2.5"
       } ${
         active
-          ? "border-live bg-surface text-ink"
-          : "border-transparent text-muted hover:bg-surface/60 hover:text-ink"
+          ? "bg-accent/12 font-medium text-ink shadow-sm ring-1 ring-accent/25"
+          : "text-secondary hover:bg-raised hover:text-ink"
       }`}
     >
       {children}

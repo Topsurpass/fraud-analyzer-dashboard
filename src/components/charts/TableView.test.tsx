@@ -245,3 +245,59 @@ describe("TableView flag rules", () => {
     expect(container.querySelectorAll("span.rounded-full")).toHaveLength(0);
   });
 });
+
+describe("large results", () => {
+  function bigTable(rowCount: number) {
+    return table(
+      ["id", "amount"],
+      Array.from({ length: rowCount }, (_, index) => [index, index * 3]),
+    );
+  }
+
+  it("renders only a window of a large result, not every row", () => {
+    // 10,000 rows at two columns is 20,000 cells for the forty a person can
+    // see, and the cost lands on the main thread during a poll.
+    const { container } = render(<TableView data={bigTable(10_000)} title="T" />);
+    const rendered = container.querySelectorAll("tbody tr[style]");
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered.length).toBeLessThan(200);
+  });
+
+  it("still describes the full height, so the scrollbar does not lie", () => {
+    const { container } = render(<TableView data={bigTable(5_000)} title="T" />);
+    const spacers = container.querySelectorAll('tbody tr[aria-hidden="true"]');
+    const padding = [...spacers].reduce(
+      (total, row) => total + Number.parseInt((row as HTMLElement).style.height || "0", 10),
+      0,
+    );
+    // Whatever is not rendered has to be accounted for in spacer height.
+    expect(padding).toBeGreaterThan(100_000);
+  });
+
+  it("renders a small result whole, with no spacers", () => {
+    // Windowing below this size costs more than it saves.
+    const { container } = render(<TableView data={bigTable(20)} title="T" />);
+    expect(container.querySelectorAll("tbody tr").length).toBe(20);
+    expect(container.querySelectorAll('tbody tr[aria-hidden="true"]').length).toBe(0);
+  });
+
+  it("keeps row indices honest inside the window", () => {
+    // The rendered slice is offset from the start of the data, so an off-by-one
+    // would show row N's values under row N+1 - the worst possible bug in an
+    // audit view, and invisible unless the pairing is asserted.
+    const { container } = render(<TableView data={bigTable(500)} title="T" />);
+    const rows = [...container.querySelectorAll("tbody tr[style]")];
+
+    const pairs = rows.slice(0, 5).map((row) =>
+      [...row.querySelectorAll("td")].slice(1).map((cell) => cell.textContent),
+    );
+    // Column two is column one times three, per bigTable.
+    expect(pairs).toEqual([
+      ["0", "0"],
+      ["1", "3"],
+      ["2", "6"],
+      ["3", "9"],
+      ["4", "12"],
+    ]);
+  });
+});

@@ -1,42 +1,76 @@
 @import "tailwindcss";
 
 /*
- * Fraud Analyzer — instrument panel design tokens.
+ * Fraud Analyzer - design tokens.
  *
- * Cool slate base, never pure black. Signal colours carry meaning and nothing
- * else: --signal-live for "polling is alive", --signal-change for "this data
- * just moved", --signal-alert exclusively for flagged or anomalous points
- * inside chart data. No gradient, no glow, no shadow beyond a 1px hairline.
- * This is a schematic, not a poster.
+ * A modern analytics surface: a near-neutral dark ground, surfaces that lift
+ * rather than outline, generous radius, and one brand accent that carries
+ * interaction. Chrome is allowed to breathe; data is not. A review queue of
+ * three hundred rows has to stay scannable, so tables and lists keep tight
+ * rhythm inside an airy shell - that tension is the whole layout brief.
+ *
+ * Three signal colours still mean exactly one thing each and are never
+ * decoration: --signal-live for "polling is alive", --signal-change for "this
+ * data just moved", --signal-alert only ever for flagged rows in the data. The
+ * brand accent is separate from all three, so "this button is primary" can
+ * never be mistaken for "this row is fraud".
  */
 :root {
-  --bg: #12151c;
-  --surface: #1a1f29;
-  --border: #2a3140;
-  --text-primary: #e6e9f0;
-  --text-muted: #8b93a7;
-  --signal-live: #4fb0c6;
-  --signal-change: #e8a33d;
-  --signal-alert: #e5484d;
+  /* Ground and surfaces. Neutral rather than blue-black: at 14px on an OLED
+     panel a cool cast reads as a colour wash rather than as dark. */
+  --bg: #0b0b0e;
+  --surface: #131318;
+  --surface-raised: #1a1a21;
+  --surface-sunken: #0f0f13;
 
-  /* Derived, never introduced as new hues: tints of the tokens above. */
-  --surface-raised: #1f2430;
-  --surface-sunken: #161a23;
-  --border-strong: #3a4356;
-  --signal-live-dim: color-mix(in srgb, var(--signal-live) 22%, transparent);
-  --signal-change-dim: color-mix(in srgb, var(--signal-change) 24%, transparent);
-  --signal-alert-dim: color-mix(in srgb, var(--signal-alert) 22%, transparent);
+  /* Borders are low contrast and mostly structural. Elevation does the work
+     that hairlines used to, which is what makes the shell feel modern rather
+     than wireframed. */
+  --border: #23232c;
+  --border-strong: #33333f;
+
+  --text-primary: #ededf2;
+  --text-secondary: #a6a6b5;
+  --text-muted: #75758a;
+
+  /* Brand accent: interaction only. Deliberately not one of the signals. */
+  --accent: #7c6cf6;
+  --accent-hover: #8f81f8;
+  --accent-contrast: #ffffff;
+
+  --signal-live: #3ecf8e;
+  --signal-change: #f5a524;
+  --signal-alert: #f2545b;
+
+  --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
+  --signal-live-dim: color-mix(in srgb, var(--signal-live) 18%, transparent);
+  --signal-change-dim: color-mix(in srgb, var(--signal-change) 20%, transparent);
+  --signal-alert-dim: color-mix(in srgb, var(--signal-alert) 18%, transparent);
+
+  /* Radius. Controls stay tighter than surfaces so a button inside a card does
+     not echo the card's own corner. */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Elevation. Two steps only. A dark UI cannot carry more without turning to
+     soup, and anything deeper reads as a modal that is not one. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow: 0 4px 16px -4px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.65);
 
   /* Motion. Short enough that the panel still reads as fast. */
   --tween-fast: 140ms;
   --tween-data: 360ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /*
    * Rail widths, here rather than in the component so the CSS that reserves
    * space and the JS that animates it cannot drift apart.
    */
-  --rail-width: 256px;
-  --rail-width-collapsed: 56px;
+  --rail-width: 248px;
+  --rail-width-collapsed: 60px;
 }
 
 @theme inline {
@@ -47,7 +81,11 @@
   --color-line: var(--border);
   --color-line-strong: var(--border-strong);
   --color-ink: var(--text-primary);
+  --color-secondary: var(--text-secondary);
   --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-contrast: var(--accent-contrast);
   --color-live: var(--signal-live);
   --color-change: var(--signal-change);
   --color-alert: var(--signal-alert);
@@ -57,6 +95,14 @@
   --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono",
     Menlo, monospace;
+
+  --radius-sm: var(--radius-sm);
+  --radius-DEFAULT: var(--radius);
+  --radius-lg: var(--radius-lg);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-DEFAULT: var(--shadow);
+  --shadow-lg: var(--shadow-lg);
 }
 
 html,
@@ -109,43 +155,91 @@ body {
 }
 
 /*
- * Type scale. Everything used to sit within a point of 13px, which left the
- * grid with no hierarchy: a card title, its description and its axis labels all
- * carried the same weight, so the eye had nowhere to land first.
+ * Type scale.
+ *
+ * Everything used to sit within a point of 13px, which left the grid with no
+ * hierarchy: a card title, its description and its axis labels all carried the
+ * same weight, so the eye had nowhere to land first. The steps below are the
+ * hierarchy; the sizes are bigger than an instrument panel would use because
+ * the shell is meant to breathe.
  */
+.t-display {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
 .t-page {
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.t-section {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 
 .t-card {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 550;
   letter-spacing: -0.01em;
-  line-height: 1.2;
+  line-height: 1.25;
+}
+
+.t-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
 .t-sub {
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text-muted);
 }
 
 .t-eyebrow {
   font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
-/* One focus treatment across the app, in the live signal colour. */
+/*
+ * Data surfaces opt out of the airy rhythm.
+ *
+ * The shell is generous on purpose, but a table of three hundred findings that
+ * breathes the same way is a table nobody can scan. This tightens line-height
+ * and figure size inside tables only, so density lives where the data is and
+ * whitespace lives everywhere else.
+ */
+.data-dense {
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.data-dense td,
+.data-dense th {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/*
+ * One focus treatment across the app, in the brand accent rather than a signal
+ * colour: "you are here" is interaction, and must not borrow the vocabulary
+ * that means "this data is alive" or "this row is fraud".
+ */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--signal-live);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 
 /* Scrollbars that belong to a dark instrument, not to the OS. */
@@ -165,8 +259,28 @@ body {
 
 *::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border: 3px solid var(--bg);
-  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-full);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 60%, transparent);
+  background-clip: content-box;
+}
+
+/*
+ * Offscreen cards cost nothing to skip.
+ *
+ * A dashboard of twenty charts lays out and paints all twenty even though four
+ * are on screen. `content-visibility` lets the browser skip the rest until they
+ * scroll near, and `contain-intrinsic-size` keeps the scrollbar honest while
+ * they are skipped. This is the single cheapest thing that makes a long
+ * dashboard feel immediate.
+ */
+.defer-paint {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 
 /*

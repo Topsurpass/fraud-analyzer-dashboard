@@ -26,11 +26,11 @@ export function TopBar({
   onOpenNav?: () => void;
 }) {
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line bg-bg px-3">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur-md">
       <button
         type="button"
         onClick={onOpenNav}
-        className="-ml-1 shrink-0 p-1 text-muted transition-colors hover:text-ink md:hidden"
+        className="-ml-1 shrink-0 rounded-[var(--radius-sm)] p-1.5 text-muted transition-colors hover:bg-raised hover:text-ink md:hidden"
         aria-label="Open navigation"
       >
         <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">

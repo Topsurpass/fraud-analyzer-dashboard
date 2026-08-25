@@ -360,3 +360,73 @@ describe("buildTable", () => {
     expect(built.numericColumns).toEqual([false, true]);
   });
 });
+
+describe("large series", () => {
+  function series(count: number) {
+    return Array.from({ length: count }, (_, index) => [`t${index}`, index % 50]);
+  }
+
+  it("caps the points handed to the chart", () => {
+    // Every point is an SVG node. Ten thousand for a 900px plot is ten points
+    // fighting over each pixel column, none of which the eye can resolve.
+    const built = buildCartesian({
+      columns: ["bucket", "n"],
+      rows: series(10_000),
+      chart: spec({ x_field: "bucket", y_field: "n" }),
+    });
+    expect(built.data.length).toBeLessThanOrEqual(900);
+    expect(built.data.length).toBeGreaterThan(100);
+  });
+
+  it("keeps a flagged row visible however much it downsamples", () => {
+    // A finding missing from the chart would disagree with the table beside it
+    // about what was flagged, which is worse than a slow chart.
+    const built = buildCartesian({
+      columns: ["bucket", "n"],
+      rows: series(10_000),
+      chart: spec({ x_field: "bucket", y_field: "n" }),
+      flags: caught("Spike", [7_777]),
+    });
+    const alerted = built.data.filter(
+      (point) => (point.__alert as Record<string, boolean>)?.n === true,
+    );
+    expect(alerted).toHaveLength(1);
+  });
+
+  it("leaves a series that already fits untouched", () => {
+    const built = buildCartesian({
+      columns: ["bucket", "n"],
+      rows: series(120),
+      chart: spec({ x_field: "bucket", y_field: "n" }),
+    });
+    expect(built.data).toHaveLength(120);
+  });
+
+  it("caps a pivoted multi-series chart too", () => {
+    const rows: [string, string, number][] = [];
+    for (let index = 0; index < 4_000; index++) {
+      rows.push([`t${index}`, "web", index % 40]);
+      rows.push([`t${index}`, "api", index % 25]);
+    }
+    const built = buildCartesian({
+      columns: ["bucket", "channel", "n"],
+      rows,
+      chart: spec({ x_field: "bucket", y_field: "n", series_field: "channel" }),
+    });
+    expect(built.data.length).toBeLessThanOrEqual(900);
+    // Both series survive: downsampling drops points, never columns.
+    expect(built.seriesKeys.sort()).toEqual(["api", "web"]);
+  });
+
+  it("does not reorder the x axis while downsampling", () => {
+    const built = buildCartesian({
+      columns: ["bucket", "n"],
+      rows: series(5_000),
+      chart: spec({ x_field: "bucket", y_field: "n" }),
+    });
+    const order = built.data.map((point) =>
+      Number.parseInt(String(point.bucket).slice(1), 10),
+    );
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});

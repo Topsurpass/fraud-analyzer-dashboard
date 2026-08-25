@@ -104,7 +104,11 @@ export function ChartCard({
     <article
       aria-label={query.name}
       style={style}
-      className={`group flex min-h-0 min-w-0 flex-col overflow-hidden border border-line bg-surface transition-colors hover:border-line-strong ${className ?? ""}`}
+      /* defer-paint lets the browser skip layout and paint for cards that are
+         off screen. A board of twenty charts otherwise pays for all twenty on
+         every render even though four are visible - the single cheapest thing
+         that makes a long dashboard feel immediate. */
+      className={`defer-paint group flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-sm transition-all duration-[var(--tween-fast)] hover:border-line-strong hover:shadow ${className ?? ""}`}
     >
       <header className="shrink-0">
         {/*

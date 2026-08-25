@@ -10,6 +10,7 @@
 
 import type { Cell, ChartSpec, FlagOutcome, FlagSeverity, Row } from "@/contracts/api";
 import { detectRowAnomalies } from "@/services/anomaly";
+import { MAX_PLOT_POINTS, downsamplePreservingAlerts } from "./downsample";
 
 export interface ResultSet {
   columns: string[];
@@ -192,11 +193,24 @@ export function buildCartesian(result: ResultSet): CartesianData {
 
   if (!fields.seriesKey) {
     const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
-    const data: ChartPoint[] = rows.map((row, index) => ({
+    const full: ChartPoint[] = rows.map((row, index) => ({
       [fields.xKey as string]: row[xIndex] ?? null,
       [fields.yKey as string]: toNumber(row[yIndex]),
       __alert: { [fields.yKey as string]: anomalies.flags[index] === true },
     }));
+
+    // Recharts draws SVG, so every point is a DOM node. Ten thousand of them
+    // for a plot 900px wide is ten points per pixel column: slower and no more
+    // informative. Flagged points are exempt - a finding missing from the chart
+    // would disagree with the table beside it.
+    const yKey = fields.yKey as string;
+    const data = downsamplePreservingAlerts(
+      full,
+      MAX_PLOT_POINTS,
+      (point) => (typeof point[yKey] === "number" ? (point[yKey] as number) : Number.NaN),
+      (point) => (point.__alert as Record<string, boolean> | undefined)?.[yKey] === true,
+    ) as ChartPoint[];
+
     return {
       data,
       seriesKeys: [fields.yKey],
@@ -254,7 +268,21 @@ export function buildCartesian(result: ResultSet): CartesianData {
     }
   }
 
-  const data = [...byX.values()];
+  const pivoted = [...byX.values()];
+
+  // Same reasoning as the single-series branch. A pivoted point carries one
+  // value per series, so "the" value for shape purposes is the first series -
+  // enough to place the point, while any alert on any series keeps it.
+  const primary = seriesKeys[0];
+  const data = primary
+    ? (downsamplePreservingAlerts(
+        pivoted,
+        MAX_PLOT_POINTS,
+        (point) =>
+          typeof point[primary] === "number" ? (point[primary] as number) : Number.NaN,
+        (point) => Object.keys((point.__alert as Record<string, boolean>) ?? {}).length > 0,
+      ) as ChartPoint[])
+    : pivoted;
 
   return {
     data,

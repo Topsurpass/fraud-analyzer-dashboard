@@ -27,14 +27,14 @@ export function FlaggedBadge({
 
 	const weight =
 		severity === "high"
-			? "border-alert/70 font-semibold text-ink"
+			? "border-alert/40 bg-alert/12 font-semibold text-ink"
 			: severity === "medium"
-				? "border-line font-medium text-ink"
-				: "border-line/60 text-muted";
+				? "border-change/35 bg-change/10 font-medium text-ink"
+				: "border-line bg-raised text-muted";
 
 	return (
 		<span
-			className={`tnum inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] leading-none ${weight}`}
+			className={`tnum inline-flex items-center gap-1 rounded-[var(--radius-full)] border px-1.5 py-0.5 text-[10px] leading-none ${weight}`}
 			title={`${count} ${label}${severity ? `, highest severity ${severity}` : ""}`}
 		>
 			<span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-alert" />
