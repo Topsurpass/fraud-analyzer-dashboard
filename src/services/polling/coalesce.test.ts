@@ -112,3 +112,52 @@ describe("coalescedPoll", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("a shared request is not one consumer's to cancel", () => {
+  it("a second caller still gets data when the first walks away", async () => {
+    // The hang after saving a chart. React re-runs effects on mount in
+    // development: the first run started a poll, its cleanup aborted it, and
+    // the second run joined that same promise and treated the AbortError as a
+    // real failure - so the card sat in "loading" until the effect re-ran,
+    // which is what switching tabs and back did.
+    //
+    // The fix is upstream in useQueryPolling: a coalesced poll is never given a
+    // consumer's abort signal. This pins the property the coalescer relies on -
+    // one shared request, one outcome, shared by everyone waiting.
+    let settle: ((value: PollResponse) => void) | undefined;
+    const fetcher = vi.fn(
+      () =>
+        new Promise<PollResponse>((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    const first = coalescedPoll("q1", null, false, fetcher);
+    const second = coalescedPoll("q1", null, false, fetcher);
+
+    // The first consumer goes away; nobody cancels the request itself.
+    first.catch(() => {});
+
+    settle?.(answer("h9"));
+    await expect(second).resolves.toMatchObject({ data_hash: "h9" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the same answer to a consumer that joins late", async () => {
+    let settle: ((value: PollResponse) => void) | undefined;
+    const fetcher = vi.fn(
+      () =>
+        new Promise<PollResponse>((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    const first = coalescedPoll("q1", null, false, fetcher);
+    const late = coalescedPoll("q1", null, false, fetcher);
+    settle?.(answer("h7"));
+
+    expect((await first).data_hash).toBe("h7");
+    expect((await late).data_hash).toBe("h7");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});

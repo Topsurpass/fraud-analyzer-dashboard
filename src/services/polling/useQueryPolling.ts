@@ -248,12 +248,28 @@ export function useQueryPolling(
     async function runPoll() {
       if (stoppedRef.current || !queryId) return;
 
-      controllerRef.current?.abort();
-      const controller = new AbortController();
-      controllerRef.current = controller;
-
       const force = forceRef.current;
       forceRef.current = false;
+
+      // Only a forced refresh gets this card's own abort signal. A coalesced
+      // poll is *shared*, so handing it one consumer's controller lets that
+      // consumer cancel a request other cards are waiting on - and, worse, hand
+      // them its AbortError as their own failure.
+      //
+      // That is what made a card hang after saving. React re-runs effects on
+      // mount in development: the first run started a poll, the cleanup aborted
+      // it, and the second run joined the very promise that had just been
+      // aborted and treated the rejection as a real error. The card then sat in
+      // "loading" until something re-ran the effect - which is exactly what
+      // switching tabs and back did, via the visibility handler.
+      //
+      // The client applies its own timeout per request, so dropping the signal
+      // here costs nothing but the ability to cancel a shared poll early.
+      const controller = force ? new AbortController() : null;
+      if (force) {
+        controllerRef.current?.abort();
+        controllerRef.current = controller;
+      }
 
       setFacts((previous) => (previous.inFlight ? previous : { ...previous, inFlight: true }));
 
@@ -268,10 +284,10 @@ export function useQueryPolling(
             // A forced refresh must not send since_hash, or the engine answers
             // "unchanged" and the analyst gets nothing back for their click.
             force ? { force: true } : { sinceHash: hashRef.current },
-            { signal: controller.signal, timeoutMs },
+            controller ? { signal: controller.signal, timeoutMs } : { timeoutMs },
           ),
         );
-        if (stoppedRef.current || controller.signal.aborted) return;
+        if (stoppedRef.current || controller?.signal.aborted) return;
         applyResponse(response);
         schedule(intervalRef.current);
       } catch (cause) {

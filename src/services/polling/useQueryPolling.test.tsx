@@ -355,3 +355,36 @@ describe("useQueryPolling", () => {
     expect(pollQuery.mock.calls[1][1]).toEqual({ sinceHash: null });
   });
 });
+
+describe("remounting while a poll is in flight", () => {
+  it("still shows data when the first mount's cleanup aborts", async () => {
+    // The hang after saving a chart. React re-runs effects on mount in
+    // development: the first run started a poll, its cleanup aborted it, and
+    // the second run joined that same shared promise - so the abort arrived as
+    // the second card's own failure and it sat in "loading" until something
+    // re-ran the effect. Switching browser tabs did exactly that, through the
+    // visibility handler, which is how this was noticed.
+    //
+    // The mock honours the abort signal, because that is the whole mechanism:
+    // with a mock that ignores it the bug cannot reproduce.
+    pollQuery.mockImplementation(
+      (_id: string, _params: unknown, options: { signal?: AbortSignal }) =>
+        new Promise<PollResponse>((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(new ApiError({ kind: "aborted", message: "aborted", url: "/poll" })),
+          );
+          setTimeout(() => resolve(changed("aaa", [[1], [2]])), 50);
+        }),
+    );
+
+    const { unmount } = renderHook(() => useQueryPolling("q1"));
+    unmount();
+
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await advance(60);
+    await advance(0);
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.snapshot?.data_hash).toBe("sha256:aaa");
+  });
+});
