@@ -82,9 +82,14 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
         >
           <thead>
             <tr>
-              <th className="sr-only">Category</th>
+              <th scope="col" className="sr-only">
+                Category
+              </th>
               {data.buckets.map((bucket) => (
-                <th key={bucket} className="sr-only">
+                // scope="col" is what associates each swatch with its bucket.
+                // Without it a screen reader reads the grid as an unlabelled
+                // run of numbers, which is the whole content of the chart.
+                <th key={bucket} scope="col" className="sr-only">
                   {bucket}
                 </th>
               ))}
@@ -120,7 +125,18 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
                       title={`${row.category} · ${cell.bucket} · ${
                         cell.value === null ? "no rows" : formatAxisValue(cell.value)
                       }`}
-                    />
+                    >
+                      {/*
+                       * The value as text, not only as a colour and a `title`.
+                       * A title attribute is announced inconsistently and never
+                       * reachable by keyboard, so without this the grid carries
+                       * no data at all for a screen reader.
+                       */}
+                      <span className="sr-only">
+                        {cell.value === null ? "no rows" : formatAxisValue(cell.value)}
+                        {cell.alert ? ", flagged" : ""}
+                      </span>
+                    </div>
                   </td>
                 ))}
               </tr>

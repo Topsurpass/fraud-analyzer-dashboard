@@ -100,6 +100,44 @@ describe("HeatmapView", () => {
     expect(screen.getByText("flagged")).toBeInTheDocument();
   });
 
+  it("associates every swatch with its bucket via a column header", () => {
+    // Without scope="col" a screen reader reads the grid as an unlabelled run
+    // of numbers, which is the entire content of the chart.
+    const { container } = render(<HeatmapView data={sample} title="By terminal" />);
+
+    const columnHeaders = container.querySelectorAll("th[scope=col]");
+    // One per bucket, plus the corner header naming the category column.
+    expect(columnHeaders).toHaveLength(sample.buckets.length + 1);
+  });
+
+  it("puts each cell's value in text, not only in colour and a title", () => {
+    render(<HeatmapView data={sample} title="By terminal" />);
+
+    // The 90 cell is readable as text, so the grid carries data for a reader
+    // that cannot see the shade or hover the swatch.
+    const cell = screen.getByTitle("T1 · 10 · 90");
+    expect(cell).toHaveTextContent("90");
+  });
+
+  it("says in text that a cell is flagged, not only by outlining it", () => {
+    const data = build(
+      [
+        ["09", "T1", 10],
+        ["10", "T1", 90],
+      ],
+      {
+        flagged_count: 1,
+        rows: [{ index: 1, rule_ids: ["r1"] }],
+        rules: [{ id: "r1", name: "Spike", severity: "high", matched: 1 }],
+        warnings: [],
+        dismissed_count: 0,
+      } as never,
+    );
+    render(<HeatmapView data={data} title="By terminal" />);
+
+    expect(screen.getByTitle("T1 · 10 · 90")).toHaveTextContent("flagged");
+  });
+
   it("emits the exact selector the browser smoke lane counts", () => {
     // scripts/smoke.mjs proves a heatmap drew something by counting
     // `th[scope=row]`. That lane needs a real browser, so this pins the
