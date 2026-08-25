@@ -48,6 +48,13 @@ const EXPECTATIONS = {
   pie: { selector: "path.recharts-sector", min: 1 },
   number: { selector: ".tnum", min: 1 },
   table: { selector: "tbody tr", min: 1 },
+  // Two windows means two curves. min: 2 is the point of the check - one curve
+  // is the failure this chart type has that the others do not, and it is
+  // invisible to a "did anything draw" assertion.
+  compare: { selector: "path.recharts-line-curve", min: 2 },
+  // A row header per category. The coloured swatches are divs with no class of
+  // their own, so the row headers are what proves the grid was built.
+  heatmap: { selector: "th[scope=row]", min: 1 },
 };
 
 async function main() {
@@ -82,9 +89,28 @@ async function main() {
   await page.waitForTimeout(9000);
 
   const failures = [];
-  for (const query of queries) {
-    const expectation = EXPECTATIONS[query.chart_type];
-    if (!expectation) continue;
+  /*
+   * One query owns many charts, and each chart is its own card. Iterating
+   * queries alone stopped working when chart configuration moved off
+   * SavedQuery: `query.chart_type` became undefined, every expectation lookup
+   * missed, and this lane quietly asserted nothing at all while still printing
+   * a pass. Flatten to charts so the unit checked is the unit rendered.
+   */
+  const cards = queries.flatMap((query) =>
+    (query.charts ?? []).map((chart) => ({ query, chart })),
+  );
+  if (cards.length === 0) {
+    console.error("no charts on any query - run: node scripts/dev-seed.mjs");
+    process.exit(2);
+  }
+
+  for (const { query, chart } of cards) {
+    const expectation = EXPECTATIONS[chart.chart_type];
+    if (!expectation) {
+      // A chart type with no expectation is a hole in this lane, not a skip.
+      failures.push(`${chart.name} is a ${chart.chart_type} chart with no smoke expectation`);
+      continue;
+    }
 
     /*
      * Ask the engine how many rows this query actually returns before deciding
@@ -97,24 +123,28 @@ async function main() {
       r.json(),
     );
     const rows = poll.row_count ?? 0;
-    const card = page.locator(`article[aria-label="${query.name}"]`);
+    const card = page.locator(`article[aria-label="${chart.name}"]`);
 
     if (rows === 0) {
       const empty = await card.getByText("No rows in range").count();
       const ok = empty > 0;
       console.log(
-        `${ok ? "ok  " : "FAIL"} ${query.chart_type.padEnd(6)} ${query.name.padEnd(28)} 0 rows, empty state shown=${ok}`,
+        `${ok ? "ok  " : "FAIL"} ${chart.chart_type.padEnd(8)} ${chart.name.padEnd(28)} 0 rows, empty state shown=${ok}`,
       );
-      if (!ok) failures.push(`${query.name} returned no rows but showed no empty state`);
+      if (!ok) failures.push(`${chart.name} returned no rows but showed no empty state`);
       continue;
     }
 
     const count = await card.locator(expectation.selector).count();
     const ok = count >= expectation.min;
     console.log(
-      `${ok ? "ok  " : "FAIL"} ${query.chart_type.padEnd(6)} ${query.name.padEnd(28)} ${count} ${expectation.selector} (${rows} rows)`,
+      `${ok ? "ok  " : "FAIL"} ${chart.chart_type.padEnd(8)} ${chart.name.padEnd(28)} ${count} ${expectation.selector} (${rows} rows)`,
     );
-    if (!ok) failures.push(`${query.name} (${query.chart_type}) has ${rows} rows but drew nothing`);
+    if (!ok) {
+      failures.push(
+        `${chart.name} (${chart.chart_type}) has ${rows} rows but drew ${count} ${expectation.selector}`,
+      );
+    }
   }
 
   /*

@@ -22,8 +22,15 @@ import { FieldPicker } from "@/components/FieldPicker";
  * it when a board empties.
  */
 
-const NEEDS_X: ChartType[] = ["line", "bar", "pie"];
-const NEEDS_Y: ChartType[] = ["line", "bar", "pie", "number"];
+const NEEDS_X: ChartType[] = ["line", "bar", "pie", "compare", "heatmap"];
+const NEEDS_Y: ChartType[] = ["line", "bar", "pie", "number", "compare", "heatmap"];
+
+/**
+ * Charts whose category axis is required rather than an optional split.
+ * A heatmap with no category is a single row, which is a line chart drawn
+ * badly - so the editor asks for one instead of rendering a stripe.
+ */
+const REQUIRES_SERIES: ChartType[] = ["heatmap"];
 
 export function needsX(type: ChartType): boolean {
   return NEEDS_X.includes(type);
@@ -34,7 +41,30 @@ export function needsY(type: ChartType): boolean {
 }
 
 export function needsSeries(type: ChartType): boolean {
-  return type === "line" || type === "bar";
+  return type === "line" || type === "bar" || REQUIRES_SERIES.includes(type);
+}
+
+/** Whether leaving the series field empty makes the chart undrawable. */
+export function seriesIsRequired(type: ChartType): boolean {
+  return REQUIRES_SERIES.includes(type);
+}
+
+/** What the x axis actually means, per chart type. */
+export function xFieldLabel(type: ChartType): string {
+  if (type === "pie") return "Category field";
+  if (type === "compare") return "Time bucket field";
+  if (type === "heatmap") return "Bucket field (columns)";
+  return "X field";
+}
+
+export function yFieldLabel(type: ChartType): string {
+  if (type === "pie") return "Value field";
+  if (type === "compare" || type === "heatmap") return "Measure field";
+  return "Y field";
+}
+
+export function seriesFieldLabel(type: ChartType): string {
+  return type === "heatmap" ? "Category field (rows)" : "Series field";
 }
 
 export function emptyChart(index: number, type: ChartType = "table"): QueryChartInput {
@@ -241,7 +271,7 @@ export function ChartSetEditor({
                   {needsX(chart.chart_type) ? (
                     <div className="min-w-[8rem] flex-1">
                       <FieldPicker
-                        label={chart.chart_type === "pie" ? "Category field" : "X field"}
+                        label={xFieldLabel(chart.chart_type)}
                         id={`chart-x-${index}`}
                         value={chart.x_field ?? ""}
                         columns={columns}
@@ -253,7 +283,7 @@ export function ChartSetEditor({
                   {needsY(chart.chart_type) ? (
                     <div className="min-w-[8rem] flex-1">
                       <FieldPicker
-                        label={chart.chart_type === "pie" ? "Value field" : "Y field"}
+                        label={yFieldLabel(chart.chart_type)}
                         id={`chart-y-${index}`}
                         value={chart.y_field ?? ""}
                         columns={columns}
@@ -265,7 +295,7 @@ export function ChartSetEditor({
                   {needsSeries(chart.chart_type) ? (
                     <div className="min-w-[8rem] flex-1">
                       <FieldPicker
-                        label="Series field"
+                        label={seriesFieldLabel(chart.chart_type)}
                         id={`chart-series-${index}`}
                         value={chart.series_field ?? ""}
                         columns={columns}

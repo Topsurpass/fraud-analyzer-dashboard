@@ -193,10 +193,10 @@ function demoQueries() {
     {
       name: "Flagged volume",
       description: "Flagged transactions per 5-minute bucket, last 6 hours.",
-      chart_type: "line",
-      x_field: "bucket",
-      y_field: "flagged",
       poll_interval_ms: 4000,
+      charts: [
+        { name: "Flagged volume", chart_type: "line", x_field: "bucket", y_field: "flagged" },
+      ],
       sql_text: `
         SELECT strftime('%H:%M', occurred_at) AS bucket,
                COUNT(*)                       AS flagged
@@ -211,10 +211,10 @@ function demoQueries() {
     {
       name: "Declines by country",
       description: "Where declined authorisations are concentrated.",
-      chart_type: "bar",
-      x_field: "country",
-      y_field: "declines",
       poll_interval_ms: 6000,
+      charts: [
+        { name: "Declines by country", chart_type: "bar", x_field: "country", y_field: "declines" },
+      ],
       sql_text: `
         SELECT country, COUNT(*) AS declines
         FROM transactions
@@ -227,10 +227,10 @@ function demoQueries() {
     {
       name: "Decline reasons",
       description: "Share of decline reasons across the last 24 hours.",
-      chart_type: "pie",
-      x_field: "reason",
-      y_field: "count",
       poll_interval_ms: 8000,
+      charts: [
+        { name: "Decline reasons", chart_type: "pie", x_field: "reason", y_field: "count" },
+      ],
       sql_text: `
         SELECT decline_reason AS reason, COUNT(*) AS count
         FROM transactions
@@ -242,9 +242,10 @@ function demoQueries() {
     {
       name: "Flagged in last hour",
       description: "Live count of flagged transactions in the trailing hour.",
-      chart_type: "number",
-      y_field: "flagged_last_hour",
       poll_interval_ms: 3000,
+      charts: [
+        { name: "Flagged in last hour", chart_type: "number", y_field: "flagged_last_hour" },
+      ],
       sql_text: `
         SELECT COUNT(*) AS flagged_last_hour
         FROM transactions
@@ -255,9 +256,10 @@ function demoQueries() {
     {
       name: "Exposure at risk",
       description: "Total value of flagged transactions in the trailing hour.",
-      chart_type: "number",
-      y_field: "exposure_usd",
       poll_interval_ms: 3000,
+      charts: [
+        { name: "Exposure at risk", chart_type: "number", y_field: "exposure_usd" },
+      ],
       sql_text: `
         SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS exposure_usd
         FROM transactions
@@ -268,11 +270,16 @@ function demoQueries() {
     {
       name: "Authorisations by channel",
       description: "Approved volume per channel, five-minute buckets.",
-      chart_type: "line",
-      x_field: "bucket",
-      y_field: "approvals",
-      series_field: "channel",
       poll_interval_ms: 6000,
+      charts: [
+        {
+          name: "Authorisations by channel",
+          chart_type: "line",
+          x_field: "bucket",
+          y_field: "approvals",
+          series_field: "channel",
+        },
+      ],
       sql_text: `
         SELECT strftime('%H:%M', occurred_at) AS bucket,
                channel,
@@ -287,15 +294,79 @@ function demoQueries() {
     {
       name: "Highest-risk transactions",
       description: "Raw rows an analyst would open a case from.",
-      chart_type: "table",
       poll_interval_ms: 5000,
       row_limit: 50,
+      charts: [{ name: "Highest-risk transactions", chart_type: "table" }],
       sql_text: `
         SELECT id, occurred_at, amount, country, merchant,
                status, risk_score, is_flagged
         FROM transactions
         ORDER BY risk_score DESC, occurred_at DESC
         LIMIT 50
+      `.trim(),
+    },
+    {
+      name: "Volume, this hour against last",
+      description: "Two hours of five-minute buckets; the chart splits them in half.",
+      poll_interval_ms: 6000,
+      /*
+       * Two charts off one execution, which is the point of the type: the same
+       * two windows read once by count and once by value, without running the
+       * grouping twice.
+       */
+      charts: [
+        {
+          name: "Transactions: now vs previous hour",
+          chart_type: "compare",
+          x_field: "bucket",
+          y_field: "txns",
+        },
+        {
+          name: "Value: now vs previous hour",
+          chart_type: "compare",
+          x_field: "bucket",
+          y_field: "value_usd",
+        },
+      ],
+      sql_text: `
+        SELECT strftime('%H:', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 5) * 5)
+                 AS bucket,
+               COUNT(*)                        AS txns,
+               ROUND(COALESCE(SUM(amount), 0), 2) AS value_usd
+        FROM transactions
+        WHERE occurred_at >= datetime('now', '-2 hours')
+        GROUP BY strftime('%Y-%m-%d %H', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 5) * 5)
+        ORDER BY MIN(occurred_at)
+      `.trim(),
+    },
+    {
+      name: "Country activity grid",
+      description: "Where and when, as one grid rather than one line chart per country.",
+      poll_interval_ms: 8000,
+      row_limit: 2000,
+      charts: [
+        {
+          name: "Country x 15 minutes",
+          chart_type: "heatmap",
+          x_field: "bucket",
+          y_field: "txns",
+          series_field: "country",
+        },
+      ],
+      sql_text: `
+        SELECT strftime('%H:', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 15) * 15)
+                 AS bucket,
+               country,
+               COUNT(*) AS txns
+        FROM transactions
+        WHERE occurred_at >= datetime('now', '-6 hours')
+        GROUP BY strftime('%Y-%m-%d %H', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 15) * 15),
+               country
+        ORDER BY MIN(occurred_at), country
       `.trim(),
     },
   ];
@@ -326,19 +397,32 @@ async function register() {
   const existing = await api(`/connections/${connection.id}/queries`);
   const byName = new Map(existing.map((query) => [query.name, query]));
 
-  for (const spec of demoQueries()) {
-    if (byName.has(spec.name)) {
-      await api(`/queries/${byName.get(spec.name).id}`, {
-        method: "PUT",
-        body: JSON.stringify(spec),
-      });
-      console.log(`query updated       ${spec.chart_type.padEnd(6)} ${spec.name}`);
+  /*
+   * A query and its charts are two calls. They used to be one, back when a
+   * saved query held the chart configuration itself; posting the old shape now
+   * creates a query with no charts at all, which renders as an empty
+   * connection page and looks like the seed silently failing.
+   */
+  for (const { charts, ...spec } of demoQueries()) {
+    let queryId = byName.get(spec.name)?.id;
+    if (queryId) {
+      await api(`/queries/${queryId}`, { method: "PUT", body: JSON.stringify(spec) });
+      console.log(`query updated       ${spec.name}`);
     } else {
-      await api(`/connections/${connection.id}/queries`, {
+      const created = await api(`/connections/${connection.id}/queries`, {
         method: "POST",
         body: JSON.stringify(spec),
       });
-      console.log(`query created       ${spec.chart_type.padEnd(6)} ${spec.name}`);
+      queryId = created.id;
+      console.log(`query created       ${spec.name}`);
+    }
+
+    await api(`/queries/${queryId}/charts`, {
+      method: "PUT",
+      body: JSON.stringify({ charts }),
+    });
+    for (const chart of charts) {
+      console.log(`  chart             ${chart.chart_type.padEnd(8)} ${chart.name}`);
     }
   }
 

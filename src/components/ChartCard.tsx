@@ -2,7 +2,14 @@
 
 import { useMemo } from "react";
 import type { ChartType, SavedQueryRead } from "@/contracts/api";
-import { buildCartesian, buildNumber, buildPie, buildTable } from "@/services/charts/shape";
+import {
+  buildCartesian,
+  buildCompare,
+  buildHeatmap,
+  buildNumber,
+  buildPie,
+  buildTable,
+} from "@/services/charts/shape";
 import Link from "next/link";
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
@@ -15,6 +22,8 @@ import { CartesianChartView } from "./charts/CartesianChartView";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
 import { NumberCardView } from "./charts/NumberCardView";
 import { PieChartView } from "./charts/PieChartView";
+import { CompareChartView } from "./charts/CompareChartView";
+import { HeatmapView } from "./charts/HeatmapView";
 import { TableView } from "./charts/TableView";
 
 /**
@@ -107,6 +116,10 @@ export function ChartCard({
         return { kind: "table" as const, data: buildTable(result) };
       case "bar":
         return { kind: "bar" as const, data: buildCartesian(result) };
+      case "compare":
+        return { kind: "compare" as const, data: buildCompare(result) };
+      case "heatmap":
+        return { kind: "heatmap" as const, data: buildHeatmap(result) };
       case "line":
       default:
         return { kind: "line" as const, data: buildCartesian(result) };
@@ -233,6 +246,10 @@ export function ChartCard({
           <ChartSkeleton type={chartType} />
         ) : view.kind === "number" ? (
           <NumberCardView data={view.data} title={cardTitle} />
+        ) : view.kind === "compare" ? (
+          <CompareChartView data={view.data} title={cardTitle} />
+        ) : view.kind === "heatmap" ? (
+          <HeatmapView data={view.data} title={cardTitle} />
         ) : view.kind === "pie" ? (
           <PieChartView data={view.data} title={cardTitle} />
         ) : view.kind === "table" ? (

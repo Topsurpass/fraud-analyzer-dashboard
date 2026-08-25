@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ChartSpec, FlagOutcome } from "@/contracts/api";
+import { MAX_PLOT_POINTS } from "./downsample";
 import {
+  MAX_HEAT_BUCKETS,
+  MAX_HEAT_ROWS,
   buildCartesian,
+  buildCompare,
+  buildHeatmap,
   buildNumber,
   buildPie,
   buildTable,
@@ -478,5 +483,312 @@ describe("a pie with repeated categories", () => {
       chart: spec({ type: "pie", x_field: "v", y_field: "n" }),
     });
     expect(built.slices).toHaveLength(2);
+  });
+});
+
+describe("buildCompare", () => {
+  /** `count` buckets of a measure, oldest first, the way a query orders them. */
+  const series = (values: number[]) => ({
+    columns: ["bucket", "amount"],
+    rows: values.map((value, index) => [`t${index}`, value]),
+    chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+  });
+
+  it("splits the result in half and lays the older window under the newer", () => {
+    // Four buckets: t0,t1 are the previous window; t2,t3 the current one.
+    const data = buildCompare(series([10, 20, 30, 40]));
+
+    expect(data.points).toHaveLength(2);
+    // Labelled by the current window, which is the axis an analyst is reading.
+    expect(data.points.map((point) => point.bucket)).toEqual(["t2", "t3"]);
+    expect(data.points.map((point) => point.current)).toEqual([30, 40]);
+    expect(data.points.map((point) => point.previous)).toEqual([10, 20]);
+  });
+
+  it("reports the delta per bucket and the widest gap between the lines", () => {
+    // The jump is at the second bucket: 60 against 20 is the story.
+    const data = buildCompare(series([10, 20, 12, 60]));
+
+    expect(data.points.map((point) => point.delta)).toEqual([2, 40]);
+    expect(data.widestGap).toEqual({ bucket: "t3", delta: 40 });
+  });
+
+  it("finds the widest gap when the current window has fallen, not risen", () => {
+    // A terminal going quiet is as much a signal as one going loud, so the
+    // widest gap is by magnitude and keeps its sign.
+    const data = buildCompare(series([80, 90, 70, 10]));
+
+    expect(data.widestGap).toEqual({ bucket: "t3", delta: -80 });
+  });
+
+  it("totals each window so a period-over-period change can be read", () => {
+    const data = buildCompare(series([10, 20, 30, 40]));
+
+    expect(data.previousTotal).toBe(30);
+    expect(data.currentTotal).toBe(70);
+  });
+
+  it("drops the oldest row when the count is odd, so both windows match", () => {
+    // Five rows cannot split evenly; keeping the extra would make the previous
+    // line cover more time than the current one and the gap would be a lie.
+    const data = buildCompare(series([99, 10, 20, 30, 40]));
+
+    expect(data.points.map((point) => point.previous)).toEqual([10, 20]);
+    expect(data.points.map((point) => point.current)).toEqual([30, 40]);
+    expect(data.warnings.join(" ")).toContain("oldest was dropped");
+  });
+
+  it("refuses to draw a comparison from fewer than four rows", () => {
+    const data = buildCompare(series([10, 20, 30]));
+
+    expect(data.points).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("at least four rows");
+  });
+
+  it("carries a flag on a current-window bucket through to the point", () => {
+    const result = {
+      ...series([10, 20, 30, 40]),
+      // Row 3 is the last bucket of the current window.
+      flags: caught("Spike", [3]),
+    };
+
+    const data = buildCompare(result);
+
+    expect(data.points.map((point) => point.alert)).toEqual([false, true]);
+    expect(data.hasAlerts).toBe(true);
+  });
+
+  it("holds a null where a value is missing instead of reading it as zero", () => {
+    // A bucket with no value is not a bucket worth zero; a comparison that
+    // treats it as zero invents a cliff the data never had.
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows: [
+        ["t0", 10],
+        ["t1", null],
+        ["t2", 30],
+        ["t3", 40],
+      ],
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.points[1].previous).toBeNull();
+    expect(data.points[1].delta).toBeNull();
+  });
+});
+
+describe("buildHeatmap", () => {
+  const grid = spec({
+    type: "heatmap",
+    x_field: "hour",
+    y_field: "amount",
+    series_field: "terminal",
+  });
+
+  it("places each category on a row and each bucket on a column", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 5],
+        ["10", "T1", 7],
+        ["09", "T2", 1],
+        ["10", "T2", 2],
+      ],
+      chart: grid,
+    });
+
+    expect(data.buckets).toEqual(["09", "10"]);
+    expect(data.rows.map((row) => row.category)).toEqual(["T1", "T2"]);
+    expect(data.rows[0].cells.map((cell) => cell.value)).toEqual([5, 7]);
+  });
+
+  it("scales intensity across the whole grid, not per row", () => {
+    // The point of the grid is comparing rows to each other. Normalising per
+    // row would paint the quietest terminal's peak as dark as the busiest.
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 0],
+        ["10", "T1", 100],
+        ["09", "T2", 50],
+        ["10", "T2", 50],
+      ],
+      chart: grid,
+    });
+
+    expect(data.min).toBe(0);
+    expect(data.max).toBe(100);
+    expect(data.rows[0].cells.map((cell) => cell.intensity)).toEqual([0, 1]);
+    expect(data.rows[1].cells.map((cell) => cell.intensity)).toEqual([0.5, 0.5]);
+  });
+
+  it("leaves a gap null rather than drawing a missing cell as a cold zero", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 5],
+        ["10", "T2", 9],
+      ],
+      chart: grid,
+    });
+
+    const t1 = data.rows.find((row) => row.category === "T1");
+    expect(t1?.cells.map((cell) => cell.value)).toEqual([5, null]);
+  });
+
+  it("sums repeated category/bucket pairs into the one cell they describe", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 5],
+        ["09", "T1", 3],
+      ],
+      chart: grid,
+    });
+
+    expect(data.rows[0].cells[0].value).toBe(8);
+  });
+
+  it("colours a flat grid as one shade instead of dividing by a zero range", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 7],
+        ["10", "T1", 7],
+      ],
+      chart: grid,
+    });
+
+    expect(data.rows[0].cells.every((cell) => Number.isFinite(cell.intensity))).toBe(true);
+    expect(data.rows[0].cells.map((cell) => cell.intensity)).toEqual([1, 1]);
+  });
+
+  it("keeps the busiest categories and says how many it dropped", () => {
+    const rows = Array.from({ length: MAX_HEAT_ROWS + 5 }, (_, index) => [
+      "09",
+      `T${index}`,
+      index,
+    ]);
+
+    const data = buildHeatmap({ columns: ["hour", "terminal", "amount"], rows, chart: grid });
+
+    expect(data.rows).toHaveLength(MAX_HEAT_ROWS);
+    // Sorted by total, so the highest-numbered terminals survive.
+    expect(data.rows[0].category).toBe(`T${MAX_HEAT_ROWS + 4}`);
+    expect(data.warnings.join(" ")).toContain(`${MAX_HEAT_ROWS + 5} categories`);
+  });
+
+  it("keeps the most recent buckets when there are too many to read", () => {
+    const rows = Array.from({ length: MAX_HEAT_BUCKETS + 3 }, (_, index) => [
+      `b${index}`,
+      "T1",
+      index,
+    ]);
+
+    const data = buildHeatmap({ columns: ["hour", "terminal", "amount"], rows, chart: grid });
+
+    expect(data.buckets).toHaveLength(MAX_HEAT_BUCKETS);
+    // The right edge is where a fraud queue looks, so the tail is what stays.
+    expect(data.buckets.at(-1)).toBe(`b${MAX_HEAT_BUCKETS + 2}`);
+    expect(data.buckets[0]).toBe("b3");
+  });
+
+  it("marks the cell a flagged row landed in", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 5],
+        ["10", "T1", 900],
+      ],
+      chart: grid,
+      flags: caught("Spike", [1]),
+    });
+
+    expect(data.rows[0].cells.map((cell) => cell.alert)).toEqual([false, true]);
+    expect(data.hasAlerts).toBe(true);
+  });
+
+  it("asks for a category column instead of guessing one", () => {
+    const data = buildHeatmap({
+      columns: ["hour", "amount"],
+      rows: [["09", 5]],
+      chart: spec({ type: "heatmap", x_field: "hour", y_field: "amount" }),
+    });
+
+    expect(data.rows).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("category column");
+  });
+});
+
+describe("buildCompare previous bucket labels", () => {
+  it("records which bucket each previous value was measured in", () => {
+    // The axis shows the current window, so t2's previous value is t0's. A
+    // tooltip that said only "previous" would imply both were measured at t2.
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows: [
+        ["t0", 10],
+        ["t1", 20],
+        ["t2", 30],
+        ["t3", 40],
+      ],
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.points.map((point) => point.previousBucket)).toEqual(["t0", "t1"]);
+  });
+});
+
+describe("buildCompare at scale", () => {
+  /** 10k rows is the stated ceiling for a single query. */
+  const wide = (count: number) => ({
+    columns: ["bucket", "amount"],
+    rows: Array.from({ length: count }, (_, index) => [
+      `t${index}`,
+      Math.sin(index / 40) * 100 + 200,
+    ]),
+    chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+  });
+
+  it("thins the plot but keeps the totals over every bucket", () => {
+    const all = buildCompare(wide(400));
+    const many = buildCompare(wide(10_000));
+
+    expect(many.points.length).toBeLessThanOrEqual(MAX_PLOT_POINTS);
+    // The headline must not move because the plot got thinner. 400 rows are
+    // under the threshold, so that run is the unthinned reference for shape.
+    expect(all.points.length).toBe(200);
+    expect(many.warnings.join(" ")).toContain("totals cover them all");
+  });
+
+  it("totals every bucket even when only some are drawn", () => {
+    // Flat data makes the arithmetic checkable by hand: 5000 buckets a side at
+    // 10 each is 50000, whatever the plot ends up showing.
+    const flat = {
+      columns: ["bucket", "amount"],
+      rows: Array.from({ length: 10_000 }, (_, index) => [`t${index}`, 10]),
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    };
+
+    const data = buildCompare(flat);
+
+    expect(data.points.length).toBeLessThanOrEqual(MAX_PLOT_POINTS);
+    expect(data.currentTotal).toBe(50_000);
+    expect(data.previousTotal).toBe(50_000);
+  });
+
+  it("keeps a flagged bucket in the plot rather than thinning it away", () => {
+    // The one bucket that broke a rule is the one a downsampler is most likely
+    // to drop, and the only one an analyst is looking for.
+    const rows = Array.from({ length: 4000 }, (_, index) => [`t${index}`, 10]);
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows,
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+      flags: caught("Spike", [3777]),
+    });
+
+    expect(data.points.some((point) => point.bucket === "t3777")).toBe(true);
+    expect(data.hasAlerts).toBe(true);
   });
 });

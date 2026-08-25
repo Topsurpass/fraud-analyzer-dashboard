@@ -429,3 +429,357 @@ export function buildTable(result: ResultSet): TableData {
     numericColumns: columns.map((_, index) => columnIsNumeric(rows, index)),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Period comparison
+// ---------------------------------------------------------------------------
+
+export interface ComparePoint {
+  /** Bucket label from the current window. */
+  bucket: string;
+  /**
+   * The bucket the `previous` value actually came from.
+   *
+   * The two windows are laid on one axis, so a point labelled "16:00" carries a
+   * previous value measured at "04:00". Without this the tooltip would imply
+   * both numbers were taken at the same time, which is the one way this chart
+   * misleads.
+   */
+  previousBucket: string;
+  current: number | null;
+  previous: number | null;
+  /** current - previous, or null when either side is missing. */
+  delta: number | null;
+  /** True when the current value is flagged. */
+  alert?: boolean;
+}
+
+export interface CompareData {
+  points: ComparePoint[];
+  /** The largest absolute gap between the two lines, and where it happened. */
+  widestGap: { bucket: string; delta: number } | null;
+  /** Totals for each window, which is what "up 12%" is read from. */
+  currentTotal: number;
+  previousTotal: number;
+  warnings: string[];
+  hasAlerts: boolean;
+}
+
+const EMPTY_COMPARE: CompareData = {
+  points: [],
+  widestGap: null,
+  currentTotal: 0,
+  previousTotal: 0,
+  warnings: [],
+  hasAlerts: false,
+};
+
+/**
+ * The same measure over two consecutive windows, aligned so the gap is visible.
+ *
+ * The result is split in half by row order: the older half is the previous
+ * window, the newer half is the current one, and they are laid on top of each
+ * other by position within the window. A query returning two hours of
+ * five-minute buckets therefore draws "the last hour" against "the hour before
+ * it" with no extra SQL and no configuration.
+ *
+ * Splitting by position rather than by parsing timestamps is deliberate. The
+ * engine never knows what a bucket column contains - it may be an hour, a date,
+ * a label - and a chart that only works when the x axis parses as a date is a
+ * chart that silently draws nothing the first time someone buckets by something
+ * else. Position is what the analyst already ordered by.
+ *
+ * An odd number of rows drops the oldest, because a half-window would make the
+ * two lines describe different amounts of time and the gap between them
+ * meaningless.
+ */
+export function buildCompare(result: ResultSet): CompareData {
+  const { columns, rows } = result;
+  const fields = resolveFields(result);
+  if (!fields.xKey || !fields.yKey) {
+    return { ...EMPTY_COMPARE, warnings: fields.warnings };
+  }
+
+  const xIndex = columns.indexOf(fields.xKey);
+  const yIndex = columns.indexOf(fields.yKey);
+  const warnings = [...fields.warnings];
+
+  if (rows.length < 4) {
+    // Two points a side is the least that can show a shape rather than a step.
+    return {
+      ...EMPTY_COMPARE,
+      warnings: [
+        ...warnings,
+        "A comparison needs at least four rows: two windows of at least two buckets each.",
+      ],
+    };
+  }
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+
+  const half = Math.floor(rows.length / 2);
+  const offset = rows.length - half * 2;
+  if (offset > 0) {
+    warnings.push(
+      "An odd number of rows: the oldest was dropped so both windows cover the same span.",
+    );
+  }
+
+  const previousRows = rows.slice(offset, offset + half);
+  const currentRows = rows.slice(offset + half);
+
+  const points: ComparePoint[] = currentRows.map((row, index) => {
+    const current = toNumber(row[yIndex]);
+    const previous = toNumber(previousRows[index]?.[yIndex]);
+    const label = (cell: Cell | undefined) =>
+      cell === null || cell === undefined ? "" : String(cell);
+    return {
+      bucket: label(row[xIndex]),
+      previousBucket: label(previousRows[index]?.[xIndex]),
+      current: Number.isFinite(current) ? current : null,
+      previous: Number.isFinite(previous) ? previous : null,
+      delta:
+        Number.isFinite(current) && Number.isFinite(previous) ? current - previous : null,
+      alert: anomalies.flags[offset + half + index] === true,
+    };
+  });
+
+  const widest = points.reduce<ComparePoint | null>((worst, point) => {
+    if (point.delta === null) return worst;
+    if (worst === null || Math.abs(point.delta) > Math.abs(worst.delta as number)) {
+      return point;
+    }
+    return worst;
+  }, null);
+
+  const sum = (values: (number | null)[]) =>
+    values.reduce<number>((total, value) => total + (value ?? 0), 0);
+
+  // Totals and the widest gap are computed on every bucket, then the series is
+  // thinned only for plotting. Deriving the headline from the thinned set would
+  // make the number on the card depend on how many pixels were available, and
+  // the largest divergence is exactly the kind of single bucket a downsampler
+  // is entitled to drop.
+  const currentTotal = sum(points.map((point) => point.current));
+  const previousTotal = sum(points.map((point) => point.previous));
+
+  const plotted = downsamplePreservingAlerts(
+    points,
+    MAX_PLOT_POINTS,
+    // Shape is judged on the current window: it is the subject of the chart,
+    // and thinning against the previous line would preserve last hour's spikes
+    // at the expense of this hour's.
+    (point) => point.current ?? point.previous ?? 0,
+    (point) => point.alert === true,
+  );
+
+  if (plotted.length < points.length) {
+    warnings.push(
+      `Plotting ${plotted.length} of ${points.length} buckets; totals cover them all.`,
+    );
+  }
+
+  return {
+    points: [...plotted],
+    widestGap:
+      widest && widest.delta !== null
+        ? { bucket: widest.bucket, delta: widest.delta }
+        : null,
+    currentTotal,
+    previousTotal,
+    warnings,
+    hasAlerts: points.some((point) => point.alert),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Heatmap
+// ---------------------------------------------------------------------------
+
+export interface HeatCell {
+  bucket: string;
+  /** null means the query returned no row for this category/bucket pair. */
+  value: number | null;
+  /** 0..1 against the grid's own range. What the colour is drawn from. */
+  intensity: number;
+  alert: boolean;
+}
+
+export interface HeatRow {
+  category: string;
+  cells: HeatCell[];
+  total: number;
+}
+
+export interface HeatmapData {
+  buckets: string[];
+  rows: HeatRow[];
+  min: number;
+  max: number;
+  warnings: string[];
+  hasAlerts: boolean;
+}
+
+const EMPTY_HEATMAP: HeatmapData = {
+  buckets: [],
+  rows: [],
+  min: 0,
+  max: 0,
+  warnings: [],
+  hasAlerts: false,
+};
+
+/**
+ * How many categories a person can actually scan before the grid is wallpaper.
+ * Beyond this the tail is dropped by total, keeping the rows worth looking at.
+ */
+export const MAX_HEAT_ROWS = 40;
+
+/** Buckets are columns; past this they are narrower than a finger. */
+export const MAX_HEAT_BUCKETS = 96;
+
+/**
+ * A category against a time bucket, coloured by a measure.
+ *
+ * This is the chart for "which terminal, and when". Fifty terminals as fifty
+ * line charts is fifty things to read; as one grid, the hot row and the hot
+ * column are pre-attentive - the eye finds them before it reads any label.
+ *
+ * `x_field` is the bucket (a column of the grid), `series_field` the category
+ * (a row), `y_field` the measure. Repeated pairs are summed, the same way the
+ * pie folds repeated categories, because two rows for one cell is one cell.
+ *
+ * Both axes are bounded. An unbounded grid over a busy day is hundreds of
+ * columns of two-pixel cells, which is not a chart; the tail is dropped by
+ * total and the drop is reported as a warning rather than done quietly.
+ */
+export function buildHeatmap(result: ResultSet): HeatmapData {
+  const { columns, rows } = result;
+  const fields = resolveFields(result);
+  if (!fields.xKey || !fields.yKey || !fields.seriesKey) {
+    return {
+      ...EMPTY_HEATMAP,
+      warnings: [
+        ...fields.warnings,
+        !fields.seriesKey
+          ? "A heatmap needs a category column as well as a bucket and a value."
+          : "A heatmap needs a bucket column and a value column.",
+      ],
+    };
+  }
+
+  const xIndex = columns.indexOf(fields.xKey);
+  const yIndex = columns.indexOf(fields.yKey);
+  const seriesIndex = columns.indexOf(fields.seriesKey);
+  const warnings = [...fields.warnings];
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+
+  const label = (cell: Cell | undefined) =>
+    cell === null || cell === undefined ? "" : String(cell);
+
+  // Insertion order is the query's ORDER BY, which is the order the analyst
+  // asked for. Sorting buckets here would silently reorder a deliberate axis.
+  const bucketOrder: string[] = [];
+  const seen = new Set<string>();
+  const grid = new Map<string, Map<string, { value: number; alert: boolean }>>();
+
+  for (const [index, row] of rows.entries()) {
+    const bucket = label(row[xIndex]);
+    const category = label(row[seriesIndex]);
+    const value = toNumber(row[yIndex]);
+    if (!Number.isFinite(value)) continue;
+
+    if (!seen.has(bucket)) {
+      seen.add(bucket);
+      bucketOrder.push(bucket);
+    }
+
+    let cells = grid.get(category);
+    if (!cells) {
+      cells = new Map();
+      grid.set(category, cells);
+    }
+    const existing = cells.get(bucket);
+    const alert = anomalies.flags[index] === true;
+    if (existing) {
+      existing.value += value;
+      existing.alert = existing.alert || alert;
+    } else {
+      cells.set(bucket, { value, alert });
+    }
+  }
+
+  if (grid.size === 0) {
+    return { ...EMPTY_HEATMAP, warnings };
+  }
+
+  let buckets = bucketOrder;
+  if (buckets.length > MAX_HEAT_BUCKETS) {
+    // The newest buckets, not the oldest: a fraud queue reads the right edge.
+    buckets = buckets.slice(-MAX_HEAT_BUCKETS);
+    warnings.push(
+      `Showing the most recent ${MAX_HEAT_BUCKETS} of ${bucketOrder.length} buckets.`,
+    );
+  }
+  const bucketSet = new Set(buckets);
+
+  let built: HeatRow[] = [...grid.entries()].map(([category, cells]) => {
+    const rowCells = buckets.map((bucket) => {
+      const cell = cells.get(bucket);
+      return {
+        bucket,
+        value: cell ? cell.value : null,
+        intensity: 0,
+        alert: cell ? cell.alert : false,
+      };
+    });
+    const total = [...cells.entries()]
+      .filter(([bucket]) => bucketSet.has(bucket))
+      .reduce((sum, [, cell]) => sum + cell.value, 0);
+    return { category, cells: rowCells, total };
+  });
+
+  if (built.length > MAX_HEAT_ROWS) {
+    const dropped = built.length - MAX_HEAT_ROWS;
+    built = [...built].sort((a, b) => b.total - a.total).slice(0, MAX_HEAT_ROWS);
+    warnings.push(
+      `Showing the ${MAX_HEAT_ROWS} busiest of ${MAX_HEAT_ROWS + dropped} categories.`,
+    );
+  }
+
+  const values = built.flatMap((row) =>
+    row.cells.map((cell) => cell.value).filter((value): value is number => value !== null),
+  );
+  const min = values.length > 0 ? Math.min(...values) : 0;
+  const max = values.length > 0 ? Math.max(...values) : 0;
+  // A flat grid is every cell equal; colouring that by (v-min)/(max-min) is a
+  // divide by zero, and "all the same" is honestly drawn as one shade.
+  const span = max - min;
+
+  for (const row of built) {
+    for (const cell of row.cells) {
+      cell.intensity =
+        cell.value === null ? 0 : span === 0 ? 1 : (cell.value - min) / span;
+    }
+  }
+
+  return {
+    buckets,
+    rows: built,
+    min,
+    max,
+    warnings,
+    hasAlerts: built.some((row) => row.cells.some((cell) => cell.alert)),
+  };
+}

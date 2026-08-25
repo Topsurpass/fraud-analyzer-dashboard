@@ -20,6 +20,25 @@ export function ChartSkeleton({ type }: { type: ChartType }) {
     case "bar":
       return <BarSkeleton />;
 
+    case "compare":
+      // Two strokes, the second offset, so the skeleton already reads as a
+      // comparison rather than resolving from one line into two.
+      return (
+        <div className="skeleton-sweep h-full px-3 py-3">
+          <div className="h-1.5 w-full bg-line/50" />
+          <div className="mt-6 h-1.5 w-[85%] bg-line" />
+        </div>
+      );
+
+    case "heatmap":
+      return (
+        <div className="skeleton-sweep grid h-full grid-cols-8 gap-[2px] px-3 py-3">
+          {Array.from({ length: 40 }, (_, index) => (
+            <div key={index} className="bg-line/50" />
+          ))}
+        </div>
+      );
+
     case "pie":
       return (
         <div className="skeleton-sweep flex h-full items-center justify-center">

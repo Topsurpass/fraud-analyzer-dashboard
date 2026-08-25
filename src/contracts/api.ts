@@ -9,7 +9,14 @@
 
 export type DbType = "postgres" | "mysql" | "sqlite";
 export type ConnectionStatus = "untested" | "ok" | "failed";
-export type ChartType = "line" | "bar" | "pie" | "number" | "table";
+export type ChartType =
+	| "line"
+	| "bar"
+	| "pie"
+	| "number"
+	| "table"
+	| "compare"
+	| "heatmap";
 
 export const DB_TYPES: readonly DbType[] = ["postgres", "mysql", "sqlite"];
 
@@ -51,7 +58,15 @@ export const SSL_MODE_HINTS: Record<SslMode, string> = {
 	"verify-ca": "Encrypted, and the server's certificate must be signed by a CA you trust.",
 	"verify-full": "Encrypted, certificate checked, and the hostname must match it.",
 };
-export const CHART_TYPES: readonly ChartType[] = ["line", "bar", "pie", "number", "table"];
+export const CHART_TYPES: readonly ChartType[] = [
+	"line",
+	"bar",
+	"pie",
+	"number",
+	"table",
+	"compare",
+	"heatmap",
+];
 
 /** Default ports the engine expects, used to prefill the connection form. */
 export const DEFAULT_PORTS: Record<DbType, number | null> = {

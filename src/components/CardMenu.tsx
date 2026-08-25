@@ -35,6 +35,8 @@ const CHART_LABELS: Record<ChartType, string> = {
   pie: "Pie",
   number: "Number",
   table: "Table",
+  compare: "Compare periods",
+  heatmap: "Heatmap",
 };
 
 export interface CardMenuProps {

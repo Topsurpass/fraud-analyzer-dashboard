@@ -84,7 +84,7 @@ under jsdom a chart that renders zero bars and one that renders ten are
 indistinguishable - both are "a `<BarChart />` that mounted without throwing".
 Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
-asserts on the actual SVG geometry for all five chart types, checks that every
+asserts on the actual SVG geometry for all seven chart types, checks that every
 card reporting a flagged series actually painted its hatch pattern, checks that
 the card menu opens and then closes on an outside click, on Escape and when
 another menu opens, checks that no card sits in a stale state, and checks that the layout does not overflow at
@@ -113,11 +113,65 @@ contract at the boundary. Routes hold glue only.
 | `src/contracts/api.ts` | Wire types, mirrored from the engine's OpenAPI schema. The only place request/response shapes are defined. |
 | `src/services/api-client/` | Every call to the engine. Applies a per-request deadline, honours cancellation, and normalizes every failure into one `ApiError`. |
 | `src/services/polling/` | `useQueryPolling` — one card's live loop. Sends `since_hash`, adopts the engine's cadence, backs off on failure, pauses on a hidden tab. |
-| `src/services/charts/` | Reshapes `columns` + `rows` + `ChartSpec` into what each chart type needs, including the long→wide pivot for multi-series. |
+| `src/services/charts/` | Reshapes `columns` + `rows` + `ChartSpec` into what each chart type needs, including the long→wide pivot for multi-series, the half-and-half split behind `compare`, and the category-by-bucket grid behind `heatmap`. |
 | `src/services/anomaly/` | Decides which points get the alert colour. |
 | `src/services/format/` | Every number, duration, timestamp and hash the app renders, plus the column-name-to-label pass. Pure functions; callers pass `now`. |
 | `src/services/dashboards/` | Server-owned dashboards: the ordered-id arithmetic `PUT /dashboards/{id}` needs, and the one context that fetches and mutates them. |
 | `src/services/connections/` | The connection list, shared by the rail and every page. |
+
+### Charts built for a fraud queue
+
+Five of the seven chart types answer "what is the shape of this". Two answer the
+questions an analyst actually opens the app with.
+
+**`compare` - the same measure over two consecutive windows.** Configure a time
+bucket (`x_field`) and a measure (`y_field`), and write a query returning *twice*
+the window you care about: two hours of five-minute buckets to compare this hour
+against the last. The result is split in half by row order - older half
+"previous", newer half "current" - and the two are laid on one axis so the gap
+between them is the thing you read.
+
+The split is positional rather than parsed from the bucket column. The engine
+never knows what that column holds; it may be an hour, a date, a weekday name.
+A chart that only works when the x axis parses as a date is a chart that draws
+nothing the first time someone buckets by something else. Position is what the
+query already ordered by. An odd row count drops the oldest row, because two
+windows covering different spans make the gap between them meaningless.
+
+Three things carry the finding, because a shape alone is slow to read under
+queue pressure: both totals and the signed change in a headline strip, the
+widest single-bucket gap named and shaded on the plot, and the two lines
+themselves. Previous is dashed and slate; current is solid and in the ramp.
+Making them equally loud is the classic failure of this chart - both lines shout
+and neither reads as "then" versus "now". The tooltip names the previous value's
+own bucket, since a point labelled 16:00 carries a value measured at 04:00 and
+nothing else on the card says so.
+
+Totals are computed over every bucket and only the plot is thinned, so the
+headline number never depends on how many pixels were available. The largest
+divergence is exactly the kind of single bucket a downsampler is entitled to
+drop, so it is found first.
+
+**`heatmap` - a category against a time bucket, coloured by a measure.**
+Configure the bucket as `x_field` (columns), the category as `series_field`
+(rows) and the measure as `y_field`. Forty terminals as forty line charts is
+forty things to read; as one grid the hot row and the hot hour are
+pre-attentive.
+
+It is a CSS grid, not an SVG chart. A heatmap is a table of coloured rectangles,
+and a table gets real focus order, real hover targets and text a screen reader
+can reach. Both axes are capped - forty categories, ninety-six buckets - and the
+tail is dropped by total with a warning on the card rather than quietly. Colour
+carries one variable, so it is one hue at varying strength; a multi-hue ramp
+reads as categories rather than magnitude and is the standard way this chart
+lies. Intensity is square-rooted because transaction volumes are heavily skewed
+and one busy terminal flattens every other row on a linear ramp. A flagged cell
+is *outlined* in the alert colour rather than tinted with it, so "this is big"
+and "this broke a rule" stay separable states.
+
+The hovered value is pinned to a fixed line above the grid instead of a floating
+tooltip: a tooltip under the pointer covers the neighbouring cells, which are
+the comparison the chart exists to make.
 
 ### The pulse line
 
