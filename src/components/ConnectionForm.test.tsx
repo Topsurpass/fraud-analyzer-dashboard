@@ -24,6 +24,7 @@ function connection(over: Partial<ConnectionRead> = {}): ConnectionRead {
     sqlite_path: null,
     ssl_mode: "require",
     ssl_root_cert: null,
+    paused: false,
     status: "ok",
     last_tested_at: null,
     last_test_error: null,

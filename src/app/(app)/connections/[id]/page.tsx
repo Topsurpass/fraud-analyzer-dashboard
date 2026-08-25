@@ -10,6 +10,10 @@ import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/Char
 import { AddToDashboardMenu } from "@/components/AddToDashboardMenu";
 import { useExpandedCards } from "@/lib/useExpandedCards";
 import { EmptyState, ErrorState, LinkButton } from "@/components/ui";
+import {
+  ConnectionPowerButton,
+  DisconnectedNotice,
+} from "@/components/ConnectionPowerButton";
 
 /**
  * A connection's live grid: every saved query it owns, each polling on its own
@@ -17,7 +21,7 @@ import { EmptyState, ErrorState, LinkButton } from "@/components/ui";
  */
 export default function ConnectionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { connections } = useConnections();
+  const { connections, reload } = useConnections();
   const connection = connections.find((entry) => entry.id === id) ?? null;
 
   const load = useCallback((signal: AbortSignal) => listQueries(id, { signal }), [id]);
@@ -31,6 +35,9 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
       crumbs={[{ label: "Connections", href: "/" }, { label: name }]}
       actions={
         <div className="flex items-center gap-2">
+          {connection ? (
+            <ConnectionPowerButton connection={connection} onChanged={reload} />
+          ) : null}
           <LinkButton href={`/connections/${id}/flagged`}>Flagged</LinkButton>
           <LinkButton href={`/connections/${id}/settings`}>Settings</LinkButton>
           <LinkButton href={`/connections/${id}/queries/new`} tone="primary">
@@ -39,7 +46,9 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
         </div>
       }
     >
-      {connection?.status === "failed" ? (
+      {connection?.paused ? <DisconnectedNotice name={name} /> : null}
+
+      {connection?.status === "failed" && !connection.paused ? (
         <p className="mb-2 border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
           This connection last failed its test
           {connection.last_test_error ? `: ${connection.last_test_error.replace(/\.?$/, ".")}` : "."}{" "}
@@ -74,18 +83,25 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
         />
       ) : (
         <ChartGrid>
-          {(queries.data ?? []).map((query) => (
-            <ChartCard
-              key={query.id}
-              query={query}
-              className={chartCellClass(query.chart_type, expanded.isExpanded(query.id))}
-              expanded={expanded.isExpanded(query.id)}
-              onToggleExpand={() => expanded.toggle(query.id)}
-              onChanged={queries.reload}
-              onDeleted={queries.reload}
-              actions={<AddToDashboardMenu queryId={query.id} />}
-            />
-          ))}
+          {/* One card per chart, not per query. Several charts of one query
+              share its execution and its poll, so showing three costs what
+              showing one used to. */}
+          {(queries.data ?? []).flatMap((query) =>
+            query.charts.map((chart) => (
+              <ChartCard
+                key={chart.id}
+                query={query}
+                chartId={chart.id}
+                title={query.charts.length > 1 ? `${query.name} · ${chart.name}` : query.name}
+                className={chartCellClass(chart.chart_type, expanded.isExpanded(chart.id))}
+                expanded={expanded.isExpanded(chart.id)}
+                onToggleExpand={() => expanded.toggle(chart.id)}
+                onChanged={queries.reload}
+                onDeleted={queries.reload}
+                actions={<AddToDashboardMenu chartId={chart.id} />}
+              />
+            )),
+          )}
         </ChartGrid>
       )}
     </PageBody>

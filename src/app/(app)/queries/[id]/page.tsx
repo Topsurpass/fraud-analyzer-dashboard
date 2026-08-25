@@ -8,9 +8,12 @@ import {
   getFlagRules,
   getQuery,
   putFlagRules,
+  putQueryCharts,
+  getQueryCharts,
   updateQuery,
 } from "@/services/api-client";
 import { useConnections } from "@/services/connections/ConnectionsContext";
+import { invalidateCoalesced } from "@/services/polling/coalesce";
 import { useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
 import { PageBody } from "@/components/PageBody";
@@ -34,6 +37,12 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
   );
   const rules = useResource(loadRules);
 
+  const loadCharts = useCallback(
+    (signal: AbortSignal) => getQueryCharts(id, { signal }),
+    [id],
+  );
+  const charts = useResource(loadCharts);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
@@ -48,14 +57,22 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
     setError(null);
     setSaved(false);
     try {
-      const { flag_rules: nextRules, ...patch } = values;
+      const { flag_rules: nextRules, charts: nextCharts, ...patch } = values;
       await updateQuery(id, patch);
       // Always sent, including when empty: that is how the last rule is
       // removed, and skipping the call when the list is empty would make
       // deleting a rule silently do nothing.
       await putFlagRules(id, { rules: nextRules });
+      // Always sent, like the rules: an empty set is how the last chart is
+      // removed, and skipping the call when it is empty would make deleting a
+      // chart silently do nothing.
+      await putQueryCharts(id, nextCharts);
+      // The cached payload echoes every chart's mapping, so a stale answer
+      // would keep drawing the old way until it aged out.
+      invalidateCoalesced(id);
       query.reload();
       rules.reload();
+      charts.reload();
       setSaved(true);
     } catch (cause) {
       setError(
@@ -123,7 +140,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
       {/* Both resources must settle before the editor mounts. It seeds its rule
           state once, from `initialRules`, so mounting it against a half-loaded
           page means seeding it wrong. */}
-      {query.initial || rules.initial || !query.data || !connectionId ? (
+      {query.initial || rules.initial || charts.initial || !query.data || !connectionId ? (
         <div className="skeleton-sweep grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="h-96 border border-line bg-surface" />
           <div className="h-64 border border-line bg-surface" />
@@ -137,6 +154,13 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
           key={id}
           connectionId={connectionId}
           initial={query.data}
+          initialCharts={charts.data?.charts.map((chart) => ({
+            name: chart.name,
+            chart_type: chart.chart_type,
+            x_field: chart.x_field ?? "",
+            y_field: chart.y_field ?? "",
+            series_field: chart.series_field ?? "",
+          }))}
           initialRules={rules.data?.rules.map((rule) => ({
             name: rule.name,
             severity: rule.severity,

@@ -8,7 +8,7 @@ function table(columns: string[], rows: Row[]) {
   return buildTable({
     columns,
     rows,
-    chart: { type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
+    chart: { id: "c", name: "Chart", type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
   });
 }
 
@@ -131,7 +131,7 @@ function ruleTable(
   return buildTable({
     columns,
     rows,
-    chart: { type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
+    chart: { id: "c", name: "Chart", type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
     // Dismissed rows are removed by the engine before the payload is served,
     // so the view never sees one and the fixtures need not model it.
     flags: { dismissed_count: 0, ...flags },

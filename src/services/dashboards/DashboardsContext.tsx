@@ -35,8 +35,8 @@ export interface DashboardsValue {
   create: (name: string, queryIds?: string[]) => Promise<DashboardRead>;
   rename: (id: string, name: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
-  addQueryTo: (id: string, queryId: string) => Promise<void>;
-  removeQueryFrom: (id: string, queryId: string) => Promise<void>;
+  addChartTo: (id: string, queryId: string) => Promise<void>;
+  removeChartFrom: (id: string, queryId: string) => Promise<void>;
   moveQueryTo: (id: string, queryId: string, toIndex: number) => Promise<void>;
 }
 
@@ -53,7 +53,7 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
     async (name: string, queryIds: string[] = []) => {
       const dashboard = await createDashboard({
         name: normalizeName(name),
-        query_ids: queryIds,
+        chart_ids: queryIds,
       });
       reload();
       return dashboard;
@@ -78,7 +78,7 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
   );
 
   /**
-   * `query_ids` replaces the arrangement wholesale, so every membership change
+   * `chart_ids` replaces the arrangement wholesale, so every membership change
    * is "read the current order, compute the next one, send it".
    *
    * The read is a fresh GET rather than a lookup in the list above, for two
@@ -91,18 +91,18 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
   const rearrange = useCallback(
     async (id: string, next: (current: readonly string[]) => string[]) => {
       const current = await getDashboard(id);
-      await updateDashboard(id, { query_ids: next(current.query_ids) });
+      await updateDashboard(id, { chart_ids: next(current.chart_ids) });
       reload();
     },
     [reload],
   );
 
-  const addQueryTo = useCallback(
+  const addChartTo = useCallback(
     (id: string, queryId: string) => rearrange(id, (ids) => withQuery(ids, queryId)),
     [rearrange],
   );
 
-  const removeQueryFrom = useCallback(
+  const removeChartFrom = useCallback(
     (id: string, queryId: string) => rearrange(id, (ids) => withoutQuery(ids, queryId)),
     [rearrange],
   );
@@ -123,8 +123,8 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
       create,
       rename,
       remove,
-      addQueryTo,
-      removeQueryFrom,
+      addChartTo,
+      removeChartFrom,
       moveQueryTo,
     }),
     [
@@ -136,8 +136,8 @@ export function DashboardsProvider({ children }: { children: React.ReactNode }) 
       create,
       rename,
       remove,
-      addQueryTo,
-      removeQueryFrom,
+      addChartTo,
+      removeChartFrom,
       moveQueryTo,
     ],
   );

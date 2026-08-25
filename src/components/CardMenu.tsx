@@ -4,17 +4,24 @@ import { useState } from "react";
 import Link from "next/link";
 import type { ChartType, SavedQueryRead } from "@/contracts/api";
 import { CHART_TYPES } from "@/contracts/api";
-import { ApiError, deleteQuery, runQuery, updateQuery } from "@/services/api-client";
+import {
+  ApiError,
+  deleteQuery,
+  getQueryCharts,
+  putQueryCharts,
+  runQuery,
+} from "@/services/api-client";
+import { invalidateCoalesced } from "@/services/polling/coalesce";
 import { useDashboards } from "@/services/dashboards";
 import { Popover, usePopoverClose } from "./Popover";
 
 /**
  * Per-card actions: pick how this query is drawn, run it, edit it, delete it.
  *
- * Chart type is a property of the saved query, not a view preference, so
- * choosing one writes through to the engine. Every other card showing the same
- * query - on a dashboard, on the connection grid - therefore agrees, which is
- * the behaviour an analyst expects from something that persists.
+ * Chart type is a property of the chart, not a view preference, so choosing
+ * one writes through to the engine and every card drawing that chart agrees.
+ * It changes only the chart this card is showing: a query can hold several,
+ * and switching one to a bar must not silently reshape the others.
  *
  * Built on `Popover`, so it closes on an option, on an outside click and on
  * Escape. Every item here except the delete confirmation dismisses the menu:
@@ -32,6 +39,10 @@ const CHART_LABELS: Record<ChartType, string> = {
 
 export interface CardMenuProps {
   query: SavedQueryRead;
+  /** Which of the query's charts this card draws. Omitted means the first. */
+  chartId?: string | null;
+  /** What that chart is currently drawn as, for the checked state. */
+  currentChartType?: ChartType;
   /** Called after the query is changed on the engine. */
   onMutated?: () => void;
   /** Called after the query is deleted. */
@@ -40,7 +51,7 @@ export interface CardMenuProps {
   extra?: React.ReactNode;
 }
 
-export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) {
+export function CardMenu({ query, chartId, currentChartType, onMutated, onDeleted, extra }: CardMenuProps) {
   return (
     <Popover
       label={`Actions for ${query.name}`}
@@ -49,7 +60,14 @@ export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) 
       triggerClassName="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
       panelClassName="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1"
     >
-      <CardMenuPanel query={query} onMutated={onMutated} onDeleted={onDeleted} extra={extra} />
+      <CardMenuPanel
+        query={query}
+        chartId={chartId}
+        currentChartType={currentChartType}
+        onMutated={onMutated}
+        onDeleted={onDeleted}
+        extra={extra}
+      />
     </Popover>
   );
 }
@@ -58,7 +76,7 @@ export function CardMenu({ query, onMutated, onDeleted, extra }: CardMenuProps) 
  * Split from the trigger so everything here sits *inside* the popover and can
  * therefore reach `usePopoverClose`.
  */
-function CardMenuPanel({ query, onMutated, onDeleted, extra }: CardMenuProps) {
+function CardMenuPanel({ query, chartId, currentChartType, onMutated, onDeleted, extra }: CardMenuProps) {
   const close = usePopoverClose();
   const { reload: reloadDashboards } = useDashboards();
   const [busy, setBusy] = useState<null | "chart" | "run" | "delete">(null);
@@ -76,7 +94,7 @@ function CardMenuPanel({ query, onMutated, onDeleted, extra }: CardMenuProps) {
    * therefore last, after the `finally`, and only on the success path.
    */
   const chooseChart = async (chartType: ChartType) => {
-    if (chartType === query.chart_type) {
+    if (chartType === currentChartType) {
       close();
       return;
     }
@@ -84,7 +102,28 @@ function CardMenuPanel({ query, onMutated, onDeleted, extra }: CardMenuProps) {
     setError(null);
     let ok = false;
     try {
-      await updateQuery(query.id, { chart_type: chartType });
+      // Read-modify-write, because charts are replaced as a set. Editing the
+      // one this card draws and sending the rest back untouched keeps every
+      // other chart's id - and therefore every dashboard placing one.
+      const { charts } = await getQueryCharts(query.id);
+      const target = chartId
+        ? charts.find((candidate) => candidate.id === chartId)
+        : charts[0];
+      if (!target) throw new Error("This chart no longer exists.");
+
+      await putQueryCharts(
+        query.id,
+        charts.map((candidate) => ({
+          name: candidate.name,
+          chart_type: candidate.id === target.id ? chartType : candidate.chart_type,
+          x_field: candidate.x_field,
+          y_field: candidate.y_field,
+          series_field: candidate.series_field,
+        })),
+      );
+      // The cached payload echoes every chart's mapping, so a stale answer
+      // would keep drawing the old way.
+      invalidateCoalesced(query.id);
       onMutated?.();
       ok = true;
     } catch (cause) {
@@ -139,7 +178,7 @@ function CardMenuPanel({ query, onMutated, onDeleted, extra }: CardMenuProps) {
         </p>
         <ul className="px-1.5 pb-1">
           {CHART_TYPES.map((type) => {
-            const selected = type === query.chart_type;
+            const selected = type === currentChartType;
             return (
               <li key={type}>
                 <button

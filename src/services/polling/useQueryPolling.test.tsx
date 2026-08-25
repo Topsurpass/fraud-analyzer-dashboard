@@ -25,8 +25,10 @@ function changed(hash: string, rows: unknown[][] = [[1]], intervalMs = 3000): Po
     data_hash: `sha256:${hash}`,
     columns: ["n"],
     rows: rows as never,
-    chart: { type: "number", x_field: null, y_field: "n", series_field: null, warnings: [] },
-      flags: EMPTY_FLAGS,
+    charts: [
+      { id: "c", name: "Chart", type: "number", x_field: null, y_field: "n", series_field: null, warnings: [] },
+    ],
+    flags: EMPTY_FLAGS,
     poll_interval_ms: intervalMs,
   };
 }

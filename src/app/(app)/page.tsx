@@ -115,8 +115,8 @@ export default function OverviewPage() {
 												{dashboard.name}
 											</span>
 											<span className="tnum ml-auto shrink-0 text-[10px] text-muted">
-												{dashboard.query_ids.length}{" "}
-												{dashboard.query_ids.length === 1
+												{dashboard.chart_ids.length}{" "}
+												{dashboard.chart_ids.length === 1
 													? "card"
 													: "cards"}
 											</span>

@@ -7,6 +7,8 @@ import { PieChartView } from "./PieChartView";
 import { ChartEmpty } from "./ChartEmpty";
 
 const spec = (overrides: Partial<ChartSpec> = {}): ChartSpec => ({
+  id: "c",
+  name: "Chart",
   type: "line",
   x_field: "bucket",
   y_field: "n",

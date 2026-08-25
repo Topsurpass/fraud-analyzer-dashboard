@@ -53,14 +53,39 @@ vi.mock("@/components/ChartCard", () => ({
   ),
 }));
 
-const board = (over: Partial<DashboardRead> = {}): DashboardRead => ({
-  id: "d1",
-  name: "Chargebacks",
-  query_ids: ["q1"],
+/**
+ * A chart placed on a board.
+ *
+ * The board resolves its own charts, so the id a board holds is a chart's and
+ * the chart is what says which query to poll. Two charts of one query is the
+ * whole point of the split: the SQL runs once.
+ */
+const chart = (id: string, queryId = id) => ({
+  id,
+  query_id: queryId,
+  name: id === "q1" ? "Declines by hour" : "Chargeback rate",
+  position: 0,
+  chart_type: "line" as const,
+  x_field: null,
+  y_field: null,
+  series_field: null,
   created_at: "2026-08-23T09:00:00",
   updated_at: "2026-08-23T09:00:00",
-  ...over,
 });
+
+const board = (over: Partial<DashboardRead> = {}): DashboardRead => {
+  const base = { chart_ids: ["q1"], ...over };
+  return {
+    id: "d1",
+    name: "Chargebacks",
+    // Kept in step with chart_ids unless a test supplies its own, so a board
+    // never claims to place a chart it cannot describe.
+    charts: over.charts ?? base.chart_ids.map((id) => chart(id)),
+    created_at: "2026-08-23T09:00:00",
+    updated_at: "2026-08-23T09:00:00",
+    ...base,
+  };
+};
 
 const query = (over: Partial<SavedQueryRead> = {}): SavedQueryRead =>
   ({
@@ -69,7 +94,6 @@ const query = (over: Partial<SavedQueryRead> = {}): SavedQueryRead =>
     name: "Declines by hour",
     description: null,
     sql: "SELECT 1",
-    chart_type: "line",
     chart_spec: null,
     poll_interval_ms: 5_000,
     created_at: "2026-08-23T09:00:00",
@@ -96,8 +120,8 @@ beforeEach(() => {
   listDashboards.mockReset().mockResolvedValue([]);
   getDashboard.mockReset().mockResolvedValue(board());
   getQuery.mockReset().mockResolvedValue(query());
-  updateDashboard.mockReset().mockImplementation((id: string, patch: { query_ids?: string[] }) =>
-    Promise.resolve(board({ query_ids: patch.query_ids ?? ["q1"] })),
+  updateDashboard.mockReset().mockImplementation((id: string, patch: { chart_ids?: string[] }) =>
+    Promise.resolve(board({ chart_ids: patch.chart_ids ?? ["q1"] })),
   );
 });
 
@@ -130,14 +154,14 @@ describe("DashboardPage", () => {
   });
 
   it("shows the empty state for a board with no cards on it", async () => {
-    getDashboard.mockResolvedValue(board({ query_ids: [] }));
+    getDashboard.mockResolvedValue(board({ chart_ids: [] }));
     await open();
     expect(await screen.findByText("This dashboard is empty")).toBeInTheDocument();
     expect(getQuery).not.toHaveBeenCalled();
   });
 
   it("refetches the board when a card resolves to a deleted query", async () => {
-    getDashboard.mockResolvedValue(board({ query_ids: ["q1", "gone"] }));
+    getDashboard.mockResolvedValue(board({ chart_ids: ["q1", "gone"] }));
     getQuery.mockImplementation((id: string) =>
       id === "gone"
         ? Promise.reject(
@@ -153,7 +177,7 @@ describe("DashboardPage", () => {
 
   describe("ordering", () => {
     const twoUp = () => {
-      getDashboard.mockResolvedValue(board({ query_ids: ["q1", "q2"] }));
+      getDashboard.mockResolvedValue(board({ chart_ids: ["q1", "q2"] }));
       getQuery.mockImplementation((id: string) =>
         Promise.resolve(
           id === "q1" ? query() : query({ id: "q2", name: "Chargeback rate" }),
@@ -171,7 +195,7 @@ describe("DashboardPage", () => {
 
       // PUT replaces query_ids wholesale, so the request carries the full order.
       await waitFor(() =>
-        expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2", "q1"] }),
+        expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q2", "q1"] }),
       );
     });
 
@@ -211,7 +235,7 @@ describe("DashboardPage", () => {
       await userEvent.click(first.getByRole("button", { name: "Remove from this board" }));
 
       await waitFor(() =>
-        expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2"] }),
+        expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q2"] }),
       );
     });
   });

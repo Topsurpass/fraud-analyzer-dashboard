@@ -27,7 +27,8 @@ vi.mock("@/services/api-client", async () => {
 const board = (over: Partial<DashboardRead> = {}): DashboardRead => ({
   id: "d1",
   name: "Card testing",
-  query_ids: ["q1", "q2"],
+  chart_ids: ["q1", "q2"],
+  charts: [],
   created_at: "2026-08-23T09:00:00",
   updated_at: "2026-08-23T09:00:00",
   ...over,
@@ -76,7 +77,7 @@ describe("DashboardsProvider", () => {
     // The name is normalized before it reaches the engine.
     expect(createDashboard).toHaveBeenCalledWith({
       name: "Chargebacks",
-      query_ids: ["q9"],
+      chart_ids: ["q9"],
     });
     await waitFor(() => expect(listDashboards).toHaveBeenCalledTimes(2));
   });
@@ -107,10 +108,10 @@ describe("DashboardsProvider", () => {
       await waitFor(() => expect(result.current.initial).toBe(false));
 
       await act(async () => {
-        await result.current.addQueryTo("d1", "q3");
+        await result.current.addChartTo("d1", "q3");
       });
       expect(updateDashboard).toHaveBeenCalledWith("d1", {
-        query_ids: ["q1", "q2", "q3"],
+        chart_ids: ["q1", "q2", "q3"],
       });
     });
 
@@ -119,9 +120,9 @@ describe("DashboardsProvider", () => {
       await waitFor(() => expect(result.current.initial).toBe(false));
 
       await act(async () => {
-        await result.current.addQueryTo("d1", "q2");
+        await result.current.addChartTo("d1", "q2");
       });
-      expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q1", "q2"] });
+      expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q1", "q2"] });
     });
 
     it("removes one without disturbing the rest", async () => {
@@ -129,9 +130,9 @@ describe("DashboardsProvider", () => {
       await waitFor(() => expect(result.current.initial).toBe(false));
 
       await act(async () => {
-        await result.current.removeQueryFrom("d1", "q1");
+        await result.current.removeChartFrom("d1", "q1");
       });
-      expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2"] });
+      expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q2"] });
     });
 
     it("reorders", async () => {
@@ -141,7 +142,7 @@ describe("DashboardsProvider", () => {
       await act(async () => {
         await result.current.moveQueryTo("d1", "q2", 0);
       });
-      expect(updateDashboard).toHaveBeenCalledWith("d1", { query_ids: ["q2", "q1"] });
+      expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q2", "q1"] });
     });
 
     it("changes a board this browser has never listed", async () => {
@@ -149,17 +150,17 @@ describe("DashboardsProvider", () => {
       // and the board is still perfectly real. Reading the order from the list
       // would make every action here silently do nothing.
       listDashboards.mockResolvedValue([]);
-      getDashboard.mockResolvedValue(board({ id: "elsewhere", query_ids: ["q9"] }));
+      getDashboard.mockResolvedValue(board({ id: "elsewhere", chart_ids: ["q9"] }));
 
       const { result } = setup();
       await waitFor(() => expect(result.current.initial).toBe(false));
       expect(result.current.dashboards).toEqual([]);
 
       await act(async () => {
-        await result.current.addQueryTo("elsewhere", "q3");
+        await result.current.addChartTo("elsewhere", "q3");
       });
       expect(updateDashboard).toHaveBeenCalledWith("elsewhere", {
-        query_ids: ["q9", "q3"],
+        chart_ids: ["q9", "q3"],
       });
     });
 
@@ -172,7 +173,7 @@ describe("DashboardsProvider", () => {
 
       await expect(
         act(async () => {
-          await result.current.addQueryTo("absent", "q3");
+          await result.current.addChartTo("absent", "q3");
         }),
       ).rejects.toThrow();
       expect(updateDashboard).not.toHaveBeenCalled();
@@ -181,16 +182,16 @@ describe("DashboardsProvider", () => {
     it("computes the next order from the engine, not from the cached list", async () => {
       // Another machine added a card after this browser listed the board. The
       // write must not drop it.
-      getDashboard.mockResolvedValue(board({ query_ids: ["q1", "q2", "added-elsewhere"] }));
+      getDashboard.mockResolvedValue(board({ chart_ids: ["q1", "q2", "added-elsewhere"] }));
 
       const { result } = setup();
       await waitFor(() => expect(result.current.initial).toBe(false));
 
       await act(async () => {
-        await result.current.addQueryTo("d1", "q3");
+        await result.current.addChartTo("d1", "q3");
       });
       expect(updateDashboard).toHaveBeenCalledWith("d1", {
-        query_ids: ["q1", "q2", "added-elsewhere", "q3"],
+        chart_ids: ["q1", "q2", "added-elsewhere", "q3"],
       });
     });
   });

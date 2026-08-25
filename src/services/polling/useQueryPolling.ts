@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PollResponse, RunResponse } from "@/contracts/api";
 import { isPollChanged } from "@/contracts/api";
 import { ApiError, pollQuery } from "@/services/api-client";
+import { coalescedPoll } from "./coalesce";
 
 /**
  * Drives one ChartCard's live data.
@@ -257,12 +258,18 @@ export function useQueryPolling(
       setFacts((previous) => (previous.inFlight ? previous : { ...previous, inFlight: true }));
 
       try {
-        const response = await pollQuery(
-          queryId,
-          // A forced refresh must not send since_hash, or the engine answers
-          // "unchanged" and the analyst gets nothing back for their click.
-          force ? { force: true } : { sinceHash: hashRef.current },
-          { signal: controller.signal, timeoutMs },
+        // Coalesced: several charts of one query are several cards, each with
+        // its own loop. Without this they make identical requests on the same
+        // interval, which is the waste the query/chart split removed from the
+        // engine reappearing in the browser.
+        const response = await coalescedPoll(queryId, hashRef.current, force, () =>
+          pollQuery(
+            queryId,
+            // A forced refresh must not send since_hash, or the engine answers
+            // "unchanged" and the analyst gets nothing back for their click.
+            force ? { force: true } : { sinceHash: hashRef.current },
+            { signal: controller.signal, timeoutMs },
+          ),
         );
         if (stoppedRef.current || controller.signal.aborted) return;
         applyResponse(response);

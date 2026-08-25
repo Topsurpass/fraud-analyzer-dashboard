@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { resetCoalesced } from "@/services/polling/coalesce";
 
 /*
  * Testing Library's `waitFor` defaults to a 1s budget. The assertions here
@@ -14,6 +15,14 @@ configure({ asyncUtilTimeout: 4_000 });
 
 afterEach(() => {
   cleanup();
+  /*
+   * The poll coalescer is module state, so a request answered in one test is
+   * still remembered in the next. Its reuse window is under a second, but a
+   * test file runs faster than that, and the symptom is the worst kind: a
+   * later test sees a poll it did not make suppressed and reads as a real
+   * failure of the polling loop.
+   */
+  resetCoalesced();
 });
 
 // jsdom ships neither of these and Recharts + the pulse line need both.

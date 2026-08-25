@@ -17,6 +17,8 @@ import type {
 	PollResponse,
 	PreviewRequest,
 	PreviewResponse,
+	QueryChartInput,
+	QueryChartSet,
 	RunResponse,
 	SavedQueryCreate,
 	SavedQueryRead,
@@ -477,3 +479,53 @@ export const deleteFlaggedRows = (
 		...options,
 	});
 };
+
+/** Every way this query's result can be drawn, in display order. */
+export const getQueryCharts = (queryId: string, options?: RequestOptions) =>
+	request<QueryChartSet>({
+		method: "GET",
+		path: `/queries/${encodeURIComponent(queryId)}/charts`,
+		...options,
+	});
+
+/**
+ * Replace a query's whole chart set.
+ *
+ * Charts are matched by name, so editing a chart's type or fields keeps its id
+ * and every dashboard placing it keeps working. Adding one costs nothing at the
+ * target database: they all render from the one result the query already
+ * fetched, which is the entire point of separating them from the query.
+ */
+export const putQueryCharts = (
+	queryId: string,
+	charts: QueryChartInput[],
+	options?: RequestOptions,
+) =>
+	request<QueryChartSet>({
+		method: "PUT",
+		path: `/queries/${encodeURIComponent(queryId)}/charts`,
+		body: { charts },
+		...options,
+	});
+
+/**
+ * Stop using a connection until it is reconnected.
+ *
+ * Closes its pooled connections immediately and stops the scheduler running
+ * its queries. Saved queries, flag rules and flagged rows are all kept.
+ */
+export const disconnectConnection = (connectionId: string, options?: RequestOptions) =>
+	request<ConnectionRead>({
+		method: "POST",
+		path: `/connections/${encodeURIComponent(connectionId)}/disconnect`,
+		...options,
+	});
+
+/** Put a disconnected connection back into service, testing it on the way. */
+export const reconnectConnection = (connectionId: string, options?: RequestOptions) =>
+	request<ConnectionTestResult>({
+		method: "POST",
+		path: `/connections/${encodeURIComponent(connectionId)}/reconnect`,
+		timeoutMs: 30_000,
+		...options,
+	});

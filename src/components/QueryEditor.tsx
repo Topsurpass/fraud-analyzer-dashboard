@@ -2,20 +2,26 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
-  ChartType,
+  QueryChartInput,
   PreviewResponse,
   SavedQueryCreate,
   SavedQueryRead,
   FlagRule,
 } from "@/contracts/api";
-import { CHART_TYPES } from "@/contracts/api";
 import { ApiError, previewQuery } from "@/services/api-client";
 import { formatDuration, formatInteger } from "@/services/format";
-import { Button, Field, Input, Panel, Select, Textarea } from "./ui";
+import { Button, Field, Input, Panel, Textarea } from "./ui";
 import { TableView } from "./charts/TableView";
 import { buildTable } from "@/services/charts/shape";
 import { SchemaBrowser } from "./SchemaBrowser";
 import { FlagRuleEditor } from "./FlagRuleEditor";
+import {
+  ChartSetEditor,
+  emptyChart,
+  needsSeries,
+  needsX,
+  needsY,
+} from "./ChartSetEditor";
 
 /**
  * Write SQL, see what it returns, then say how to draw it.
@@ -26,22 +32,26 @@ import { FlagRuleEditor } from "./FlagRuleEditor";
  */
 
 export interface QueryEditorValues extends SavedQueryCreate {
-  chart_type: ChartType;
   /**
    * Saved separately from the query itself: the engine stores rules under
    * PUT /queries/{id}/flag-rules, and on create the query has no id until the
    * POST returns. The caller sequences the two.
    */
   flag_rules: FlagRule[];
+  /**
+   * Saved separately from the query itself, like the rules: the engine stores
+   * them under PUT /queries/{id}/charts, and on create the query has no id
+   * until the POST returns. The caller sequences the two.
+   */
+  charts: QueryChartInput[];
 }
 
-const NEEDS_X: ChartType[] = ["line", "bar", "pie"];
-const NEEDS_Y: ChartType[] = ["line", "bar", "pie", "number"];
 
 export function QueryEditor({
   connectionId,
   initial,
   initialRules,
+  initialCharts,
   submitLabel,
   busy,
   error,
@@ -52,6 +62,7 @@ export function QueryEditor({
   connectionId: string;
   initial?: SavedQueryRead | null;
   initialRules?: FlagRule[];
+  initialCharts?: QueryChartInput[];
   submitLabel: string;
   busy: boolean;
   error?: ApiError | null;
@@ -62,10 +73,9 @@ export function QueryEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [sql, setSql] = useState(initial?.sql_text ?? "");
-  const [chartType, setChartType] = useState<ChartType>(initial?.chart_type ?? "table");
-  const [xField, setXField] = useState(initial?.x_field ?? "");
-  const [yField, setYField] = useState(initial?.y_field ?? "");
-  const [seriesField, setSeriesField] = useState(initial?.series_field ?? "");
+  const [charts, setCharts] = useState<QueryChartInput[]>(
+    initialCharts ?? [emptyChart(0)],
+  );
   const [rowLimit, setRowLimit] = useState(
     initial?.row_limit != null ? String(initial.row_limit) : "",
   );
@@ -106,10 +116,15 @@ export function QueryEditor({
   // the saved query was already configured with, so editing does not blank it.
   const columns = useMemo(() => {
     if (preview) return preview.columns;
-    return [initial?.x_field, initial?.y_field, initial?.series_field].filter(
-      (value): value is string => Boolean(value),
-    );
-  }, [preview, initial]);
+    // Whatever the saved charts already name, so opening the editor before
+    // running a preview does not blank a configured field.
+    const named = charts.flatMap((chart) => [
+      chart.x_field,
+      chart.y_field,
+      chart.series_field,
+    ]);
+    return [...new Set(named.filter((value): value is string => Boolean(value)))];
+  }, [preview, charts]);
 
   const previewMatchCounts = useMemo(() => {
     if (!preview?.flags?.rules.length) return null;
@@ -136,9 +151,21 @@ export function QueryEditor({
       });
       setPreview(result);
       // Offer sensible axes the moment the columns are known.
-      if (!xField && result.columns.length > 0) setXField(result.columns[0]);
-      if (!yField && result.columns.length > 1) setYField(result.columns[1]);
-      else if (!yField && result.columns.length === 1) setYField(result.columns[0]);
+      // Offer sensible axes to any chart that has none yet, the moment the
+      // real column names are known. Charts the analyst has already configured
+      // are left alone.
+      setCharts((current) =>
+        current.map((chart) => {
+          const next = { ...chart };
+          if (needsX(chart.chart_type) && !next.x_field && result.columns.length > 0) {
+            next.x_field = result.columns[0];
+          }
+          if (needsY(chart.chart_type) && !next.y_field) {
+            next.y_field = result.columns[1] ?? result.columns[0] ?? "";
+          }
+          return next;
+        }),
+      );
     } catch (cause) {
       setPreview(null);
       setPreviewError(
@@ -160,10 +187,13 @@ export function QueryEditor({
       name: name.trim(),
       description: description.trim() || null,
       sql_text: sql,
-      chart_type: chartType,
-      x_field: NEEDS_X.includes(chartType) && xField ? xField : null,
-      y_field: NEEDS_Y.includes(chartType) && yField ? yField : null,
-      series_field: chartType === "line" || chartType === "bar" ? seriesField || null : null,
+      charts: charts.map((chart) => ({
+        name: chart.name.trim(),
+        chart_type: chart.chart_type,
+        x_field: needsX(chart.chart_type) ? chart.x_field || null : null,
+        y_field: needsY(chart.chart_type) ? chart.y_field || null : null,
+        series_field: needsSeries(chart.chart_type) ? chart.series_field || null : null,
+      })),
       row_limit: rowLimit.trim() ? Number(rowLimit) : null,
       poll_interval_ms: pollInterval.trim() ? Number(pollInterval) : null,
       flag_rules: rules,
@@ -238,61 +268,13 @@ export function QueryEditor({
       <div className="space-y-3">
         <SchemaBrowser connectionId={connectionId} onInsert={insertAtCaret} />
 
-        <Panel title="Chart">
-          <div className="space-y-3 p-3">
-            <Field label="Type" htmlFor="query-chart">
-              <Select
-                id="query-chart"
-                value={chartType}
-                onChange={(event) => setChartType(event.target.value as ChartType)}
-              >
-                {CHART_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            {NEEDS_X.includes(chartType) ? (
-              <FieldPicker
-                label={chartType === "pie" ? "Category field" : "X field"}
-                id="query-x"
-                value={xField ?? ""}
-                columns={columns}
-                onChange={setXField}
-              />
-            ) : null}
-
-            {NEEDS_Y.includes(chartType) ? (
-              <FieldPicker
-                label="Value field"
-                id="query-y"
-                value={yField ?? ""}
-                columns={columns}
-                onChange={setYField}
-              />
-            ) : null}
-
-            {chartType === "line" || chartType === "bar" ? (
-              <FieldPicker
-                label="Series field"
-                id="query-series"
-                value={seriesField ?? ""}
-                columns={columns}
-                onChange={setSeriesField}
-                optional
-                hint="Splits the chart into one line or bar group per distinct value."
-              />
-            ) : null}
-
-            {columns.length === 0 ? (
-              <p className="text-[11px] text-muted">
-                Run a preview to choose fields from the real column names.
-              </p>
-            ) : null}
-          </div>
-        </Panel>
+        <ChartSetEditor
+          charts={charts}
+          onChange={setCharts}
+          columns={columns}
+          disabled={busy}
+          savedNames={initialCharts?.map((chart) => chart.name)}
+        />
 
         <Panel title="Execution">
           <div className="space-y-3 p-3">
@@ -351,41 +333,6 @@ export function QueryEditor({
   );
 }
 
-function FieldPicker({
-  label,
-  id,
-  value,
-  columns,
-  onChange,
-  optional,
-  hint,
-}: {
-  label: string;
-  id: string;
-  value: string;
-  columns: string[];
-  onChange: (value: string) => void;
-  optional?: boolean;
-  hint?: string;
-}) {
-  // A configured field that is no longer in the result set must still be
-  // listed, or opening the editor would silently drop it on save.
-  const options = value && !columns.includes(value) ? [value, ...columns] : columns;
-
-  return (
-    <Field label={label} htmlFor={id} hint={hint}>
-      <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{optional ? "None" : "Not set"}</option>
-        {options.map((column) => (
-          <option key={column} value={column}>
-            {column}
-          </option>
-        ))}
-      </Select>
-    </Field>
-  );
-}
-
 function PreviewPanel({
   preview,
   error,
@@ -400,7 +347,15 @@ function PreviewPanel({
     return buildTable({
       columns: preview.columns,
       rows: preview.rows,
-      chart: { type: "table", x_field: null, y_field: null, series_field: null, warnings: [] },
+      chart: {
+        id: "preview",
+        name: "Preview",
+        type: "table",
+        x_field: null,
+        y_field: null,
+        series_field: null,
+        warnings: [],
+      },
     });
   }, [preview]);
 

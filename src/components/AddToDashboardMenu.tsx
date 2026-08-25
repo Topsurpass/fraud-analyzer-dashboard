@@ -15,7 +15,7 @@ import { Popover, usePopoverClose } from "./Popover";
  * are named in the popover, which is also why the menu only dismisses itself
  * once the write has actually landed.
  */
-export function AddToDashboardMenu({ queryId }: { queryId: string }) {
+export function AddToDashboardMenu({ chartId }: { chartId: string }) {
   return (
     <Popover
       label="Add to dashboard"
@@ -24,15 +24,15 @@ export function AddToDashboardMenu({ queryId }: { queryId: string }) {
       triggerClassName="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
       panelClassName="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1"
     >
-      <AddToDashboardPanel queryId={queryId} />
+      <AddToDashboardPanel chartId={chartId} />
     </Popover>
   );
 }
 
 /** Inside the popover, so it can reach `usePopoverClose`. */
-function AddToDashboardPanel({ queryId }: { queryId: string }) {
+function AddToDashboardPanel({ chartId }: { chartId: string }) {
   const close = usePopoverClose();
-  const { dashboards, addQueryTo, removeQueryFrom, create } = useDashboards();
+  const { dashboards, addChartTo, removeChartFrom, create } = useDashboards();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ function AddToDashboardPanel({ queryId }: { queryId: string }) {
         ) : (
           <ul>
             {dashboards.map((dashboard) => {
-              const present = dashboard.query_ids.includes(queryId);
+              const present = dashboard.chart_ids.includes(chartId);
               return (
                 <li key={dashboard.id}>
                   <button
@@ -78,8 +78,8 @@ function AddToDashboardPanel({ queryId }: { queryId: string }) {
                           : "Could not add it to that dashboard",
                         () =>
                           present
-                            ? removeQueryFrom(dashboard.id, queryId)
-                            : addQueryTo(dashboard.id, queryId),
+                            ? removeChartFrom(dashboard.id, chartId)
+                            : addChartTo(dashboard.id, chartId),
                       )
                     }
                     className="flex w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] text-muted transition-colors disabled:opacity-40 hover:bg-surface hover:text-ink"
@@ -107,7 +107,7 @@ function AddToDashboardPanel({ queryId }: { queryId: string }) {
             disabled={busy}
             onClick={() =>
               attempt("Could not create the dashboard", async () => {
-                const dashboard = await create("New dashboard", [queryId]);
+                const dashboard = await create("New dashboard", [chartId]);
                 router.push(`/dashboards/${dashboard.id}`);
               })
             }

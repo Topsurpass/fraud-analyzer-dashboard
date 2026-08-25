@@ -71,6 +71,9 @@ export interface ConnectionRead {
 	sqlite_path: string | null;
 	ssl_mode: SslMode;
 	ssl_root_cert: string | null;
+	/** Disconnected by a person. Separate from `status`, which records how the
+	 *  last test went and stays as it was. */
+	paused: boolean;
 	status: ConnectionStatus;
 	last_tested_at: string | null;
 	last_test_error: string | null;
@@ -132,7 +135,38 @@ export interface ColumnList {
 	columns: ColumnInfo[];
 }
 
+/** One saved way of drawing a query's result. */
+export interface QueryChart {
+	id: string;
+	query_id: string;
+	name: string;
+	position: number;
+	chart_type: ChartType;
+	x_field: string | null;
+	y_field: string | null;
+	series_field: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** What the editor sends: the whole set, in display order. */
+export interface QueryChartInput {
+	name: string;
+	chart_type: ChartType;
+	x_field?: string | null;
+	y_field?: string | null;
+	series_field?: string | null;
+}
+
+export interface QueryChartSet {
+	query_id: string;
+	charts: QueryChart[];
+}
+
 export interface ChartSpec {
+	/** Which chart this mapping belongs to. A payload carries several. */
+	id: string;
+	name: string;
 	type: ChartType;
 	x_field: string | null;
 	y_field: string | null;
@@ -147,12 +181,11 @@ export interface SavedQueryRead {
 	description: string | null;
 	sql_text: string;
 	table_hint: string | null;
-	chart_type: ChartType;
-	x_field: string | null;
-	y_field: string | null;
-	series_field: string | null;
 	row_limit: number;
 	poll_interval_ms: number | null;
+	/** Every way this query's result can be drawn, in display order. Included
+	 *  here so a page rendering a card per chart costs one request. */
+	charts: QueryChart[];
 	created_at: string;
 	updated_at: string;
 }
@@ -162,10 +195,6 @@ export interface SavedQueryCreate {
 	sql_text: string;
 	description?: string | null;
 	table_hint?: string | null;
-	chart_type?: ChartType;
-	x_field?: string | null;
-	y_field?: string | null;
-	series_field?: string | null;
 	row_limit?: number | null;
 	poll_interval_ms?: number | null;
 }
@@ -428,7 +457,12 @@ export interface RunResponse {
 	data_hash: string;
 	columns: string[];
 	rows: Row[];
-	chart: ChartSpec;
+	/**
+	 * Every chart on the query, against the columns this run returned. One
+	 * payload serves them all, which is what lets three views of a result cost
+	 * one execution and one poll.
+	 */
+	charts: ChartSpec[];
 	flags: FlagOutcome;
 	poll_interval_ms: number;
 }
@@ -470,27 +504,30 @@ export interface ExecutionLogRead {
 /**
  * A named, ordered arrangement of saved queries. May span connections.
  *
- * `query_ids` is the display order. The engine keeps it honest: deleting a
+ * `chart_ids` is the display order. The engine keeps it honest: deleting a
  * saved query removes it from every dashboard, so this list never names
  * something that no longer exists.
  */
 export interface DashboardRead {
 	id: string;
 	name: string;
-	query_ids: string[];
+	chart_ids: string[];
+	/** The placed charts, in the same order. Resolved by the engine so a board
+	 *  does not cost a request per card just to learn what to poll. */
+	charts: QueryChart[];
 	created_at: string;
 	updated_at: string;
 }
 
 export interface DashboardCreate {
 	name: string;
-	query_ids?: string[];
+	chart_ids?: string[];
 }
 
 export interface DashboardUpdate {
 	name?: string;
 	/** Replaces the whole arrangement rather than merging into it. */
-	query_ids?: string[];
+	chart_ids?: string[];
 }
 
 /** Error envelope the engine returns on 4xx/5xx. */

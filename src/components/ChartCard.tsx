@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { SavedQueryRead } from "@/contracts/api";
+import type { ChartType, SavedQueryRead } from "@/contracts/api";
 import { buildCartesian, buildNumber, buildPie, buildTable } from "@/services/charts/shape";
 import Link from "next/link";
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
@@ -40,6 +40,14 @@ export interface ChartCardProps {
   onChanged?: () => void;
   /** The saved query was deleted on the engine. */
   onDeleted?: () => void;
+  /**
+   * Which of the query's charts to draw. Omitted means the first, which is
+   * what a query page showing one chart wants; a dashboard placing a specific
+   * chart passes its id.
+   */
+  chartId?: string | null;
+  /** Shown instead of the query name when a chart has its own. */
+  title?: string;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -53,6 +61,8 @@ export function ChartCard({
   onToggleExpand,
   onChanged,
   onDeleted,
+  chartId,
+  title,
   className,
   style,
 }: ChartCardProps) {
@@ -66,16 +76,29 @@ export function ChartCard({
   const now = useNow();
 
   const snapshot = poll.snapshot;
+  const spec = snapshot
+    ? (chartId
+        ? snapshot.charts.find((candidate) => candidate.id === chartId)
+        : snapshot.charts[0])
+    : undefined;
+  // Before the first payload lands there is no spec to read, and a table is
+  // the honest skeleton: it is what a query renders as until configured.
+  const chartType = spec?.type ?? "table";
+  const cardTitle = title ?? spec?.name ?? query.name;
 
   const view = useMemo(() => {
     if (!snapshot) return null;
+    // One payload carries every chart on the query, so picking one here is
+    // what lets several cards share a single execution and a single poll.
+    if (!spec) return null;
+
     const result = {
       columns: snapshot.columns,
       rows: snapshot.rows,
-      chart: snapshot.chart,
+      chart: spec,
     };
 
-    switch (snapshot.chart.type) {
+    switch (spec.type) {
       case "number":
         return { kind: "number" as const, data: buildNumber(result) };
       case "pie":
@@ -88,7 +111,7 @@ export function ChartCard({
       default:
         return { kind: "line" as const, data: buildCartesian(result) };
     }
-  }, [snapshot]);
+  }, [snapshot, spec]);
 
   const warnings = view
     ? "warnings" in view.data
@@ -162,6 +185,8 @@ export function ChartCard({
             ) : null}
             <CardMenu
               query={query}
+              chartId={chartId}
+              currentChartType={chartType}
               onMutated={() => {
                 // Re-poll immediately so a new chart type is drawn now rather
                 // than at the end of this card's interval.
@@ -186,7 +211,7 @@ export function ChartCard({
         <StatusLine
           poll={poll}
           now={now}
-          chartType={query.chart_type}
+          chartType={chartType}
         />
       </header>
 
@@ -194,15 +219,15 @@ export function ChartCard({
         {poll.phase === "error" && !snapshot ? (
           <CardError message={poll.error?.displayMessage ?? "Poll failed"} onRetry={poll.refresh} />
         ) : !view ? (
-          <ChartSkeleton type={query.chart_type} />
+          <ChartSkeleton type={chartType} />
         ) : view.kind === "number" ? (
-          <NumberCardView data={view.data} title={query.name} />
+          <NumberCardView data={view.data} title={cardTitle} />
         ) : view.kind === "pie" ? (
-          <PieChartView data={view.data} title={query.name} />
+          <PieChartView data={view.data} title={cardTitle} />
         ) : view.kind === "table" ? (
-          <TableView data={view.data} title={query.name} />
+          <TableView data={view.data} title={cardTitle} />
         ) : (
-          <CartesianChartView data={view.data} kind={view.kind} title={query.name} />
+          <CartesianChartView data={view.data} kind={view.kind} title={cardTitle} />
         )}
       </div>
 
@@ -235,7 +260,7 @@ function StatusLine({
 }: {
   poll: ReturnType<typeof useQueryPolling>;
   now: number;
-  chartType: SavedQueryRead["chart_type"];
+  chartType: ChartType;
 }) {
   const snapshot = poll.snapshot;
 

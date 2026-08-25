@@ -21,11 +21,18 @@ import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/
  * its membership is already reconciled - a query deleted anywhere is gone from
  * every board by the time this list is fetched.
  */
+/**
+ * Fetch the queries behind a board's charts, once each.
+ *
+ * Deduplicated on purpose: a board showing one result as a trend line and as
+ * the rows behind it holds two charts of one query, and fetching that query
+ * twice would reintroduce the per-card cost the query/chart split removed.
+ */
 async function resolveQueries(
   key: string,
   signal: AbortSignal,
 ): Promise<{ found: SavedQueryRead[]; stale: boolean }> {
-  const ids = key ? key.split(",") : [];
+  const ids = key ? [...new Set(key.split(","))] : [];
   const settled = await Promise.all(
     ids.map((queryId) =>
       getQuery(queryId, { signal }).then(
@@ -55,7 +62,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     reload: reloadDashboards,
     rename,
     remove,
-    removeQueryFrom,
+    removeChartFrom,
     moveQueryTo,
   } = useDashboards();
 
@@ -72,8 +79,17 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   // Keyed off a primitive so the loader below stays referentially stable: an
   // array literal rebuilt each render would re-fetch the whole board every time
   // anything on this page changed.
-  const key = dashboard ? dashboard.query_ids.join(",") : "";
-  const queryIds = useMemo(() => (key ? key.split(",") : []), [key]);
+  const chartIds = useMemo(
+    () => (dashboard ? dashboard.chart_ids : []),
+    [dashboard],
+  );
+  // The board resolves its own charts, so the queries to fetch come from them
+  // rather than from another round trip.
+  const placed = useMemo(() => dashboard?.charts ?? [], [dashboard]);
+  const key = useMemo(
+    () => [...new Set(placed.map((chart) => chart.query_id))].join(","),
+    [placed],
+  );
 
   const load = useCallback((signal: AbortSignal) => resolveQueries(key, signal), [key]);
   const queries = useResource(load);
@@ -188,14 +204,14 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         />
       ) : dashboardsLoading || queries.initial ? (
         <ChartGrid>
-          {(queryIds.length > 0 ? queryIds : ["a", "b", "c"]).map((queryId) => (
+          {(chartIds.length > 0 ? chartIds : ["a", "b", "c"]).map((chartId) => (
             <div
-              key={queryId}
+              key={chartId}
               className={`skeleton-sweep border border-line bg-surface ${PENDING_CELL_CLASS}`}
             />
           ))}
         </ChartGrid>
-      ) : queryIds.length === 0 ? (
+      ) : chartIds.length === 0 ? (
         <EmptyState
           title="This dashboard is empty"
           body="Open a connection and use the + on any card to add it here."
@@ -207,37 +223,48 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         />
       ) : (
         <ChartGrid>
-          {(queries.data?.found ?? []).map((query) => (
-            <ChartCard
-              key={query.id}
-              query={query}
-              className={chartCellClass(query.chart_type, expandedCards.isExpanded(query.id))}
-              expanded={expandedCards.isExpanded(query.id)}
-              onToggleExpand={() => expandedCards.toggle(query.id)}
-              onChanged={queries.reload}
-              onDeleted={() => {
-                board.reload();
-                reloadDashboards();
-                queries.reload();
-              }}
-              menuExtra={
-                dashboard ? (
-                  <BoardCardActions
-                    position={queryIds.indexOf(query.id)}
-                    count={queryIds.length}
-                    onMove={async (toIndex) => {
-                      await moveQueryTo(dashboard.id, query.id, toIndex);
-                      board.reload();
-                    }}
-                    onRemove={async () => {
-                      await removeQueryFrom(dashboard.id, query.id);
-                      board.reload();
-                    }}
-                  />
-                ) : null
-              }
-            />
-          ))}
+          {placed.map((chart) => {
+            const query = (queries.data?.found ?? []).find(
+              (candidate) => candidate.id === chart.query_id,
+            );
+            if (!query) return null;
+            return (
+              <ChartCard
+                key={chart.id}
+                query={query}
+                chartId={chart.id}
+                title={chart.name}
+                className={chartCellClass(
+                  chart.chart_type,
+                  expandedCards.isExpanded(chart.id),
+                )}
+                expanded={expandedCards.isExpanded(chart.id)}
+                onToggleExpand={() => expandedCards.toggle(chart.id)}
+                onChanged={queries.reload}
+                onDeleted={() => {
+                  board.reload();
+                  reloadDashboards();
+                  queries.reload();
+                }}
+                menuExtra={
+                  dashboard ? (
+                    <BoardCardActions
+                      position={chartIds.indexOf(chart.id)}
+                      count={chartIds.length}
+                      onMove={async (toIndex) => {
+                        await moveQueryTo(dashboard.id, chart.id, toIndex);
+                        board.reload();
+                      }}
+                      onRemove={async () => {
+                        await removeChartFrom(dashboard.id, chart.id);
+                        board.reload();
+                      }}
+                    />
+                  ) : null
+                }
+              />
+            );
+          })}
         </ChartGrid>
       )}
     </PageBody>

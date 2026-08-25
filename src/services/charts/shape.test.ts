@@ -10,6 +10,8 @@ import {
 } from "./shape";
 
 const spec = (overrides: Partial<ChartSpec> = {}): ChartSpec => ({
+  id: "c",
+  name: "Chart",
   type: "line",
   x_field: null,
   y_field: null,

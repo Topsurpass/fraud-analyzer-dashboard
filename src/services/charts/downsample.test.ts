@@ -67,31 +67,28 @@ describe("downsampleLTTB", () => {
     expect(kept).toHaveLength(100);
   });
 
-  it("scales linearly, so a bigger result cannot fall off a cliff", () => {
+  it("completes on a result far larger than any query returns", () => {
     // The failure this guards is an accidental quadratic - a nested scan over
-    // the bucket, say - which would be invisible at 1,000 points and lock the
-    // tab at 100,000.
+    // the bucket, say - which is invisible at 1,000 points and locks the tab at
+    // 200,000.
     //
-    // Asserting a wall-clock budget instead was flaky: the first call includes
-    // JIT warm-up, so a cold 50k run measured *slower* than a warm 200k one.
-    // The ratio between two warm runs is the property that actually matters.
-    const build = (count: number) =>
-      Array.from({ length: count }, (_, x) => ({ x, y: Math.sin(x / 20) }));
+    // Two earlier versions of this test were flaky: a wall-clock budget was
+    // really measuring JIT warm-up (a cold 50k run took 66ms, a warm 200k run
+    // took 16ms), and a ratio between two warm runs still moved with machine
+    // load. The bound here is deliberately enormous - linear finishes in
+    // milliseconds, quadratic on 200k would take minutes - so it can only fail
+    // for the reason it names.
+    const points = Array.from({ length: 200_000 }, (_, x) => ({
+      x,
+      y: Math.sin(x / 20),
+    }));
 
-    const time = (count: number) => {
-      const points = build(count);
-      const started = performance.now();
-      downsampleLTTB(points, MAX_PLOT_POINTS, valueOf);
-      return performance.now() - started;
-    };
+    const started = performance.now();
+    const kept = downsampleLTTB(points, MAX_PLOT_POINTS, valueOf);
+    const elapsed = performance.now() - started;
 
-    time(50_000); // warm the JIT; this measurement is discarded
-    const small = Math.max(time(50_000), 1);
-    const large = Math.max(time(200_000), 1);
-
-    // Linear would be ~4x for 4x the data. Ten leaves room for a noisy machine
-    // while still catching a quadratic, which would be ~16x.
-    expect(large / small).toBeLessThan(10);
+    expect(kept).toHaveLength(MAX_PLOT_POINTS);
+    expect(elapsed).toBeLessThan(10_000);
   });
 });
 

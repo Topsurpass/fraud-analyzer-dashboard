@@ -26,11 +26,8 @@ const query: SavedQueryRead = {
   description: "Live count of flagged transactions.",
   sql_text: "SELECT 1",
   table_hint: null,
-  chart_type: "number",
-  x_field: null,
-  y_field: "flagged",
-  series_field: null,
   row_limit: 1000,
+  charts: [],
   poll_interval_ms: 3000,
   created_at: "2026-08-22T12:00:00",
   updated_at: "2026-08-22T12:00:00",
@@ -46,15 +43,19 @@ function changed(hash: string, value: number): PollResponse {
     data_hash: `sha256:${hash}`,
     columns: ["flagged"],
     rows: [[value]],
-    chart: {
-      type: "number",
-      x_field: null,
-      y_field: "flagged",
-      series_field: null,
-      warnings: [],
-    },
+    charts: [
+      {
+        id: "chart-1",
+        name: "Count",
+        type: "number",
+        x_field: null,
+        y_field: "flagged",
+        series_field: null,
+        warnings: [],
+      },
+    ],
     flags: EMPTY_FLAGS,
-  poll_interval_ms: 3000,
+    poll_interval_ms: 3000,
   };
 }
 
@@ -179,13 +180,17 @@ describe("ChartCard", () => {
   it("surfaces the engine's chart warnings rather than hiding a guessed axis", async () => {
     pollQuery.mockResolvedValue({
       ...changed("aaa", 20),
-      chart: {
-        type: "number",
-        x_field: null,
-        y_field: "flagged",
-        series_field: null,
-        warnings: ["value axis defaulted to \"flagged\""],
-      },
+      charts: [
+        {
+          id: "chart-1",
+          name: "Count",
+          type: "number",
+          x_field: null,
+          y_field: "flagged",
+          series_field: null,
+          warnings: ['value axis defaulted to "flagged"'],
+        },
+      ],
     } as PollResponse);
 
     render(<ChartCard query={query} />);

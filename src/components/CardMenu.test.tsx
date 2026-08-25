@@ -5,7 +5,8 @@ import type { SavedQueryRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { CardMenu } from "./CardMenu";
 
-const updateQuery = vi.hoisted(() => vi.fn());
+const getQueryCharts = vi.hoisted(() => vi.fn());
+const putQueryCharts = vi.hoisted(() => vi.fn());
 const deleteQuery = vi.hoisted(() => vi.fn());
 const runQuery = vi.hoisted(() => vi.fn());
 
@@ -19,7 +20,7 @@ vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",
   );
-  return { ...actual, updateQuery, deleteQuery, runQuery };
+  return { ...actual, getQueryCharts, putQueryCharts, deleteQuery, runQuery };
 });
 
 const query: SavedQueryRead = {
@@ -29,11 +30,8 @@ const query: SavedQueryRead = {
   description: null,
   sql_text: "SELECT 1",
   table_hint: null,
-  chart_type: "bar",
-  x_field: "country",
-  y_field: "declines",
-  series_field: null,
   row_limit: 1000,
+  charts: [],
   poll_interval_ms: 5000,
   created_at: "2026-08-22T12:00:00",
   updated_at: "2026-08-22T12:00:00",
@@ -45,7 +43,26 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
-  updateQuery.mockReset().mockResolvedValue(query);
+  // Chart type is a property of the chart now, so switching it is a
+  // read-modify-write of the query's chart set rather than a query update.
+  getQueryCharts.mockReset().mockResolvedValue({
+    query_id: "q1",
+    charts: [
+      {
+        id: "chart-1",
+        query_id: "q1",
+        name: "Chart",
+        position: 0,
+        chart_type: "table",
+        x_field: null,
+        y_field: null,
+        series_field: null,
+        created_at: "2026-08-24T09:00:00Z",
+        updated_at: "2026-08-24T09:00:00Z",
+      },
+    ],
+  });
+  putQueryCharts.mockReset().mockResolvedValue({ query_id: "q1", charts: [] });
   deleteQuery.mockReset().mockResolvedValue(undefined);
   runQuery.mockReset().mockResolvedValue({});
 });
@@ -53,7 +70,7 @@ beforeEach(() => {
 describe("CardMenu", () => {
   it("offers every chart type the engine supports", async () => {
     const user = userEvent.setup();
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
     await openMenu(user);
 
     for (const label of ["Line", "Bar", "Pie", "Number", "Table"]) {
@@ -63,7 +80,7 @@ describe("CardMenu", () => {
 
   it("marks the current type with a glyph, not colour alone", async () => {
     const user = userEvent.setup();
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="bar" />);
     await openMenu(user);
 
     expect(screen.getByRole("button", { name: "Bar" })).toHaveAttribute("aria-pressed", "true");
@@ -74,30 +91,33 @@ describe("CardMenu", () => {
   it("writes a chart-type change through to the engine", async () => {
     const user = userEvent.setup();
     const onMutated = vi.fn();
-    render(<CardMenu query={query} onMutated={onMutated} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" onMutated={onMutated} />);
     await openMenu(user);
 
     await user.click(screen.getByRole("button", { name: "Pie" }));
 
-    await waitFor(() => expect(updateQuery).toHaveBeenCalledWith("q1", { chart_type: "pie" }));
+    await waitFor(() => expect(putQueryCharts).toHaveBeenCalled());
+    // Only the chart this card draws changes type; the rest of the set is sent
+    // back untouched so their ids - and the dashboards placing them - survive.
+    expect(putQueryCharts.mock.calls[0][1][0].chart_type).toBe("pie");
     await waitFor(() => expect(onMutated).toHaveBeenCalled());
   });
 
   it("does not call the engine when the chosen type is already active", async () => {
     const user = userEvent.setup();
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="bar" />);
     await openMenu(user);
 
     await user.click(screen.getByRole("button", { name: "Bar" }));
-    expect(updateQuery).not.toHaveBeenCalled();
+    expect(putQueryCharts).not.toHaveBeenCalled();
   });
 
   it("reports a failed chart change instead of pretending it worked", async () => {
     const user = userEvent.setup();
-    updateQuery.mockRejectedValue(
+    putQueryCharts.mockRejectedValue(
       new ApiError({ kind: "http", message: "Chart type is invalid", url: "/x", status: 422 }),
     );
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
     await openMenu(user);
 
     await user.click(screen.getByRole("button", { name: "Pie" }));
@@ -107,7 +127,7 @@ describe("CardMenu", () => {
   it("runs the query on demand", async () => {
     const user = userEvent.setup();
     const onMutated = vi.fn();
-    render(<CardMenu query={query} onMutated={onMutated} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" onMutated={onMutated} />);
     await openMenu(user);
 
     await user.click(screen.getByRole("button", { name: "Run now" }));
@@ -117,7 +137,7 @@ describe("CardMenu", () => {
 
   it("links to the full editor", async () => {
     const user = userEvent.setup();
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
     await openMenu(user);
 
     expect(screen.getByRole("link", { name: "Edit query" })).toHaveAttribute(
@@ -142,7 +162,7 @@ describe("CardMenu", () => {
 
   it("lets a confirmation be backed out of", async () => {
     const user = userEvent.setup();
-    render(<CardMenu query={query} />);
+    render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
     await openMenu(user);
 
     await user.click(screen.getByRole("button", { name: "Delete query" }));
@@ -163,7 +183,7 @@ describe("CardMenu", () => {
   describe("dismissing", () => {
     it("closes once the chart type has been written through", async () => {
       const user = userEvent.setup();
-      render(<CardMenu query={query} />);
+      render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
       await openMenu(user);
 
       await user.click(screen.getByRole("button", { name: "Pie" }));
@@ -171,15 +191,15 @@ describe("CardMenu", () => {
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: "Pie" })).not.toBeInTheDocument(),
       );
-      expect(updateQuery).toHaveBeenCalledWith("q1", { chart_type: "pie" });
+      expect(putQueryCharts.mock.calls[0][1][0].chart_type).toBe("pie");
     });
 
     it("stays open when that write fails, because it holds the error", async () => {
-      updateQuery.mockRejectedValue(
+      putQueryCharts.mockRejectedValue(
         new ApiError({ kind: "network", message: "down", url: "/queries/q1" }),
       );
       const user = userEvent.setup();
-      render(<CardMenu query={query} />);
+      render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
       await openMenu(user);
 
       await user.click(screen.getByRole("button", { name: "Pie" }));
@@ -193,7 +213,7 @@ describe("CardMenu", () => {
       render(
         <div>
           <p>the card behind the menu</p>
-          <CardMenu query={query} />
+          <CardMenu query={query} chartId="chart-1" currentChartType="table" />
         </div>,
       );
       await openMenu(user);
@@ -205,7 +225,7 @@ describe("CardMenu", () => {
 
     it("keeps the delete confirmation on screen rather than closing on it", async () => {
       const user = userEvent.setup();
-      render(<CardMenu query={query} />);
+      render(<CardMenu query={query} chartId="chart-1" currentChartType="table" />);
       await openMenu(user);
 
       await user.click(screen.getByRole("button", { name: "Delete query" }));
@@ -220,7 +240,7 @@ describe("CardMenu", () => {
       render(
         <div>
           <p>the card behind the menu</p>
-          <CardMenu query={query} />
+          <CardMenu query={query} chartId="chart-1" currentChartType="table" />
         </div>,
       );
       await openMenu(user);

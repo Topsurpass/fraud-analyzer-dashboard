@@ -119,7 +119,7 @@ export function Rail({
             <ul>
               {dashboards.map((dashboard) => {
                 const href = `/dashboards/${dashboard.id}`;
-                const count = dashboard.query_ids.length;
+                const count = dashboard.chart_ids.length;
                 return (
                   <li key={dashboard.id}>
                     <RailLink

@@ -19,6 +19,8 @@ const getQuery = vi.hoisted(() => vi.fn());
 const updateQuery = vi.hoisted(() => vi.fn());
 const getFlagRules = vi.hoisted(() => vi.fn());
 const putFlagRules = vi.hoisted(() => vi.fn());
+const getQueryCharts = vi.hoisted(() => vi.fn());
+const putQueryCharts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
@@ -30,6 +32,8 @@ vi.mock("@/services/api-client", async () => {
     updateQuery,
     getFlagRules,
     putFlagRules,
+    getQueryCharts,
+    putQueryCharts,
     deleteQuery: vi.fn(),
     listConnections: vi.fn().mockResolvedValue([]),
     listDashboards: vi.fn().mockResolvedValue([]),
@@ -57,11 +61,8 @@ function savedQuery(over: Partial<SavedQueryRead> = {}): SavedQueryRead {
     description: null,
     sql_text: "SELECT amount FROM txns",
     table_hint: null,
-    chart_type: "table",
-    x_field: null,
-    y_field: null,
-    series_field: null,
     row_limit: 1000,
+  charts: [],
     poll_interval_ms: 30000,
     created_at: "2026-08-24T09:00:00Z",
     updated_at: "2026-08-24T09:00:00Z",
@@ -111,6 +112,8 @@ beforeEach(() => {
   getQuery.mockResolvedValue(savedQuery());
   updateQuery.mockResolvedValue(savedQuery({ updated_at: "2026-08-24T10:00:00Z" }));
   putFlagRules.mockResolvedValue(ruleSet("999"));
+  getQueryCharts.mockResolvedValue({ query_id: "q1", charts: [] });
+  putQueryCharts.mockResolvedValue({ query_id: "q1", charts: [] });
 });
 
 describe("saved flag rules on reopen", () => {
