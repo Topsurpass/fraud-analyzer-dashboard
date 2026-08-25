@@ -783,3 +783,193 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
     hasAlerts: built.some((row) => row.cells.some((cell) => cell.alert)),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Movers: two windows, totalled per category
+// ---------------------------------------------------------------------------
+
+export interface MoverRow {
+  category: string;
+  previous: number;
+  current: number;
+  /** current - previous. The number the rows are ranked by. */
+  delta: number;
+  /**
+   * Proportional change, or null when the previous window was zero. A ratio
+   * against zero has no value, and printing one invites acting on it.
+   */
+  pctChange: number | null;
+  /** True when any row behind either window total was flagged. */
+  alert: boolean;
+}
+
+export interface MoversData {
+  rows: MoverRow[];
+  previousTotal: number;
+  currentTotal: number;
+  /** Bucket labels each window spans, so the card can name what it compared. */
+  previousSpan: [string, string] | null;
+  currentSpan: [string, string] | null;
+  /** Largest single-category value in either window; the bar scale. */
+  scaleMax: number;
+  warnings: string[];
+  hasAlerts: boolean;
+}
+
+const EMPTY_MOVERS: MoversData = {
+  rows: [],
+  previousTotal: 0,
+  currentTotal: 0,
+  previousSpan: null,
+  currentSpan: null,
+  scaleMax: 0,
+  warnings: [],
+  hasAlerts: false,
+};
+
+/** Past this the list stops being a ranking and becomes a directory. */
+export const MAX_MOVER_ROWS = 60;
+
+/**
+ * The same two windows as `buildCompare`, totalled per category.
+ *
+ * `buildCompare` answers "did this move". This answers "which terminal moved",
+ * which is the question that names a suspect: an hour where total volume held
+ * steady while one terminal quadrupled and another went dark reads as flat on a
+ * time overlay and as two obvious rows here.
+ *
+ * The split is by *distinct bucket*, not by row position. A result grouped by
+ * (bucket, terminal) interleaves terminals within every bucket, so halving the
+ * row list would cut through the middle of a bucket and assign one terminal's
+ * 09:00 to the previous window and another's to the current. Bucket order is
+ * the only thing that carries time here.
+ *
+ * Rows are ranked by the size of the change rather than by either total,
+ * because the biggest terminal is a fact an analyst already knows and the
+ * biggest *change* is the one they do not.
+ */
+export function buildMovers(result: ResultSet): MoversData {
+  const { columns, rows } = result;
+  const fields = resolveFields(result);
+  if (!fields.xKey || !fields.yKey || !fields.seriesKey) {
+    return {
+      ...EMPTY_MOVERS,
+      warnings: [
+        ...fields.warnings,
+        !fields.seriesKey
+          ? "Comparing per category needs a category column as well as a bucket and a measure."
+          : "Comparing two windows needs a bucket column and a measure column.",
+      ],
+    };
+  }
+
+  const xIndex = columns.indexOf(fields.xKey);
+  const yIndex = columns.indexOf(fields.yKey);
+  const seriesIndex = columns.indexOf(fields.seriesKey);
+  const warnings = [...fields.warnings];
+
+  const label = (cell: Cell | undefined) =>
+    cell === null || cell === undefined ? "" : String(cell);
+
+  // Insertion order is the query's ORDER BY, which is the only ordering that
+  // can be trusted to mean time here.
+  const buckets: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const bucket = label(row[xIndex]);
+    if (!seen.has(bucket)) {
+      seen.add(bucket);
+      buckets.push(bucket);
+    }
+  }
+
+  if (buckets.length < 2) {
+    return {
+      ...EMPTY_MOVERS,
+      warnings: [
+        ...warnings,
+        "Comparing two windows needs at least two time buckets in the result.",
+      ],
+    };
+  }
+
+  const half = Math.floor(buckets.length / 2);
+  const offset = buckets.length - half * 2;
+  if (offset > 0) {
+    warnings.push(
+      "An odd number of buckets: the oldest was dropped so both windows cover the same span.",
+    );
+  }
+
+  const previousBuckets = new Set(buckets.slice(offset, offset + half));
+  const currentBuckets = new Set(buckets.slice(offset + half));
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+
+  const totals = new Map<string, { previous: number; current: number; alert: boolean }>();
+  for (const [index, row] of rows.entries()) {
+    const bucket = label(row[xIndex]);
+    const inPrevious = previousBuckets.has(bucket);
+    // A dropped odd bucket belongs to neither window.
+    if (!inPrevious && !currentBuckets.has(bucket)) continue;
+
+    const value = toNumber(row[yIndex]);
+    if (!Number.isFinite(value)) continue;
+
+    const category = label(row[seriesIndex]);
+    let entry = totals.get(category);
+    if (!entry) {
+      entry = { previous: 0, current: 0, alert: false };
+      totals.set(category, entry);
+    }
+    if (inPrevious) entry.previous += value;
+    else entry.current += value;
+    if (anomalies.flags[index] === true) entry.alert = true;
+  }
+
+  if (totals.size === 0) {
+    return { ...EMPTY_MOVERS, warnings };
+  }
+
+  let ranked: MoverRow[] = [...totals.entries()]
+    .map(([category, entry]) => ({
+      category,
+      previous: entry.previous,
+      current: entry.current,
+      delta: entry.current - entry.previous,
+      pctChange:
+        entry.previous === 0 ? null : (entry.current - entry.previous) / Math.abs(entry.previous),
+      alert: entry.alert,
+    }))
+    // Largest movement first, either direction: a terminal going dark is as
+    // much a finding as one lighting up.
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  if (ranked.length > MAX_MOVER_ROWS) {
+    warnings.push(
+      `Showing the ${MAX_MOVER_ROWS} biggest movers of ${ranked.length} categories.`,
+    );
+    ranked = ranked.slice(0, MAX_MOVER_ROWS);
+  }
+
+  const spanOf = (list: string[]): [string, string] | null =>
+    list.length === 0 ? null : [list[0], list[list.length - 1]];
+
+  return {
+    rows: ranked,
+    // Totalled over every category, including any the ranking cut, so the
+    // headline describes the window rather than the visible rows.
+    previousTotal: [...totals.values()].reduce((sum, entry) => sum + entry.previous, 0),
+    currentTotal: [...totals.values()].reduce((sum, entry) => sum + entry.current, 0),
+    previousSpan: spanOf(buckets.slice(offset, offset + half)),
+    currentSpan: spanOf(buckets.slice(offset + half)),
+    scaleMax: ranked.reduce((max, row) => Math.max(max, row.previous, row.current), 0),
+    warnings,
+    hasAlerts: ranked.some((row) => row.alert),
+  };
+}

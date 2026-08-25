@@ -30,6 +30,18 @@ export function ChartSkeleton({ type }: { type: ChartType }) {
         </div>
       );
 
+    case "movers":
+      return (
+        <div className="skeleton-sweep h-full space-y-2 px-3 py-3">
+          {[0.9, 0.7, 0.55, 0.4, 0.3, 0.22].map((width, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <div className="h-2 w-10 bg-line/50" />
+              <div className="h-[2px] bg-line" style={{ width: `${width * 100}%` }} />
+            </div>
+          ))}
+        </div>
+      );
+
     case "heatmap":
       return (
         <div className="skeleton-sweep grid h-full grid-cols-8 gap-[2px] px-3 py-3">

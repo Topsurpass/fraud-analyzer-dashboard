@@ -4,9 +4,11 @@ import { MAX_PLOT_POINTS } from "./downsample";
 import {
   MAX_HEAT_BUCKETS,
   MAX_HEAT_ROWS,
+  MAX_MOVER_ROWS,
   buildCartesian,
   buildCompare,
   buildHeatmap,
+  buildMovers,
   buildNumber,
   buildPie,
   buildTable,
@@ -790,5 +792,199 @@ describe("buildCompare at scale", () => {
 
     expect(data.points.some((point) => point.bucket === "t3777")).toBe(true);
     expect(data.hasAlerts).toBe(true);
+  });
+});
+
+describe("buildMovers", () => {
+  const byTerminal = spec({
+    type: "movers",
+    x_field: "bucket",
+    y_field: "amount",
+    series_field: "terminal",
+  });
+
+  /** Rows grouped by (bucket, terminal), the way such a query returns them. */
+  const result = (rows: (string | number | null)[][], flags?: FlagOutcome) => ({
+    columns: ["bucket", "terminal", "amount"],
+    rows,
+    chart: byTerminal,
+    ...(flags ? { flags } : {}),
+  });
+
+  it("totals each terminal across the older and newer halves of the buckets", () => {
+    const data = buildMovers(
+      result([
+        ["09", "T1", 10],
+        ["09", "T2", 5],
+        ["10", "T1", 20],
+        ["10", "T2", 5],
+        // 09 and 10 are the previous window; 11 and 12 the current one.
+        ["11", "T1", 100],
+        ["11", "T2", 5],
+        ["12", "T1", 100],
+        ["12", "T2", 5],
+      ]),
+    );
+
+    const t1 = data.rows.find((row) => row.category === "T1");
+    expect(t1).toMatchObject({ previous: 30, current: 200, delta: 170 });
+    const t2 = data.rows.find((row) => row.category === "T2");
+    expect(t2).toMatchObject({ previous: 10, current: 10, delta: 0 });
+  });
+
+  it("splits on distinct buckets, not on row position", () => {
+    /*
+     * The regression that matters. Rows are interleaved by terminal, so
+     * halving the row list would put T1's 10:00 in the previous window and
+     * T2's 10:00 in the current one - every total silently wrong.
+     */
+    const data = buildMovers(
+      result([
+        ["09", "A", 1],
+        ["09", "B", 1],
+        ["09", "C", 1],
+        ["10", "A", 8],
+        ["10", "B", 8],
+        ["10", "C", 8],
+      ]),
+    );
+
+    for (const row of data.rows) {
+      expect(row.previous).toBe(1);
+      expect(row.current).toBe(8);
+    }
+  });
+
+  it("ranks by the size of the change, not by either total", () => {
+    // T1 is far bigger in absolute terms; T2 is the one that moved. The
+    // biggest terminal is a fact an analyst already knows.
+    const data = buildMovers(
+      result([
+        ["09", "T1", 1000],
+        ["09", "T2", 10],
+        ["10", "T1", 1010],
+        ["10", "T2", 500],
+      ]),
+    );
+
+    expect(data.rows[0].category).toBe("T2");
+  });
+
+  it("ranks a collapse as highly as a spike", () => {
+    // A terminal going dark is as much a finding as one lighting up.
+    const data = buildMovers(
+      result([
+        ["09", "Quiet", 900],
+        ["09", "Steady", 100],
+        ["10", "Quiet", 0],
+        ["10", "Steady", 110],
+      ]),
+    );
+
+    expect(data.rows[0].category).toBe("Quiet");
+    expect(data.rows[0].delta).toBe(-900);
+  });
+
+  it("reports proportional change, and refuses to compute it against zero", () => {
+    const data = buildMovers(
+      result([
+        ["09", "Grew", 100],
+        ["09", "New", 0],
+        ["10", "Grew", 150],
+        ["10", "New", 40],
+      ]),
+    );
+
+    expect(data.rows.find((row) => row.category === "Grew")?.pctChange).toBeCloseTo(0.5);
+    // 0 -> 40 is not "up 100%": a ratio against zero has no value.
+    expect(data.rows.find((row) => row.category === "New")?.pctChange).toBeNull();
+  });
+
+  it("names the buckets each window spans", () => {
+    const data = buildMovers(
+      result([
+        ["09", "T1", 1],
+        ["10", "T1", 1],
+        ["11", "T1", 1],
+        ["12", "T1", 1],
+      ]),
+    );
+
+    expect(data.previousSpan).toEqual(["09", "10"]);
+    expect(data.currentSpan).toEqual(["11", "12"]);
+  });
+
+  it("drops the oldest bucket when there is an odd number of them", () => {
+    // Three buckets cannot make two equal windows, and the dropped bucket must
+    // land in neither total rather than skewing one.
+    const data = buildMovers(
+      result([
+        ["09", "T1", 99],
+        ["10", "T1", 1],
+        ["11", "T1", 5],
+      ]),
+    );
+
+    expect(data.rows[0]).toMatchObject({ previous: 1, current: 5 });
+    expect(data.warnings.join(" ")).toContain("oldest was dropped");
+  });
+
+  it("totals the whole window even when the ranking is capped", () => {
+    const rows: (string | number)[][] = [];
+    for (let index = 0; index < MAX_MOVER_ROWS + 10; index += 1) {
+      rows.push(["09", `T${index}`, 1]);
+      rows.push(["10", `T${index}`, 1 + index]);
+    }
+
+    const data = buildMovers(result(rows));
+
+    expect(data.rows).toHaveLength(MAX_MOVER_ROWS);
+    expect(data.warnings.join(" ")).toContain(`of ${MAX_MOVER_ROWS + 10} categories`);
+    // Every category counts toward the headline, including the cut ones.
+    expect(data.previousTotal).toBe(MAX_MOVER_ROWS + 10);
+  });
+
+  it("marks a category any of whose rows were flagged", () => {
+    const data = buildMovers(
+      result(
+        [
+          ["09", "T1", 10],
+          ["09", "T2", 10],
+          ["10", "T1", 900],
+          ["10", "T2", 10],
+        ],
+        caught("Spike", [2]),
+      ),
+    );
+
+    expect(data.rows.find((row) => row.category === "T1")?.alert).toBe(true);
+    expect(data.rows.find((row) => row.category === "T2")?.alert).toBe(false);
+    expect(data.hasAlerts).toBe(true);
+  });
+
+  it("asks for a category column instead of guessing one", () => {
+    const data = buildMovers({
+      columns: ["bucket", "amount"],
+      rows: [
+        ["09", 5],
+        ["10", 6],
+      ],
+      chart: spec({ type: "movers", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.rows).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("category column");
+  });
+
+  it("refuses to compare when the result holds a single bucket", () => {
+    const data = buildMovers(
+      result([
+        ["09", "T1", 5],
+        ["09", "T2", 6],
+      ]),
+    );
+
+    expect(data.rows).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("at least two time buckets");
   });
 });

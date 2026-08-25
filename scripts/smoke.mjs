@@ -52,6 +52,9 @@ const EXPECTATIONS = {
   // is the failure this chart type has that the others do not, and it is
   // invisible to a "did anything draw" assertion.
   compare: { selector: "path.recharts-line-curve", min: 2 },
+  // A row header per category, same as the heatmap: the marks are positioned
+  // divs with no class of their own.
+  movers: { selector: "th[scope=row]", min: 1 },
   // A row header per category. The coloured swatches are divs with no class of
   // their own, so the row headers are what proves the grid was built.
   heatmap: { selector: "th[scope=row]", min: 1 },

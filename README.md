@@ -84,7 +84,7 @@ under jsdom a chart that renders zero bars and one that renders ten are
 indistinguishable - both are "a `<BarChart />` that mounted without throwing".
 Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
-asserts on the actual SVG geometry for all seven chart types, checks that every
+asserts on the actual SVG geometry for all eight chart types, checks that every
 card reporting a flagged series actually painted its hatch pattern, checks that
 the card menu opens and then closes on an outside click, on Escape and when
 another menu opens, checks that no card sits in a stale state, and checks that the layout does not overflow at
@@ -121,8 +121,8 @@ contract at the boundary. Routes hold glue only.
 
 ### Charts built for a fraud queue
 
-Five of the seven chart types answer "what is the shape of this". Two answer the
-questions an analyst actually opens the app with.
+Five of the eight chart types answer "what is the shape of this". Three answer
+the questions an analyst actually opens the app with.
 
 **`compare` - the same measure over two consecutive windows.** Configure a time
 bucket (`x_field`) and a measure (`y_field`), and write a query returning *twice*
@@ -151,6 +151,31 @@ Totals are computed over every bucket and only the plot is thinned, so the
 headline number never depends on how many pixels were available. The largest
 divergence is exactly the kind of single bucket a downsampler is entitled to
 drop, so it is found first.
+
+**`movers` - the same two windows, totalled per category.** `compare` answers
+"did this move". `movers` answers "which terminal moved", which is the question
+that names a suspect: an hour where total volume held steady while one terminal
+quadrupled and another went dark reads as flat on a time overlay and as two
+obvious rows here. Configure the bucket as `x_field`, the measure as `y_field`
+and the category as `series_field`.
+
+The split here is by *distinct bucket*, not by row position. A result grouped by
+(bucket, terminal) interleaves terminals within every bucket, so halving the row
+list would cut through the middle of a bucket and put one terminal's 09:00 in
+the previous window and another's in the current. Bucket order is the only thing
+carrying time in that shape.
+
+Each row is a dumbbell: a hollow mark for the previous window, a filled one for
+the current, joined by a segment whose *length is the change*. That makes "moved
+a lot" a physical property of the row rather than arithmetic the reader
+performs, and rows are pre-sorted by it so the scan can stop as soon as the
+segments get short. Two paired bars would encode the same numbers and read
+worse - the eye would have to measure two lengths and subtract them, which is
+exactly the work this chart removes. Ranking is by size of change rather than by
+either total, because the biggest terminal is a fact an analyst already knows
+and the biggest change is the one they do not. Direction is carried by an arrow
+and a sign, never by colour alone, which leaves the alert colour meaning only
+"a rule matched".
 
 **`heatmap` - a category against a time bucket, coloured by a measure.**
 Configure the bucket as `x_field` (columns), the category as `series_field`

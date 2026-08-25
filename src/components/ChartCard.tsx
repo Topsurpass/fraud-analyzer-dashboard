@@ -6,6 +6,7 @@ import {
   buildCartesian,
   buildCompare,
   buildHeatmap,
+  buildMovers,
   buildNumber,
   buildPie,
   buildTable,
@@ -24,6 +25,7 @@ import { NumberCardView } from "./charts/NumberCardView";
 import { PieChartView } from "./charts/PieChartView";
 import { CompareChartView } from "./charts/CompareChartView";
 import { HeatmapView } from "./charts/HeatmapView";
+import { MoversView } from "./charts/MoversView";
 import { TableView } from "./charts/TableView";
 
 /**
@@ -118,6 +120,8 @@ export function ChartCard({
         return { kind: "bar" as const, data: buildCartesian(result) };
       case "compare":
         return { kind: "compare" as const, data: buildCompare(result) };
+      case "movers":
+        return { kind: "movers" as const, data: buildMovers(result) };
       case "heatmap":
         return { kind: "heatmap" as const, data: buildHeatmap(result) };
       case "line":
@@ -248,6 +252,8 @@ export function ChartCard({
           <NumberCardView data={view.data} title={cardTitle} />
         ) : view.kind === "compare" ? (
           <CompareChartView data={view.data} title={cardTitle} />
+        ) : view.kind === "movers" ? (
+          <MoversView data={view.data} title={cardTitle} />
         ) : view.kind === "heatmap" ? (
           <HeatmapView data={view.data} title={cardTitle} />
         ) : view.kind === "pie" ? (

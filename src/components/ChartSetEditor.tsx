@@ -22,15 +22,23 @@ import { FieldPicker } from "@/components/FieldPicker";
  * it when a board empties.
  */
 
-const NEEDS_X: ChartType[] = ["line", "bar", "pie", "compare", "heatmap"];
-const NEEDS_Y: ChartType[] = ["line", "bar", "pie", "number", "compare", "heatmap"];
+const NEEDS_X: ChartType[] = ["line", "bar", "pie", "compare", "movers", "heatmap"];
+const NEEDS_Y: ChartType[] = [
+  "line",
+  "bar",
+  "pie",
+  "number",
+  "compare",
+  "movers",
+  "heatmap",
+];
 
 /**
  * Charts whose category axis is required rather than an optional split.
  * A heatmap with no category is a single row, which is a line chart drawn
  * badly - so the editor asks for one instead of rendering a stripe.
  */
-const REQUIRES_SERIES: ChartType[] = ["heatmap"];
+const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers"];
 
 export function needsX(type: ChartType): boolean {
   return NEEDS_X.includes(type);
@@ -52,19 +60,23 @@ export function seriesIsRequired(type: ChartType): boolean {
 /** What the x axis actually means, per chart type. */
 export function xFieldLabel(type: ChartType): string {
   if (type === "pie") return "Category field";
-  if (type === "compare") return "Time bucket field";
+  if (type === "compare" || type === "movers") return "Time bucket field";
   if (type === "heatmap") return "Bucket field (columns)";
   return "X field";
 }
 
 export function yFieldLabel(type: ChartType): string {
   if (type === "pie") return "Value field";
-  if (type === "compare" || type === "heatmap") return "Measure field";
+  if (type === "compare" || type === "heatmap" || type === "movers") {
+    return "Measure field";
+  }
   return "Y field";
 }
 
 export function seriesFieldLabel(type: ChartType): string {
-  return type === "heatmap" ? "Category field (rows)" : "Series field";
+  if (type === "heatmap") return "Category field (rows)";
+  if (type === "movers") return "Compare per (category)";
+  return "Series field";
 }
 
 export function emptyChart(index: number, type: ChartType = "table"): QueryChartInput {

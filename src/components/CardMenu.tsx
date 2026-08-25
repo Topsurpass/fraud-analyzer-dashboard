@@ -36,6 +36,7 @@ const CHART_LABELS: Record<ChartType, string> = {
   number: "Number",
   table: "Table",
   compare: "Compare periods",
+  movers: "Movers by category",
   heatmap: "Heatmap",
 };
 
