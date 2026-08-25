@@ -67,13 +67,31 @@ describe("downsampleLTTB", () => {
     expect(kept).toHaveLength(100);
   });
 
-  it("is fast enough to run on every render", () => {
-    const points = flat(50_000).map((point, x) => ({ ...point, y: Math.sin(x / 20) }));
-    const started = performance.now();
-    downsampleLTTB(points, MAX_PLOT_POINTS, valueOf);
-    // Generous: the point is to catch an accidental quadratic, not to pin a
-    // number that varies with the machine running CI.
-    expect(performance.now() - started).toBeLessThan(250);
+  it("scales linearly, so a bigger result cannot fall off a cliff", () => {
+    // The failure this guards is an accidental quadratic - a nested scan over
+    // the bucket, say - which would be invisible at 1,000 points and lock the
+    // tab at 100,000.
+    //
+    // Asserting a wall-clock budget instead was flaky: the first call includes
+    // JIT warm-up, so a cold 50k run measured *slower* than a warm 200k one.
+    // The ratio between two warm runs is the property that actually matters.
+    const build = (count: number) =>
+      Array.from({ length: count }, (_, x) => ({ x, y: Math.sin(x / 20) }));
+
+    const time = (count: number) => {
+      const points = build(count);
+      const started = performance.now();
+      downsampleLTTB(points, MAX_PLOT_POINTS, valueOf);
+      return performance.now() - started;
+    };
+
+    time(50_000); // warm the JIT; this measurement is discarded
+    const small = Math.max(time(50_000), 1);
+    const large = Math.max(time(200_000), 1);
+
+    // Linear would be ~4x for 4x the data. Ten leaves room for a noisy machine
+    // while still catching a quadratic, which would be ~16x.
+    expect(large / small).toBeLessThan(10);
   });
 });
 

@@ -274,3 +274,48 @@ describe("row identity", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(3); // header + 2
   });
 });
+
+describe("a large queue", () => {
+  function findings(count: number) {
+    return Array.from({ length: count }, (_, index) =>
+      finding(index, [`2026-08-${(index % 28) + 1}`, index], String(index).padStart(64, "0")),
+    );
+  }
+
+  it("caps what it renders rather than putting thousands of rows in the DOM", async () => {
+    // The store only grows. Nobody reviews finding 1,400 by scrolling past
+    // 1,399 others, and rendering them all is slow as well as useless.
+    getConnectionFlagged.mockResolvedValue(
+      flagged({
+        queries: [section({ rows: findings(1_500), flagged_count: 1_500 })],
+        flagged_count: 1_500,
+      }),
+    );
+    await open();
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+
+    const rows = screen.getAllByRole("row");
+    // Header plus the cap, not 1,500.
+    expect(rows.length).toBeLessThan(220);
+  });
+
+  it("says how many findings are not shown, so the cap is not a silent lie", async () => {
+    getConnectionFlagged.mockResolvedValue(
+      flagged({
+        queries: [section({ rows: findings(1_500), flagged_count: 1_500 })],
+        flagged_count: 1_500,
+      }),
+    );
+    await open();
+    // The number sits in its own element for tabular figures, so match the
+    // sentence around it rather than a string spanning both.
+    const note = await screen.findByText(/more are\s+waiting/i);
+    expect(note.textContent?.replace(/\s+/g, " ")).toMatch(/1,300 more are waiting/);
+  });
+
+  it("says nothing about a cap when everything fits", async () => {
+    await open();
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+    expect(screen.queryByText(/more are waiting/i)).toBeNull();
+  });
+});

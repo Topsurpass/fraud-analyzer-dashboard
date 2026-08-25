@@ -17,7 +17,7 @@ export function ChartGrid({ children }: { children: React.ReactNode }) {
     <div
       // `minmax(0,1fr)` rather than the default `1fr`: an auto-sized track lets
       // a wide child push the whole grid past the viewport on a phone.
-      className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2 xl:grid-cols-3"
+      className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3"
       /*
        * A fixed row height, not `minmax(row, 1fr)`. The 1fr version was an
        * attempt to fill a short page and it does the opposite of what it looks

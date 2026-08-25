@@ -45,7 +45,7 @@ export default function OverviewPage() {
 					onRetry={reload}
 				/>
 			) : initial ? (
-				<ul className="skeleton-sweep grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+				<ul className="skeleton-sweep grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
 					{[0, 1, 2].map((index) => (
 						<li key={index} className="h-28 border border-line bg-surface" />
 					))}
@@ -71,7 +71,7 @@ export default function OverviewPage() {
 
 					<section>
 						<SectionHead title="Connections" count={connections.length} />
-						<ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+						<ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
 							{connections.map((connection) => (
 								<li key={connection.id}>
 									<ConnectionCard connection={connection} now={now} />
@@ -87,7 +87,7 @@ export default function OverviewPage() {
 							action={{ href: "/dashboards/new", label: "New dashboard" }}
 						/>
 						{dashboardsLoading ? (
-							<ul className="skeleton-sweep grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+							<ul className="skeleton-sweep grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
 								{[0, 1].map((index) => (
 									<li
 										key={index}
@@ -104,7 +104,7 @@ export default function OverviewPage() {
 								.
 							</p>
 						) : (
-							<ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+							<ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
 								{dashboards.map((dashboard) => (
 									<li key={dashboard.id}>
 										<Link
@@ -222,7 +222,7 @@ function ConnectionCard({
 	return (
 		<Link
 			href={`/connections/${connection.id}`}
-			className="block h-full border border-line bg-surface transition-colors hover:border-line-strong"
+			className="group block h-full overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-sm transition-all duration-[var(--tween-fast)] hover:-translate-y-px hover:border-line-strong hover:shadow"
 		>
 			{/* The status hairline repeats the dot as an edge, so a failing
           connection is visible before any of its text is read. */}
@@ -238,7 +238,7 @@ function ConnectionCard({
 								: "var(--border)",
 				}}
 			/>
-			<span className="block p-3">
+			<span className="block p-3.5">
 				<span className="flex items-center gap-2">
 					<StatusDot status={connection.status} />
 					<span className="t-card truncate">{connection.name}</span>
@@ -254,7 +254,7 @@ function ConnectionCard({
 					</span>
 				</span>
 
-				<span className="tnum mt-2 block truncate text-[11px] text-muted" title={target}>
+				<span className="tnum mt-2.5 block truncate text-[11.5px] text-muted" title={target}>
 					{target}
 				</span>
 

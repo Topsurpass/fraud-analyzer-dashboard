@@ -10,7 +10,7 @@
  * feature quietly lying.
  */
 
-import { use, useCallback, useState } from "react";
+import { use, useCallback, useMemo, useState } from "react";
 import {
 	ApiError,
 	deleteFlaggedRows,
@@ -78,6 +78,16 @@ function RuleLegend({ rules }: { rules: RuleHit[] }) {
 	);
 }
 
+/**
+ * How many findings one section renders before it asks you to narrow down.
+ *
+ * The store only grows, so a busy connection can hold thousands. Rendering all
+ * of them is both slow and useless: nobody reviews finding 1,400 by scrolling
+ * past 1,399 others. The cap is the honest answer - show the worst, say how
+ * many are hidden, and let the queue be worked down.
+ */
+const SECTION_ROW_CAP = 200;
+
 function Section({
 	section,
 	onChanged,
@@ -85,7 +95,14 @@ function Section({
 	section: FlaggedQuery;
 	onChanged: () => void;
 }) {
-	const ruleById = new Map(section.rules.map((rule) => [rule.id, rule]));
+	// Rebuilt on every render otherwise, and this runs while a poll is updating
+	// the badges above it.
+	const ruleById = useMemo(
+		() => new Map(section.rules.map((rule) => [rule.id, rule])),
+		[section.rules],
+	);
+	const shown = section.rows.slice(0, SECTION_ROW_CAP);
+	const hidden = section.rows.length - shown.length;
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	const [confirmingRules, setConfirmingRules] = useState(false);
@@ -265,12 +282,15 @@ function Section({
 								</tr>
 							</thead>
 							<tbody>
-								{section.rows.map((row) => {
+								{shown.map((row) => {
 									const hits = row.rule_ids
 										.map((id) => ruleById.get(id))
 										.filter((rule): rule is RuleHit => rule !== undefined);
 									return (
-										<tr key={row.fingerprint}>
+										<tr
+											key={row.fingerprint}
+											className="transition-colors hover:bg-raised/50"
+										>
 											<td className="border-b border-line/60 px-2.5 py-1.5 align-top">
 												<div className="flex flex-wrap items-center gap-1">
 													{hits.map((rule) => (
@@ -310,6 +330,13 @@ function Section({
 								})}
 							</tbody>
 						</table>
+						{hidden > 0 ? (
+							<p className="border-t border-line px-3 py-2 text-[11.5px] text-muted">
+								Showing the {SECTION_ROW_CAP} highest-severity findings.{" "}
+								<span className="tnum text-ink">{formatInteger(hidden)}</span> more are
+								waiting - dismiss what you have reviewed, or narrow the rule.
+							</p>
+						) : null}
 					</div>
 				)}
 			</div>
