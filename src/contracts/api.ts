@@ -358,20 +358,41 @@ export interface ConnectionFlagged {
 	refresh_truncated: boolean;
 }
 
-/** One line of the flagged summary, for a connection or for a query. */
-export interface FlaggedTally {
-	connection_id?: string;
-	query_id?: string;
+/** What every line of the flagged summary carries. */
+interface FlaggedTallyBase {
 	flagged_count: number;
 	/** Highest severity among the findings being counted. */
 	severity: FlagSeverity;
+	/** When the newest of them first appeared, ISO. Null when there are none. */
+	newest_first_seen_at: string | null;
+}
+
+/** Two shapes rather than one with both ids optional: every row of the
+ *  connections list has a connection, every row of the queries list has both,
+ *  and a caller should not have to check. */
+export interface FlaggedConnectionTally extends FlaggedTallyBase {
+	connection_id: string;
+	/** Carried by the engine so a notification can name it without a second
+	 *  request and without depending on the connection list being loaded. */
+	connection_name: string;
+}
+
+export interface FlaggedQueryTally extends FlaggedTallyBase {
+	query_id: string;
+	connection_id: string;
 }
 
 /** Flagged totals across everything, in one request. Drives the badges. */
 export interface FlaggedSummary {
-	connections: FlaggedTally[];
-	queries: FlaggedTally[];
+	connections: FlaggedConnectionTally[];
+	queries: FlaggedQueryTally[];
 	flagged_count: number;
+	/**
+	 * When the most recent finding anywhere first appeared. A count alone
+	 * cannot answer "has anything new arrived" - dismiss two and gain two and
+	 * it has not moved, while the reader has still missed something.
+	 */
+	newest_first_seen_at: string | null;
 }
 
 export interface FlagDismissalResult {

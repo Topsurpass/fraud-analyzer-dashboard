@@ -4,6 +4,7 @@ import Link from "next/link";
 import { formatRelative } from "@/services/format";
 import { useEngineHealth } from "@/lib/useEngineHealth";
 import { useNow } from "@/lib/useNow";
+import { FlaggedBell } from "./FlaggedBell";
 
 /**
  * Breadcrumb location and the page's own actions. Deliberately not a busy
@@ -43,6 +44,9 @@ export function TopBar({
 
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {actions}
+        {/* Always present, on every page: the whole point is not having to go
+            and look. */}
+        <FlaggedBell />
         {/* The rail carries this permanently. Below `md` the rail is a drawer,
             so the readout moves up here rather than being two places at once. */}
         <span className="md:hidden">

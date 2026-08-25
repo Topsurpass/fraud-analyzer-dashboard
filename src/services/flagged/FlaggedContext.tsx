@@ -1,7 +1,11 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo } from "react";
-import type { FlagSeverity, FlaggedSummary } from "@/contracts/api";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type {
+	FlagSeverity,
+	FlaggedConnectionTally,
+	FlaggedSummary,
+} from "@/contracts/api";
 import { ApiError, getFlaggedSummary } from "@/services/api-client";
 import { useResource } from "@/lib/useResource";
 
@@ -13,11 +17,21 @@ import { useResource } from "@/lib/useResource";
  * so a count endpoint per thing on screen would be the same data fetched once
  * per thing on screen.
  *
- * Deliberately not live. This drives a badge that says "there is something to
- * look at here", and a badge that changes under the reader is worse than one
- * that is a minute stale. It reloads when the user does something that could
- * change it - dismissing, deleting, refreshing a flagged view.
+ * Refetched on an interval, because the engine now runs queries on a schedule
+ * and findings appear with nobody watching. Without that the only way to learn
+ * something had been flagged would be to open the flagged view and look, which
+ * is exactly what the notification exists to replace.
+ *
+ * The interval is slow on purpose - this is a badge, not a live chart - and
+ * stops entirely while the tab is hidden, matching `useQueryPolling`. A
+ * background tab polling a database summary forever is rude.
+ *
+ * It also reloads immediately whenever the user does something that could
+ * change it: dismissing, clearing, refreshing a flagged view.
  */
+
+/** How often to re-read the summary while the tab is visible. */
+const REFRESH_MS = 30_000;
 export interface FlaggedValue {
 	/** Total across every connection. */
 	total: number;
@@ -25,6 +39,10 @@ export interface FlaggedValue {
 	severityForConnection: (connectionId: string) => FlagSeverity | null;
 	countForQuery: (queryId: string) => number;
 	severityForQuery: (queryId: string) => FlagSeverity | null;
+	/** Connections holding findings, most first. What the bell lists. */
+	connections: FlaggedConnectionTally[];
+	/** When the most recent finding anywhere first appeared, ISO, or null. */
+	newestAt: string | null;
 	loading: boolean;
 	error: ApiError | null;
 	reload: () => void;
@@ -35,6 +53,24 @@ const FlaggedContext = createContext<FlaggedValue | null>(null);
 export function FlaggedProvider({ children }: { children: React.ReactNode }) {
 	const load = useCallback((signal: AbortSignal) => getFlaggedSummary({ signal }), []);
 	const resource = useResource(load);
+	const { reload } = resource;
+
+	const [hidden, setHidden] = useState(false);
+	useEffect(() => {
+		const read = () => setHidden(document.visibilityState === "hidden");
+		read();
+		document.addEventListener("visibilitychange", read);
+		return () => document.removeEventListener("visibilitychange", read);
+	}, []);
+
+	useEffect(() => {
+		if (hidden) return;
+		// Reload on becoming visible again as well as on the interval: coming
+		// back to the tab is exactly when the reader wants to know.
+		reload();
+		const timer = setInterval(reload, REFRESH_MS);
+		return () => clearInterval(timer);
+	}, [hidden, reload]);
 
 	const value = useMemo<FlaggedValue>(() => {
 		const summary: FlaggedSummary | null = resource.data;
@@ -46,6 +82,8 @@ export function FlaggedProvider({ children }: { children: React.ReactNode }) {
 		);
 		return {
 			total: summary?.flagged_count ?? 0,
+			connections: summary?.connections ?? [],
+			newestAt: summary?.newest_first_seen_at ?? null,
 			countForConnection: (id) => byConnection.get(id)?.flagged_count ?? 0,
 			severityForConnection: (id) => byConnection.get(id)?.severity ?? null,
 			countForQuery: (id) => byQuery.get(id)?.flagged_count ?? 0,
@@ -69,6 +107,8 @@ export function FlaggedProvider({ children }: { children: React.ReactNode }) {
  */
 const NOTHING_FLAGGED: FlaggedValue = {
 	total: 0,
+	connections: [],
+	newestAt: null,
 	countForConnection: () => 0,
 	severityForConnection: () => null,
 	countForQuery: () => 0,

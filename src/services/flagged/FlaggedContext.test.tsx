@@ -27,9 +27,26 @@ function Probe() {
 beforeEach(() => {
   vi.clearAllMocks();
   getFlaggedSummary.mockResolvedValue({
-    connections: [{ connection_id: "c1", flagged_count: 5, severity: "high" }],
-    queries: [{ query_id: "q1", connection_id: "c1", flagged_count: 5, severity: "high" }],
+    connections: [
+      {
+        connection_id: "c1",
+        connection_name: "Payments",
+        flagged_count: 5,
+        severity: "high",
+        newest_first_seen_at: "2026-08-24T10:00:00Z",
+      },
+    ],
+    queries: [
+      {
+        query_id: "q1",
+        connection_id: "c1",
+        flagged_count: 5,
+        severity: "high",
+        newest_first_seen_at: "2026-08-24T10:00:00Z",
+      },
+    ],
     flagged_count: 5,
+    newest_first_seen_at: "2026-08-24T10:00:00Z",
   });
 });
 
@@ -57,7 +74,10 @@ describe("FlaggedProvider", () => {
     await waitFor(() => expect(screen.getByTestId("missing")).toHaveTextContent("0"));
   });
 
-  it("fetches once for the whole shell", async () => {
+  it("fetches for the shell, not once per consumer", async () => {
+    // Three readers, one request. The provider also refetches on an interval
+    // and on the tab becoming visible, so this counts consumers rather than
+    // pinning an exact number.
     render(
       <FlaggedProvider>
         <Probe />
@@ -65,7 +85,8 @@ describe("FlaggedProvider", () => {
         <Probe />
       </FlaggedProvider>,
     );
-    await waitFor(() => expect(getFlaggedSummary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getFlaggedSummary).toHaveBeenCalled());
+    expect(getFlaggedSummary.mock.calls.length).toBeLessThan(3);
   });
 
   it("shows no badge instead of crashing when there is no provider", () => {
