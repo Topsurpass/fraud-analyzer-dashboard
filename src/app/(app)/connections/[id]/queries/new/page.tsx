@@ -19,6 +19,7 @@ export default function NewQueryPage({ params }: { params: Promise<{ id: string 
   const name = connections.find((entry) => entry.id === id)?.name ?? "Connection";
 
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
   const submit = async (values: QueryEditorValues) => {
@@ -34,6 +35,12 @@ export default function NewQueryPage({ params }: { params: Promise<{ id: string 
       // Creating a query seeds one table chart, so this is only sent when the
       // analyst configured something else - and it replaces that seed.
       if (charts.length > 0) await putQueryCharts(created.id, charts);
+
+      // Saved. `busy` stays true through the navigation so the form cannot be
+      // submitted twice, but the label changes: leaving it on "Saving…" while
+      // the next page resolves is what made a successful save look like a
+      // hang. The segment's loading.tsx now covers the navigation itself.
+      setSaved(true);
       router.push(`/connections/${id}`);
     } catch (cause) {
       setError(
@@ -56,6 +63,7 @@ export default function NewQueryPage({ params }: { params: Promise<{ id: string 
       <QueryEditor
         connectionId={id}
         submitLabel="Save query"
+        busyLabel={saved ? "Saved · opening…" : "Saving…"}
         busy={busy}
         error={error}
         onSubmit={submit}

@@ -53,6 +53,7 @@ export function QueryEditor({
   initialRules,
   initialCharts,
   submitLabel,
+  busyLabel = "Saving…",
   busy,
   error,
   onSubmit,
@@ -64,6 +65,10 @@ export function QueryEditor({
   initialRules?: FlagRule[];
   initialCharts?: QueryChartInput[];
   submitLabel: string;
+  /** Shown while `busy`. Lets the caller say "saved, opening…" once the write
+   *  has landed but the navigation has not, which is otherwise indistinguishable
+   *  from still saving. */
+  busyLabel?: string;
   busy: boolean;
   error?: ApiError | null;
   onSubmit: (values: QueryEditorValues) => void;
@@ -318,7 +323,7 @@ export function QueryEditor({
 
         <div className="flex items-center gap-2">
           <Button type="submit" tone="primary" disabled={busy}>
-            {busy ? "Saving…" : submitLabel}
+            {busy ? busyLabel : submitLabel}
           </Button>
           {onCancel ? (
             <Button type="button" onClick={onCancel} disabled={busy}>
