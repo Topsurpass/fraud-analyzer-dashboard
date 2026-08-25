@@ -299,7 +299,10 @@ describe("a large queue", () => {
     expect(rows.length).toBeLessThan(220);
   });
 
-  it("says how many findings are not shown, so the cap is not a silent lie", async () => {
+  it("pages a large queue rather than dumping it", async () => {
+    // A queue is a work list: a page is what someone gets through before
+    // losing their place, and an unbounded section pushes every other query on
+    // the connection off the screen.
     getConnectionFlagged.mockResolvedValue(
       flagged({
         queries: [section({ rows: findings(1_500), flagged_count: 1_500 })],
@@ -307,15 +310,99 @@ describe("a large queue", () => {
       }),
     );
     await open();
-    // The number sits in its own element for tabular figures, so match the
-    // sentence around it rather than a string spanning both.
-    const note = await screen.findByText(/more are\s+waiting/i);
-    expect(note.textContent?.replace(/\s+/g, " ")).toMatch(/1,300 more are waiting/);
+    // The count sits in its own element for tabular figures, so the sentence
+    // spans several nodes; normalise the whole page rather than guess at the
+    // split.
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toMatch(/1,500 findings/);
+    expect(text).toMatch(/showing 1-25/);
+    expect(screen.getByRole("button", { name: /next page/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /previous page/i })).toBeDisabled();
   });
 
-  it("says nothing about a cap when everything fits", async () => {
+  it("moves through the pages", async () => {
+    getConnectionFlagged.mockResolvedValue(
+      flagged({
+        queries: [section({ rows: findings(60), flagged_count: 60 })],
+        flagged_count: 60,
+      }),
+    );
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: /next page/i }));
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toMatch(/showing 26-50/);
+  });
+
+  it("offers no pager when everything fits on one page", async () => {
     await open();
     await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
-    expect(screen.queryByText(/more are waiting/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /next page/i })).toBeNull();
+  });
+
+
+});
+
+describe("filtering by the rule that caught it", () => {
+  const twoRules = () =>
+    section({
+      rules: [
+        { id: "r1", name: "Large", severity: "high", matched: 1 },
+        { id: "r2", name: "Odd hour", severity: "low", matched: 1 },
+      ],
+      rows: [
+        { ...finding(0, ["a", 1], "a".repeat(64)), rule_ids: ["r1"], rule_names: ["Large"] },
+        { ...finding(1, ["b", 2], "b".repeat(64)), rule_ids: ["r2"], rule_names: ["Odd hour"] },
+      ],
+      flagged_count: 2,
+    });
+
+  it("narrows the table to one rule's findings", async () => {
+    // "Which of these caught it" is the question the legend already answered;
+    // now it can narrow to the answer too.
+    getConnectionFlagged.mockResolvedValue(
+      flagged({ queries: [twoRules()], flagged_count: 2 }),
+    );
+    await open();
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /Show only what Large caught/i }));
+
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toMatch(/Matching this rule: 1 finding/);
+  });
+
+  it("can be cleared again", async () => {
+    getConnectionFlagged.mockResolvedValue(
+      flagged({ queries: [twoRules()], flagged_count: 2 }),
+    );
+    await open();
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /Show only what Large caught/i }));
+    await userEvent.click(screen.getByRole("button", { name: /show all/i }));
+
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toMatch(/2 findings/);
+  });
+
+  it("does not offer a rule that caught nothing here", async () => {
+    // Filtering to an empty table is not something anyone wants to click.
+    getConnectionFlagged.mockResolvedValue(
+      flagged({
+        queries: [
+          section({
+            rules: [{ id: "r1", name: "Quiet", severity: "low", matched: 0 }],
+            rows: [],
+            flagged_count: 0,
+            dismissed_count: 0,
+          }),
+        ],
+        flagged_count: 0,
+      }),
+    );
+    await open();
+    await waitFor(() => expect(screen.getByText("Large transfers")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Quiet caught nothing here/i })).toBeDisabled();
   });
 });

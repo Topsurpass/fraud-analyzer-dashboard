@@ -125,7 +125,7 @@ export function ChartCard({
 
   return (
     <article
-      aria-label={query.name}
+      aria-label={cardTitle}
       style={style}
       /* defer-paint lets the browser skip layout and paint for cards that are
          off screen. A board of twenty charts otherwise pays for all twenty on
@@ -156,8 +156,19 @@ export function ChartCard({
 
         <div className="flex items-start gap-2 px-3 pt-2 pb-1">
           <div className="min-w-0 flex-1">
-            <h3 className="t-card truncate">{query.name}</h3>
-            {query.description ? (
+            {/* The chart's own name, not the query's. Four charts of one query
+                all headed "Transaction Summary" are four cards nobody can tell
+                apart, which is most of the value of naming them. */}
+            <h3 className="t-card truncate" title={cardTitle}>
+              {cardTitle}
+            </h3>
+            {/* The query underneath, so a card still says where its data came
+                from once the heading stops saying so. */}
+            {cardTitle !== query.name ? (
+              <p className="t-sub mt-0.5 truncate" title={query.name}>
+                {query.name}
+              </p>
+            ) : query.description ? (
               <p className="t-sub mt-0.5 truncate">{query.description}</p>
             ) : null}
           </div>
@@ -181,7 +192,7 @@ export function ChartCard({
             ) : null}
             {actions}
             {onToggleExpand ? (
-              <ExpandButton expanded={expanded} onClick={onToggleExpand} name={query.name} />
+              <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
             <CardMenu
               query={query}

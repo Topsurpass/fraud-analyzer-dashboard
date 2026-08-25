@@ -92,7 +92,6 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
                 key={chart.id}
                 query={query}
                 chartId={chart.id}
-                title={query.charts.length > 1 ? `${query.name} · ${chart.name}` : query.name}
                 className={chartCellClass(chart.chart_type, expanded.isExpanded(chart.id))}
                 expanded={expanded.isExpanded(chart.id)}
                 onToggleExpand={() => expanded.toggle(chart.id)}

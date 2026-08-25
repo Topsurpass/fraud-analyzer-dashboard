@@ -75,14 +75,17 @@ afterEach(() => {
 });
 
 describe("ChartCard", () => {
-  it("names the card from the query, so the grid is navigable", async () => {
+  it("names the card from the chart it draws, not the query", async () => {
+    // Four charts of one query all headed with the query's name are four cards
+    // nobody can tell apart, which is most of the value of naming them.
     pollQuery.mockResolvedValue(changed("aaa", 20));
     render(<ChartCard query={query} />);
     await settle();
 
-    expect(
-      screen.getByRole("article", { name: "Flagged in last hour" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Count" })).toBeInTheDocument();
+    // The query is still named underneath, so a card says where its data came
+    // from once the heading stops saying so.
+    expect(screen.getByText("Flagged in last hour")).toBeInTheDocument();
   });
 
   it("shows a shaped skeleton before any data arrives", async () => {

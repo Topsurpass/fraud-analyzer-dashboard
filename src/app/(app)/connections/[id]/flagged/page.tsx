@@ -61,32 +61,94 @@ function SeverityPill({ severity }: { severity: FlagSeverity }) {
 	);
 }
 
-function RuleLegend({ rules }: { rules: RuleHit[] }) {
+/**
+ * The rules that caught things here, and the filter for them.
+ *
+ * The legend already listed every rule with its count, so making it clickable
+ * adds filtering without adding a control: "which of these caught it" is the
+ * question the legend was already answering, and now it can also narrow to the
+ * answer. A rule that caught nothing is not offered - filtering to an empty
+ * table is not a thing anyone wants to click.
+ */
+function RuleLegend({
+	rules,
+	active,
+	onPick,
+}: {
+	rules: RuleHit[];
+	active: string | null;
+	onPick: (ruleId: string | null) => void;
+}) {
 	if (rules.length === 0) return null;
 	return (
-		<div className="flex flex-wrap items-center gap-2">
+		<div className="flex flex-wrap items-center gap-1.5">
+			{active ? (
+				<button
+					type="button"
+					onClick={() => onPick(null)}
+					className="rounded-[var(--radius-full)] border border-line px-2 py-0.5 text-[11px] text-muted transition-colors hover:border-line-strong hover:text-ink"
+				>
+					Show all
+				</button>
+			) : null}
 			{[...rules]
 				.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])
-				.map((rule) => (
-					<span key={rule.id} className="flex items-center gap-1 text-[11px]">
-						<SeverityPill severity={rule.severity} />
-						<span className="text-ink">{rule.name}</span>
-						<span className="tnum text-muted">{formatInteger(rule.matched)}</span>
-					</span>
-				))}
+				.map((rule) => {
+					const selected = active === rule.id;
+					const empty = rule.matched === 0;
+					return (
+						<button
+							key={rule.id}
+							type="button"
+							disabled={empty}
+							aria-pressed={selected}
+							// Without this the accessible name is the button's contents -
+							// "high Large 1" - which tells a screen reader what it says
+							// rather than what it does.
+							aria-label={
+								empty
+									? `${rule.name} caught nothing here`
+									: selected
+										? `Stop filtering by ${rule.name}`
+										: `Show only what ${rule.name} caught`
+							}
+							title={
+								empty
+									? `${rule.name} caught nothing here`
+									: `Show only what ${rule.name} caught`
+							}
+							onClick={() => onPick(selected ? null : rule.id)}
+							className={`flex items-center gap-1 rounded-[var(--radius-full)] border px-2 py-0.5 text-[11px] transition-colors ${
+								selected
+									? "border-accent/50 bg-accent/12 text-ink"
+									: empty
+										? "border-line/60 text-muted/60"
+										: "border-line text-secondary hover:border-line-strong hover:text-ink"
+							}`}
+						>
+							<SeverityPill severity={rule.severity} />
+							<span className="truncate">{rule.name}</span>
+							<span className="tnum">{formatInteger(rule.matched)}</span>
+						</button>
+					);
+				})}
 		</div>
 	);
 }
 
 /**
- * How many findings one section renders before it asks you to narrow down.
+ * Findings shown per page.
  *
- * The store only grows, so a busy connection can hold thousands. Rendering all
- * of them is both slow and useless: nobody reviews finding 1,400 by scrolling
- * past 1,399 others. The cap is the honest answer - show the worst, say how
- * many are hidden, and let the queue be worked down.
+ * The queue is a work list, not a report: a page is what someone can actually
+ * work through before losing their place. Rendering the whole thing was both
+ * slow and useless - nobody reviews finding 400 by scrolling past 399 others -
+ * and an unbounded section pushed every other query on the connection off the
+ * screen entirely.
  */
-const SECTION_ROW_CAP = 200;
+const PAGE_SIZE = 25;
+
+/** Height of the scrolling body, so one section cannot swallow the page. */
+const BODY_MAX_HEIGHT = "26rem";
 
 function Section({
 	section,
@@ -101,8 +163,25 @@ function Section({
 		() => new Map(section.rules.map((rule) => [rule.id, rule])),
 		[section.rules],
 	);
-	const shown = section.rows.slice(0, SECTION_ROW_CAP);
-	const hidden = section.rows.length - shown.length;
+
+	// Filter first, then page: paging a filtered list is the only order that
+	// lets "show me what Large transfer caught" mean anything.
+	const [ruleFilter, setRuleFilter] = useState<string | null>(null);
+	const [page, setPage] = useState(0);
+
+	const filtered = useMemo(
+		() =>
+			ruleFilter
+				? section.rows.filter((row) => row.rule_ids.includes(ruleFilter))
+				: section.rows,
+		[section.rows, ruleFilter],
+	);
+
+	const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+	// Dismissing the last row of the last page would otherwise leave the reader
+	// staring at an empty table with no way back.
+	const safePage = Math.min(page, pageCount - 1);
+	const shown = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	const [confirmingRules, setConfirmingRules] = useState(false);
@@ -213,7 +292,14 @@ function Section({
 		>
 			<div className="space-y-2 p-3">
 				<div className="flex flex-wrap items-center justify-between gap-2">
-					<RuleLegend rules={section.rules} />
+					<RuleLegend
+						rules={section.rules}
+						active={ruleFilter}
+						onPick={(ruleId) => {
+							setRuleFilter(ruleId);
+							setPage(0);
+						}}
+					/>
 					<span className="text-[10px] text-muted">
 						{section.executed_at
 							? `as of ${new Date(section.executed_at).toLocaleString()}`
@@ -254,7 +340,8 @@ function Section({
 							: "Nothing matched on the last run."}
 					</p>
 				) : (
-					<div className="overflow-auto">
+					<>
+					<div className="overflow-auto" style={{ maxHeight: BODY_MAX_HEIGHT }}>
 						<table className="w-full border-collapse text-[12px]">
 							<caption className="sr-only">
 								{section.flagged_count} flagged rows from {section.query_name}
@@ -330,14 +417,53 @@ function Section({
 								})}
 							</tbody>
 						</table>
-						{hidden > 0 ? (
-							<p className="border-t border-line px-3 py-2 text-[11.5px] text-muted">
-								Showing the {SECTION_ROW_CAP} highest-severity findings.{" "}
-								<span className="tnum text-ink">{formatInteger(hidden)}</span> more are
-								waiting - dismiss what you have reviewed, or narrow the rule.
-							</p>
+					</div>
+
+					{/* Paged rather than endlessly scrolled: a queue is a work list,
+							and a page is what someone can get through before losing their
+							place. The body scrolls within its own height so one busy query
+							cannot push every other section off the screen. */}
+					<div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2 text-[11.5px] text-muted">
+						<span>
+							{ruleFilter ? "Matching this rule: " : ""}
+							<span className="tnum text-ink">{formatInteger(filtered.length)}</span>{" "}
+							{filtered.length === 1 ? "finding" : "findings"}
+							{pageCount > 1 ? (
+								<>
+									{" · showing "}
+									<span className="tnum text-ink">
+										{safePage * PAGE_SIZE + 1}-
+										{safePage * PAGE_SIZE + shown.length}
+									</span>
+								</>
+							) : null}
+						</span>
+
+						{pageCount > 1 ? (
+							<div className="ml-auto flex items-center gap-1.5">
+								<Button
+									type="button"
+									disabled={safePage === 0}
+									aria-label="Previous page of findings"
+									onClick={() => setPage(safePage - 1)}
+								>
+									Previous
+								</Button>
+								<span className="tnum px-1">
+									{safePage + 1} / {pageCount}
+								</span>
+								<Button
+									type="button"
+									disabled={safePage >= pageCount - 1}
+									aria-label="Next page of findings"
+									onClick={() => setPage(safePage + 1)}
+								>
+									Next
+								</Button>
+							</div>
 						) : null}
 					</div>
+					</>
 				)}
 			</div>
 		</Panel>

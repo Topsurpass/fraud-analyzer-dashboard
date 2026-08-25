@@ -366,7 +366,10 @@ function PreviewPanel({
         preview ? (
           <span className="tnum text-[11px] text-muted">
             {formatInteger(preview.row_count)} rows · {formatDuration(preview.duration_ms)}
-            {preview.truncated ? " · truncated" : ""}
+            {/* A preview is capped far below the saved row limit, so a full
+                preview says so rather than letting the number read as the size
+                of the result. The limit on the query itself is untouched. */}
+            {preview.truncated ? " · preview capped, the saved row limit still applies" : ""}
           </span>
         ) : null
       }
