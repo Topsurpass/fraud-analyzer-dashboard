@@ -320,13 +320,36 @@ export function buildPie(result: ResultSet): PieData {
   const valueIndex = columns.indexOf(fields.yKey);
   const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
 
-  const slices = rows.map((row, index) => ({
-    name: row[nameIndex] === null || row[nameIndex] === undefined
-      ? "NULL"
-      : String(row[nameIndex]),
-    value: Math.max(0, toNumber(row[valueIndex]) || 0),
-    alert: anomalies.flags[index] === true,
-  }));
+  // Categories are merged rather than drawn twice.
+  //
+  // A pie is a breakdown by category, so two slices with the same name are not
+  // two things - they are one thing the query returned on two rows, and drawing
+  // them separately makes the same label appear twice in the legend for two
+  // wedges nobody can tell apart. It also happens constantly in practice: a
+  // chart whose category and value are the same column produces a duplicate for
+  // every repeated value.
+  //
+  // A merged slice is flagged if any of the rows behind it was, because the
+  // wedge stands for all of them.
+  const merged = new Map<string, { name: string; value: number; alert: boolean }>();
+  for (const [index, row] of rows.entries()) {
+    const name =
+      row[nameIndex] === null || row[nameIndex] === undefined
+        ? "NULL"
+        : String(row[nameIndex]);
+    const value = Math.max(0, toNumber(row[valueIndex]) || 0);
+    const alert = anomalies.flags[index] === true;
+
+    const existing = merged.get(name);
+    if (existing) {
+      existing.value += value;
+      existing.alert = existing.alert || alert;
+    } else {
+      merged.set(name, { name, value, alert });
+    }
+  }
+
+  const slices = [...merged.values()];
 
   return {
     slices,

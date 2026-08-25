@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { SeriesLegend } from "./SeriesLegend";
 
 const series = [
-  { key: "api", color: "#3987e5" },
-  { key: "web", color: "#199e70" },
+  { id: "api", label: "api", color: "#3987e5" },
+  { id: "web", label: "web", color: "#199e70" },
 ];
 
 describe("SeriesLegend", () => {

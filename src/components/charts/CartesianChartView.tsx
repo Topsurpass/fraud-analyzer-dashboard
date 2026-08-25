@@ -90,8 +90,12 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
   const reducedMotion = useReducedMotion();
   const [activeSeries, setActiveSeries] = useState<string | null>(null);
 
+  // A series key is already unique here - the pivot dedupes them - so it is
+  // both the identity and the label. The two are separate in the legend's
+  // contract because the pie's are not.
   const legend = data.seriesKeys.map((key, index) => ({
-    key,
+    id: key,
+    label: key,
     color: seriesColor(index),
     alert: data.data.some((point) => point.__alert?.[key] === true),
   }));

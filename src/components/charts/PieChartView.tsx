@@ -136,13 +136,15 @@ export function PieChartView({ data, title }: PieChartViewProps) {
                * of five wedges identically red, which destroyed the one thing a
                * composition chart is for: telling the categories apart.
                */}
-              {slices.map((slice) => (
+              {slices.map((slice, index) => (
                 <Cell
-                  key={slice.name}
+                  // Position, not name: two categories can share a label and
+                  // React would collapse them into one cell.
+                  key={index}
                   fill={hatch.fill(slice.color, slice.alert)}
                   stroke={slice.alert ? ALERT_COLOR : "var(--surface)"}
                   strokeWidth={slice.alert ? 1.5 : 2}
-                  fillOpacity={active === null || active === slice.name ? 1 : 0.25}
+                  fillOpacity={active === null || active === String(index) ? 1 : 0.25}
                 />
               ))}
             </Pie>
@@ -157,8 +159,12 @@ export function PieChartView({ data, title }: PieChartViewProps) {
       </div>
 
       <SeriesLegend
-        series={slices.map((slice) => ({
-          key: slice.name,
+        // Identity is the slice's position, not its name. Names are data and
+        // data repeats - two categories sharing a value, or one genuinely
+        // called "Other" beside the folded bucket.
+        series={slices.map((slice, index) => ({
+          id: String(index),
+          label: slice.name,
           color: slice.color,
           alert: slice.alert,
         }))}

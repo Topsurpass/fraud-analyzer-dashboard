@@ -432,3 +432,51 @@ describe("large series", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });
+
+describe("a pie with repeated categories", () => {
+  it("merges rows that share a category instead of drawing two slices", () => {
+    // Two wedges labelled the same thing are not two things: they are one
+    // category the query returned on two rows. Drawing both also gave React two
+    // children with the same key, which is how this was noticed.
+    const built = buildPie({
+      columns: ["rate", "n"],
+      rows: [["100.00", 5], ["100.00", 3], ["50.00", 2]],
+      chart: spec({ type: "pie", x_field: "rate", y_field: "n" }),
+    });
+
+    expect(built.slices.map((slice) => slice.name)).toEqual(["100.00", "50.00"]);
+    expect(built.slices[0].value).toBe(8);
+    expect(built.total).toBe(10);
+  });
+
+  it("keeps every category name unique", () => {
+    const built = buildPie({
+      columns: ["v"],
+      rows: [["a"], ["a"], ["b"], ["a"]],
+      chart: spec({ type: "pie", x_field: "v", y_field: "v" }),
+    });
+    const names = built.slices.map((slice) => slice.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("a merged slice is flagged when any row behind it was", () => {
+    // The wedge stands for all of them, so it has to carry the worst of them.
+    const built = buildPie({
+      columns: ["v", "n"],
+      rows: [["a", 1], ["a", 1]],
+      chart: spec({ type: "pie", x_field: "v", y_field: "n" }),
+      flags: caught("Odd", [1]),
+    });
+    expect(built.slices).toHaveLength(1);
+    expect(built.slices[0].alert).toBe(true);
+  });
+
+  it("keeps distinct categories apart", () => {
+    const built = buildPie({
+      columns: ["v", "n"],
+      rows: [["a", 1], ["b", 2]],
+      chart: spec({ type: "pie", x_field: "v", y_field: "n" }),
+    });
+    expect(built.slices).toHaveLength(2);
+  });
+});
