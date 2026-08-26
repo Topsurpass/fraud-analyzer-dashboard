@@ -5,9 +5,12 @@ import {
   MAX_HEAT_BUCKETS,
   MAX_HEAT_ROWS,
   MAX_MOVER_ROWS,
+  MAX_PANELS,
+  panelSegments,
   buildCartesian,
   buildCompare,
   buildHeatmap,
+  buildCompareGrid,
   buildMovers,
   buildNumber,
   buildPie,
@@ -986,5 +989,256 @@ describe("buildMovers", () => {
 
     expect(data.rows).toEqual([]);
     expect(data.warnings.join(" ")).toContain("at least two time buckets");
+  });
+});
+
+describe("buildCompareGrid", () => {
+  const byTerminal = spec({
+    type: "compare_grid",
+    x_field: "bucket",
+    y_field: "amount",
+    series_field: "terminal",
+  });
+
+  const result = (rows: (string | number | null)[][], flags?: FlagOutcome) => ({
+    columns: ["bucket", "terminal", "amount"],
+    rows,
+    chart: byTerminal,
+    ...(flags ? { flags } : {}),
+  });
+
+  /** Four buckets, two terminals, interleaved the way such a query returns. */
+  const sample = result([
+    ["09", "T1", 10],
+    ["09", "T2", 500],
+    ["10", "T1", 20],
+    ["10", "T2", 500],
+    ["11", "T1", 100],
+    ["11", "T2", 10],
+    ["12", "T1", 200],
+    ["12", "T2", 10],
+  ]);
+
+  it("gives each category its own panel of aligned points", () => {
+    const data = buildCompareGrid(sample);
+
+    expect(data.panels).toHaveLength(2);
+    const t1 = data.panels.find((panel) => panel.category === "T1");
+    // Two buckets a side: 11 sits over 09, 12 over 10.
+    expect(t1?.points.map((point) => point.previous)).toEqual([10, 20]);
+    expect(t1?.points.map((point) => point.current)).toEqual([100, 200]);
+  });
+
+  it("aligns each panel by position within its window, not by bucket label", () => {
+    const data = buildCompareGrid(sample);
+    const t1 = data.panels.find((panel) => panel.category === "T1");
+
+    // The axis reads as the current window; each point names where its
+    // previous value was actually measured.
+    expect(t1?.points.map((point) => point.bucket)).toEqual(["11", "12"]);
+    expect(t1?.points.map((point) => point.previousBucket)).toEqual(["09", "10"]);
+  });
+
+  it("splits on distinct buckets, not on row position", () => {
+    /*
+     * The regression that matters, same as buildMovers: rows are interleaved
+     * by terminal, so halving the row list would put T1's 10 in the previous
+     * window and T2's 10 in the current one.
+     */
+    const data = buildCompareGrid(
+      result([
+        ["09", "A", 1],
+        ["09", "B", 1],
+        ["09", "C", 1],
+        ["10", "A", 8],
+        ["10", "B", 8],
+        ["10", "C", 8],
+      ]),
+    );
+
+    for (const panel of data.panels) {
+      expect(panel.points.map((point) => point.previous)).toEqual([1]);
+      expect(panel.points.map((point) => point.current)).toEqual([8]);
+    }
+  });
+
+  it("ranks panels by how far each category moved", () => {
+    const data = buildCompareGrid(sample);
+
+    // T2 fell by 980, T1 rose by 270.
+    expect(data.panels.map((panel) => panel.category)).toEqual(["T2", "T1"]);
+  });
+
+  it("scales each panel to its own peak so a big neighbour cannot flatten it", () => {
+    // T2 does fifty times T1's volume. On a shared scale T1 would be a
+    // straight line on the axis, which is the failure this chart exists to
+    // avoid.
+    const data = buildCompareGrid(sample);
+
+    expect(data.panels.find((panel) => panel.category === "T1")?.peak).toBe(200);
+    expect(data.panels.find((panel) => panel.category === "T2")?.peak).toBe(500);
+  });
+
+  it("totals each window per panel and reports the proportional change", () => {
+    const data = buildCompareGrid(sample);
+    const t1 = data.panels.find((panel) => panel.category === "T1");
+
+    expect(t1).toMatchObject({ previousTotal: 30, currentTotal: 300, delta: 270 });
+    expect(t1?.pctChange).toBeCloseTo(9);
+  });
+
+  it("refuses a percentage when the previous window was zero", () => {
+    const data = buildCompareGrid(
+      result([
+        ["09", "New", 0],
+        ["10", "New", 0],
+        ["11", "New", 40],
+        ["12", "New", 40],
+      ]),
+    );
+
+    expect(data.panels[0].pctChange).toBeNull();
+  });
+
+  it("leaves a missing bucket null instead of reading it as zero", () => {
+    // A terminal that returned no row for an hour was not necessarily idle in
+    // it, and only the query knows which. Guessing zero invents a cliff.
+    const data = buildCompareGrid(
+      result([
+        ["09", "T1", 5],
+        ["10", "T1", 5],
+        ["11", "T1", 7],
+        // No 12:00 row for T1 at all.
+        ["12", "T2", 1],
+        ["09", "T2", 1],
+        ["10", "T2", 1],
+        ["11", "T2", 1],
+      ]),
+    );
+
+    const t1 = data.panels.find((panel) => panel.category === "T1");
+    expect(t1?.points.map((point) => point.current)).toEqual([7, null]);
+  });
+
+  it("names the buckets each window covers", () => {
+    const data = buildCompareGrid(sample);
+
+    expect(data.previousSpan).toEqual(["09", "10"]);
+    expect(data.currentSpan).toEqual(["11", "12"]);
+    expect(data.buckets).toEqual(["11", "12"]);
+  });
+
+  it("drops the oldest bucket when there is an odd number of them", () => {
+    const data = buildCompareGrid(
+      result([
+        ["09", "T1", 99],
+        ["10", "T1", 1],
+        ["11", "T1", 5],
+      ]),
+    );
+
+    expect(data.panels[0].points.map((point) => point.previous)).toEqual([1]);
+    expect(data.panels[0].points.map((point) => point.current)).toEqual([5]);
+    expect(data.warnings.join(" ")).toContain("oldest was dropped");
+  });
+
+  it("sums a repeated bucket and category pair into the one slot it describes", () => {
+    const data = buildCompareGrid(
+      result([
+        ["09", "T1", 5],
+        ["10", "T1", 1],
+        ["10", "T1", 2],
+      ]),
+    );
+
+    // 09 is dropped as the odd bucket; 10 is the current window and holds both.
+    expect(data.panels[0].points[0].current).toBe(3);
+  });
+
+  it("caps the number of panels and says how many it dropped", () => {
+    const rows: (string | number)[][] = [];
+    for (let index = 0; index < MAX_PANELS + 6; index += 1) {
+      rows.push(["09", `T${index}`, 1]);
+      rows.push(["10", `T${index}`, 1 + index]);
+    }
+
+    const data = buildCompareGrid(result(rows));
+
+    expect(data.panels).toHaveLength(MAX_PANELS);
+    expect(data.warnings.join(" ")).toContain(`of ${MAX_PANELS + 6} categories`);
+  });
+
+  it("marks the panel and the exact bucket a flagged row landed in", () => {
+    const data = buildCompareGrid(
+      result(
+        [
+          ["09", "T1", 10],
+          ["10", "T1", 10],
+          ["11", "T1", 10],
+          ["12", "T1", 900],
+        ],
+        // Row 3 is T1 at 12:00, the last bucket of the current window.
+        caught("Spike", [3]),
+      ),
+    );
+
+    expect(data.panels[0].alert).toBe(true);
+    expect(data.panels[0].points.map((point) => point.alert)).toEqual([false, true]);
+    expect(data.hasAlerts).toBe(true);
+  });
+
+  it("asks for a category column instead of guessing one", () => {
+    const data = buildCompareGrid({
+      columns: ["bucket", "amount"],
+      rows: [
+        ["09", 5],
+        ["10", 6],
+      ],
+      chart: spec({ type: "compare_grid", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.panels).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("category column");
+  });
+
+  it("refuses to compare when the result holds a single bucket", () => {
+    const data = buildCompareGrid(
+      result([
+        ["09", "T1", 5],
+        ["09", "T2", 6],
+      ]),
+    );
+
+    expect(data.panels).toEqual([]);
+    expect(data.warnings.join(" ")).toContain("at least two time buckets");
+  });
+});
+
+describe("panelSegments", () => {
+  it("maps values onto the box with the peak at the top", () => {
+    // y is inverted: the peak sits at 0 and a zero sits on the baseline.
+    expect(panelSegments([0, 10], 100, 20, 10)).toEqual(["0.00,20.00 100.00,0.00"]);
+  });
+
+  it("breaks the line at a gap rather than drawing through it", () => {
+    // A straight line across a missing bucket invents activity that was never
+    // queried, and it is indistinguishable from a real trend.
+    const segments = panelSegments([1, 1, null, 1, 1], 100, 20, 1);
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toBe("0.00,0.00 25.00,0.00");
+    expect(segments[1]).toBe("75.00,0.00 100.00,0.00");
+  });
+
+  it("drops a lone point, which would render as nothing anyway", () => {
+    expect(panelSegments([null, 5, null], 100, 20, 5)).toEqual([]);
+  });
+
+  it("draws a flat line rather than dividing by a zero peak", () => {
+    expect(panelSegments([0, 0], 100, 20, 0)).toEqual(["0.00,20.00 100.00,20.00"]);
+  });
+
+  it("returns nothing for an empty window", () => {
+    expect(panelSegments([], 100, 20, 10)).toEqual([]);
   });
 });

@@ -785,6 +785,72 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
 }
 
 // ---------------------------------------------------------------------------
+// Two windows, split by bucket
+// ---------------------------------------------------------------------------
+
+interface BucketWindows {
+  /** Bucket labels in the older half, in query order. */
+  previousList: string[];
+  /** Bucket labels in the newer half, in query order. */
+  currentList: string[];
+  previousBuckets: Set<string>;
+  currentBuckets: Set<string>;
+  warnings: string[];
+}
+
+/**
+ * Split a result's *distinct buckets* down the middle: older half previous,
+ * newer half current.
+ *
+ * Splitting by distinct bucket rather than by row position is what makes this
+ * safe for a result grouped by (bucket, category). Such a result interleaves
+ * categories inside every bucket, so halving the row list cuts through the
+ * middle of a bucket and files one terminal's 09:00 under "previous" while its
+ * neighbour's 09:00 lands under "current" - every total silently wrong, with
+ * nothing on screen to suggest it. Bucket order is the only thing carrying time
+ * in that shape.
+ *
+ * Returns null when there is no second bucket to compare against. An odd count
+ * drops the oldest bucket, because two windows covering different spans make
+ * the difference between them meaningless.
+ */
+function splitBucketWindows(rows: Row[], xIndex: number): BucketWindows | null {
+  const buckets: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const cell = row[xIndex];
+    const bucket = cell === null || cell === undefined ? "" : String(cell);
+    if (!seen.has(bucket)) {
+      seen.add(bucket);
+      buckets.push(bucket);
+    }
+  }
+
+  if (buckets.length < 2) return null;
+
+  const half = Math.floor(buckets.length / 2);
+  const offset = buckets.length - half * 2;
+  const previousList = buckets.slice(offset, offset + half);
+  const currentList = buckets.slice(offset + half);
+
+  return {
+    previousList,
+    currentList,
+    previousBuckets: new Set(previousList),
+    currentBuckets: new Set(currentList),
+    warnings:
+      offset > 0
+        ? ["An odd number of buckets: the oldest was dropped so both windows cover the same span."]
+        : [],
+  };
+}
+
+/** First and last label of a window, for naming what was compared. */
+function spanOf(list: string[]): [string, string] | null {
+  return list.length === 0 ? null : [list[0], list[list.length - 1]];
+}
+
+// ---------------------------------------------------------------------------
 // Movers: two windows, totalled per category
 // ---------------------------------------------------------------------------
 
@@ -871,19 +937,8 @@ export function buildMovers(result: ResultSet): MoversData {
   const label = (cell: Cell | undefined) =>
     cell === null || cell === undefined ? "" : String(cell);
 
-  // Insertion order is the query's ORDER BY, which is the only ordering that
-  // can be trusted to mean time here.
-  const buckets: string[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const bucket = label(row[xIndex]);
-    if (!seen.has(bucket)) {
-      seen.add(bucket);
-      buckets.push(bucket);
-    }
-  }
-
-  if (buckets.length < 2) {
+  const split = splitBucketWindows(rows, xIndex);
+  if (!split) {
     return {
       ...EMPTY_MOVERS,
       warnings: [
@@ -892,17 +947,8 @@ export function buildMovers(result: ResultSet): MoversData {
       ],
     };
   }
-
-  const half = Math.floor(buckets.length / 2);
-  const offset = buckets.length - half * 2;
-  if (offset > 0) {
-    warnings.push(
-      "An odd number of buckets: the oldest was dropped so both windows cover the same span.",
-    );
-  }
-
-  const previousBuckets = new Set(buckets.slice(offset, offset + half));
-  const currentBuckets = new Set(buckets.slice(offset + half));
+  warnings.push(...split.warnings);
+  const { previousBuckets, currentBuckets } = split;
 
   const anomalies = detectRowAnomalies({
     columns,
@@ -957,19 +1003,261 @@ export function buildMovers(result: ResultSet): MoversData {
     ranked = ranked.slice(0, MAX_MOVER_ROWS);
   }
 
-  const spanOf = (list: string[]): [string, string] | null =>
-    list.length === 0 ? null : [list[0], list[list.length - 1]];
-
   return {
     rows: ranked,
     // Totalled over every category, including any the ranking cut, so the
     // headline describes the window rather than the visible rows.
     previousTotal: [...totals.values()].reduce((sum, entry) => sum + entry.previous, 0),
     currentTotal: [...totals.values()].reduce((sum, entry) => sum + entry.current, 0),
-    previousSpan: spanOf(buckets.slice(offset, offset + half)),
-    currentSpan: spanOf(buckets.slice(offset + half)),
+    previousSpan: spanOf(split.previousList),
+    currentSpan: spanOf(split.currentList),
     scaleMax: ranked.reduce((max, row) => Math.max(max, row.previous, row.current), 0),
     warnings,
     hasAlerts: ranked.some((row) => row.alert),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Compare grid: one two-window panel per category
+// ---------------------------------------------------------------------------
+
+export interface ComparePanel {
+  category: string;
+  /** Aligned by position within each window, oldest first. */
+  points: ComparePoint[];
+  previousTotal: number;
+  currentTotal: number;
+  delta: number;
+  /** Proportional change, or null when the previous window was zero. */
+  pctChange: number | null;
+  /** Largest value in either window, which is this panel's own y scale. */
+  peak: number;
+  alert: boolean;
+}
+
+export interface CompareGridData {
+  panels: ComparePanel[];
+  previousSpan: [string, string] | null;
+  currentSpan: [string, string] | null;
+  /** Bucket labels of the current window; every panel shares this x axis. */
+  buckets: string[];
+  warnings: string[];
+  hasAlerts: boolean;
+}
+
+const EMPTY_GRID: CompareGridData = {
+  panels: [],
+  previousSpan: null,
+  currentSpan: null,
+  buckets: [],
+  warnings: [],
+  hasAlerts: false,
+};
+
+/** Past this the panels are too small to read a shape in. */
+export const MAX_PANELS = 24;
+
+/**
+ * One `buildCompare` panel per category, ranked by how far each one moved.
+ *
+ * The three period charts answer three different questions and none of them
+ * substitutes for another. `compare` shows the shape of everything at once, so
+ * a terminal that quadrupled while another went dark reads as flat. `movers`
+ * shows two totals per terminal, so a terminal moving the same volume at a
+ * completely different time of night reads as unchanged. This shows the shape
+ * *per* terminal, which is the only one of the three where a change of rhythm
+ * is visible at all.
+ *
+ * Each panel keeps its own y scale and prints its own peak. A shared scale is
+ * the textbook default for small multiples and it is wrong for this data: one
+ * terminal doing twenty times the volume of the rest flattens every other panel
+ * into a straight line at the axis, which is the failure the chart exists to
+ * avoid. Per-panel scaling makes each shape readable, and the printed peak plus
+ * the totals carry the level that the scaling gives up.
+ */
+export function buildCompareGrid(result: ResultSet): CompareGridData {
+  const { columns, rows } = result;
+  const fields = resolveFields(result);
+  if (!fields.xKey || !fields.yKey || !fields.seriesKey) {
+    return {
+      ...EMPTY_GRID,
+      warnings: [
+        ...fields.warnings,
+        !fields.seriesKey
+          ? "A panel per category needs a category column as well as a bucket and a measure."
+          : "Comparing two windows needs a bucket column and a measure column.",
+      ],
+    };
+  }
+
+  const xIndex = columns.indexOf(fields.xKey);
+  const yIndex = columns.indexOf(fields.yKey);
+  const seriesIndex = columns.indexOf(fields.seriesKey);
+  const warnings = [...fields.warnings];
+
+  const split = splitBucketWindows(rows, xIndex);
+  if (!split) {
+    return {
+      ...EMPTY_GRID,
+      warnings: [
+        ...warnings,
+        "Comparing two windows needs at least two time buckets in the result.",
+      ],
+    };
+  }
+  warnings.push(...split.warnings);
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+
+  const label = (cell: Cell | undefined) =>
+    cell === null || cell === undefined ? "" : String(cell);
+
+  // A bucket's position inside its window is what aligns the two lines: the
+  // first hour of the previous window sits under the first hour of the current
+  // one, whatever the labels say.
+  const previousSlot = new Map(split.previousList.map((bucket, index) => [bucket, index]));
+  const currentSlot = new Map(split.currentList.map((bucket, index) => [bucket, index]));
+  const width = split.currentList.length;
+
+  interface Accumulator {
+    previous: (number | null)[];
+    current: (number | null)[];
+    alert: boolean[];
+    flagged: boolean;
+  }
+  const byCategory = new Map<string, Accumulator>();
+
+  for (const [index, row] of rows.entries()) {
+    const bucket = label(row[xIndex]);
+    const inPrevious = previousSlot.get(bucket);
+    const inCurrent = currentSlot.get(bucket);
+    // A dropped odd bucket belongs to neither window.
+    if (inPrevious === undefined && inCurrent === undefined) continue;
+
+    const value = toNumber(row[yIndex]);
+    if (!Number.isFinite(value)) continue;
+
+    const category = label(row[seriesIndex]);
+    let entry = byCategory.get(category);
+    if (!entry) {
+      entry = {
+        previous: Array<number | null>(width).fill(null),
+        current: Array<number | null>(width).fill(null),
+        alert: Array<boolean>(width).fill(false),
+        flagged: false,
+      };
+      byCategory.set(category, entry);
+    }
+
+    const flagged = anomalies.flags[index] === true;
+    if (flagged) entry.flagged = true;
+
+    // Repeated (bucket, category) pairs are summed, the way every other chart
+    // here folds a duplicate: two rows for one slot is one slot.
+    if (inCurrent !== undefined) {
+      entry.current[inCurrent] = (entry.current[inCurrent] ?? 0) + value;
+      if (flagged) entry.alert[inCurrent] = true;
+    } else if (inPrevious !== undefined && inPrevious < width) {
+      entry.previous[inPrevious] = (entry.previous[inPrevious] ?? 0) + value;
+    }
+  }
+
+  if (byCategory.size === 0) {
+    return { ...EMPTY_GRID, warnings };
+  }
+
+  const sum = (values: (number | null)[]) =>
+    values.reduce<number>((total, value) => total + (value ?? 0), 0);
+
+  let panels: ComparePanel[] = [...byCategory.entries()].map(([category, entry]) => {
+    const points: ComparePoint[] = split.currentList.map((bucket, slot) => {
+      const current = entry.current[slot];
+      const previous = entry.previous[slot];
+      return {
+        bucket,
+        previousBucket: split.previousList[slot] ?? "",
+        current,
+        previous,
+        delta: current !== null && previous !== null ? current - previous : null,
+        alert: entry.alert[slot],
+      };
+    });
+
+    const previousTotal = sum(entry.previous);
+    const currentTotal = sum(entry.current);
+    return {
+      category,
+      points,
+      previousTotal,
+      currentTotal,
+      delta: currentTotal - previousTotal,
+      pctChange:
+        previousTotal === 0 ? null : (currentTotal - previousTotal) / Math.abs(previousTotal),
+      peak: points.reduce(
+        (max, point) => Math.max(max, point.current ?? 0, point.previous ?? 0),
+        0,
+      ),
+      alert: entry.flagged,
+    };
+  });
+
+  // Biggest movement first, either direction, so the panels worth reading are
+  // in the first screen and the scan can stop when they go quiet.
+  panels.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  if (panels.length > MAX_PANELS) {
+    warnings.push(`Showing the ${MAX_PANELS} biggest movers of ${panels.length} categories.`);
+    panels = panels.slice(0, MAX_PANELS);
+  }
+
+  return {
+    panels,
+    previousSpan: spanOf(split.previousList),
+    currentSpan: spanOf(split.currentList),
+    buckets: split.currentList,
+    warnings,
+    hasAlerts: panels.some((panel) => panel.alert),
+  };
+}
+
+/**
+ * An SVG polyline `points` attribute for one window of a panel.
+ *
+ * Kept here rather than in the view because it is arithmetic, not markup, and
+ * because a line that silently bridges a gap is a correctness bug worth a test:
+ * a missing bucket is a bucket with no rows, and drawing straight through it
+ * invents activity that was never queried. Gaps therefore break the line into
+ * separate segments instead.
+ */
+export function panelSegments(
+  values: (number | null)[],
+  width: number,
+  height: number,
+  peak: number,
+): string[] {
+  if (values.length === 0) return [];
+  const scale = peak > 0 ? peak : 1;
+  const step = values.length > 1 ? width / (values.length - 1) : 0;
+
+  const segments: string[] = [];
+  let run: string[] = [];
+  for (const [index, value] of values.entries()) {
+    if (value === null) {
+      // Two points make a line; a lone point would render as nothing, so it is
+      // dropped rather than emitted as an invisible segment.
+      if (run.length > 1) segments.push(run.join(" "));
+      run = [];
+      continue;
+    }
+    const x = values.length > 1 ? index * step : width / 2;
+    const y = height - (Math.max(0, value) / scale) * height;
+    run.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  if (run.length > 1) segments.push(run.join(" "));
+  return segments;
 }

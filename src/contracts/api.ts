@@ -17,6 +17,7 @@ export type ChartType =
 	| "table"
 	| "compare"
 	| "movers"
+	| "compare_grid"
 	| "heatmap";
 
 export const DB_TYPES: readonly DbType[] = ["postgres", "mysql", "sqlite"];
@@ -67,6 +68,7 @@ export const CHART_TYPES: readonly ChartType[] = [
 	"table",
 	"compare",
 	"movers",
+	"compare_grid",
 	"heatmap",
 ];
 

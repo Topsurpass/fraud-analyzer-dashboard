@@ -42,6 +42,18 @@ export function ChartSkeleton({ type }: { type: ChartType }) {
         </div>
       );
 
+    case "compare_grid":
+      return (
+        <div className="skeleton-sweep grid h-full grid-cols-3 gap-1.5 px-3 py-3">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="space-y-1 border border-line/60 p-1.5">
+              <div className="h-1.5 w-2/3 bg-line/60" />
+              <div className="h-5 bg-line/30" />
+            </div>
+          ))}
+        </div>
+      );
+
     case "heatmap":
       return (
         <div className="skeleton-sweep grid h-full grid-cols-8 gap-[2px] px-3 py-3">

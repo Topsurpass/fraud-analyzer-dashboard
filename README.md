@@ -84,7 +84,7 @@ under jsdom a chart that renders zero bars and one that renders ten are
 indistinguishable - both are "a `<BarChart />` that mounted without throwing".
 Twice during development a library-level animation defect left charts
 permanently blank while every unit test stayed green. `scripts/smoke.mjs`
-asserts on the actual SVG geometry for all eight chart types, checks that every
+asserts on the actual SVG geometry for all nine chart types, checks that every
 card reporting a flagged series actually painted its hatch pattern, checks that
 the card menu opens and then closes on an outside click, on Escape and when
 another menu opens, checks that no card sits in a stale state, and checks that the layout does not overflow at
@@ -121,8 +121,8 @@ contract at the boundary. Routes hold glue only.
 
 ### Charts built for a fraud queue
 
-Five of the eight chart types answer "what is the shape of this". Three answer
-the questions an analyst actually opens the app with.
+Five of the nine chart types answer "what is the shape of this". Four answer the
+questions an analyst actually opens the app with.
 
 **`compare` - the same measure over two consecutive windows.** Configure a time
 bucket (`x_field`) and a measure (`y_field`), and write a query returning *twice*
@@ -159,7 +159,8 @@ quadrupled and another went dark reads as flat on a time overlay and as two
 obvious rows here. Configure the bucket as `x_field`, the measure as `y_field`
 and the category as `series_field`.
 
-The split here is by *distinct bucket*, not by row position. A result grouped by
+The split here is by *distinct bucket*, not by row position - shared with
+`compare_grid` as `splitBucketWindows`. A result grouped by
 (bucket, terminal) interleaves terminals within every bucket, so halving the row
 list would cut through the middle of a bucket and put one terminal's 09:00 in
 the previous window and another's in the current. Bucket order is the only thing
@@ -176,6 +177,31 @@ either total, because the biggest terminal is a fact an analyst already knows
 and the biggest change is the one they do not. Direction is carried by an arrow
 and a sign, never by colour alone, which leaves the alert colour meaning only
 "a rule matched".
+
+**`compare_grid` - one `compare` panel per category, as small multiples.** The
+three period charts answer three different questions and none substitutes for
+another. `compare` shows the shape of everything at once, so a terminal that
+quadrupled while another went dark reads as flat. `movers` shows two totals per
+terminal, so a terminal moving the same volume at a completely different hour
+reads as unchanged. This shows the shape *per* terminal, which is the only one
+of the three where a change of rhythm is visible at all.
+
+Each panel keeps its own y scale and prints its own peak. A shared scale is the
+textbook default for small multiples and it is wrong for this data: one terminal
+doing twenty times the volume of the rest flattens every other panel onto the
+axis, which is the failure the chart exists to avoid. Per-panel scaling makes
+each shape readable; the printed peak and the two totals carry the level that
+the scaling gives up. Panels are ranked by movement and the quiet tail sits
+behind a "show quieter" toggle, because twenty flat panels ahead of the
+interesting ones is a scroll rather than a chart.
+
+Drawn as inline SVG, not a charting library. Twenty-four recharts instances
+would mount twenty-four responsive containers and resize observers to draw two
+polylines each; at this size a `viewBox` and a `points` string do the same job
+for a fraction of the work, and the geometry becomes a pure function
+(`panelSegments`) the gate lane can assert on directly. A missing bucket breaks
+the line rather than being bridged - a straight line across an hour with no rows
+invents activity that was never queried.
 
 **`heatmap` - a category against a time bucket, coloured by a measure.**
 Configure the bucket as `x_field` (columns), the category as `series_field`

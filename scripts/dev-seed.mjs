@@ -342,6 +342,45 @@ function demoQueries() {
       `.trim(),
     },
     {
+      name: "Country movement, hour by hour",
+      description: "One two-window panel per country, and the same data ranked by movement.",
+      poll_interval_ms: 8000,
+      row_limit: 2000,
+      /*
+       * The same execution answering two different questions: which countries
+       * moved, and what each one's shape looked like while it did.
+       */
+      charts: [
+        {
+          name: "Per country: now vs previous",
+          chart_type: "compare_grid",
+          x_field: "bucket",
+          y_field: "txns",
+          series_field: "country",
+        },
+        {
+          name: "Biggest movers by country",
+          chart_type: "movers",
+          x_field: "bucket",
+          y_field: "txns",
+          series_field: "country",
+        },
+      ],
+      sql_text: `
+        SELECT strftime('%H:', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 30) * 30)
+                 AS bucket,
+               country,
+               COUNT(*) AS txns
+        FROM transactions
+        WHERE occurred_at >= datetime('now', '-6 hours')
+        GROUP BY strftime('%Y-%m-%d %H', occurred_at)
+               || printf('%02d', (CAST(strftime('%M', occurred_at) AS INTEGER) / 30) * 30),
+               country
+        ORDER BY MIN(occurred_at), country
+      `.trim(),
+    },
+    {
       name: "Country activity grid",
       description: "Where and when, as one grid rather than one line chart per country.",
       poll_interval_ms: 8000,

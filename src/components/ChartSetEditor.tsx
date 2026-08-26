@@ -22,7 +22,15 @@ import { FieldPicker } from "@/components/FieldPicker";
  * it when a board empties.
  */
 
-const NEEDS_X: ChartType[] = ["line", "bar", "pie", "compare", "movers", "heatmap"];
+const NEEDS_X: ChartType[] = [
+  "line",
+  "bar",
+  "pie",
+  "compare",
+  "movers",
+  "compare_grid",
+  "heatmap",
+];
 const NEEDS_Y: ChartType[] = [
   "line",
   "bar",
@@ -30,6 +38,7 @@ const NEEDS_Y: ChartType[] = [
   "number",
   "compare",
   "movers",
+  "compare_grid",
   "heatmap",
 ];
 
@@ -38,7 +47,7 @@ const NEEDS_Y: ChartType[] = [
  * A heatmap with no category is a single row, which is a line chart drawn
  * badly - so the editor asks for one instead of rendering a stripe.
  */
-const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers"];
+const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers", "compare_grid"];
 
 export function needsX(type: ChartType): boolean {
   return NEEDS_X.includes(type);
@@ -60,14 +69,21 @@ export function seriesIsRequired(type: ChartType): boolean {
 /** What the x axis actually means, per chart type. */
 export function xFieldLabel(type: ChartType): string {
   if (type === "pie") return "Category field";
-  if (type === "compare" || type === "movers") return "Time bucket field";
+  if (type === "compare" || type === "movers" || type === "compare_grid") {
+    return "Time bucket field";
+  }
   if (type === "heatmap") return "Bucket field (columns)";
   return "X field";
 }
 
 export function yFieldLabel(type: ChartType): string {
   if (type === "pie") return "Value field";
-  if (type === "compare" || type === "heatmap" || type === "movers") {
+  if (
+    type === "compare" ||
+    type === "heatmap" ||
+    type === "movers" ||
+    type === "compare_grid"
+  ) {
     return "Measure field";
   }
   return "Y field";
@@ -75,7 +91,7 @@ export function yFieldLabel(type: ChartType): string {
 
 export function seriesFieldLabel(type: ChartType): string {
   if (type === "heatmap") return "Category field (rows)";
-  if (type === "movers") return "Compare per (category)";
+  if (type === "movers" || type === "compare_grid") return "Compare per (category)";
   return "Series field";
 }
 
