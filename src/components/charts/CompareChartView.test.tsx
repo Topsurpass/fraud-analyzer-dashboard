@@ -30,13 +30,14 @@ describe("CompareChartView", () => {
 
     expect(screen.getByText("70")).toBeInTheDocument();
     expect(screen.getByText(/30/)).toBeInTheDocument();
-    expect(screen.getByText("up 133%")).toBeInTheDocument();
+    // The badge's vocabulary: a signed percentage, not prose.
+    expect(screen.getByText("+133%")).toBeInTheDocument();
   });
 
   it("says a fall is a fall, not an unsigned change", () => {
     render(<CompareChartView data={build([40, 60, 10, 15])} title="Volume" />);
 
-    expect(screen.getByText("down 75%")).toBeInTheDocument();
+    expect(screen.getByText("−75%")).toBeInTheDocument();
   });
 
   it("calls a rise from zero what it is instead of inventing a percentage", () => {
@@ -44,7 +45,7 @@ describe("CompareChartView", () => {
     // printing one would be a number an analyst could act on wrongly.
     render(<CompareChartView data={build([0, 0, 20, 20])} title="Volume" />);
 
-    expect(screen.getByText("up from zero")).toBeInTheDocument();
+    expect(screen.getByText("from nothing")).toBeInTheDocument();
   });
 
   it("reads a rounding-error difference as flat rather than up 0%", () => {

@@ -10,6 +10,13 @@
 
 import type { Cell, ChartSpec, FlagOutcome, FlagSeverity, Row } from "@/contracts/api";
 import { detectRowAnomalies } from "@/services/anomaly";
+import {
+  type ChangeVerdict,
+  DEFAULT_SURGE_THRESHOLD_PCT,
+  bucketSurges,
+  judgeChange,
+  resolveThreshold,
+} from "./severity";
 import { MAX_PLOT_POINTS, downsamplePreservingAlerts } from "./downsample";
 
 export interface ResultSet {
@@ -456,6 +463,10 @@ export interface ComparePoint {
 
 export interface CompareData {
   points: ComparePoint[];
+  /** The window-over-window movement, judged against the threshold. */
+  verdict: ChangeVerdict;
+  /** Buckets that jumped past the threshold from the one directly before. */
+  surges: { index: number; verdict: ChangeVerdict }[];
   /** The largest absolute gap between the two lines, and where it happened. */
   widestGap: { bucket: string; delta: number } | null;
   /** Totals for each window, which is what "up 12%" is read from. */
@@ -467,6 +478,14 @@ export interface CompareData {
 
 const EMPTY_COMPARE: CompareData = {
   points: [],
+  verdict: {
+    severity: "normal",
+    pctChange: null,
+    fromNothing: false,
+    toNothing: false,
+    threshold: DEFAULT_SURGE_THRESHOLD_PCT,
+  },
+  surges: [],
   widestGap: null,
   currentTotal: 0,
   previousTotal: 0,
@@ -503,6 +522,7 @@ export function buildCompare(result: ResultSet): CompareData {
   const xIndex = columns.indexOf(fields.xKey);
   const yIndex = columns.indexOf(fields.yKey);
   const warnings = [...fields.warnings];
+  const compareThreshold = resolveThreshold(result.chart.surge_threshold_pct);
 
   if (rows.length < 4) {
     // Two points a side is the least that can show a shape rather than a step.
@@ -592,6 +612,14 @@ export function buildCompare(result: ResultSet): CompareData {
         : null,
     currentTotal,
     previousTotal,
+    verdict: judgeChange(previousTotal, currentTotal, compareThreshold),
+    // Judged over the current window only: the two windows sit adjacent in the
+    // array and are a whole window apart in time, so a step across the join is
+    // not the "last bucket against this one" comparison it would look like.
+    surges: bucketSurges(
+      points.map((point) => point.current),
+      compareThreshold,
+    ),
     warnings,
     hasAlerts: points.some((point) => point.alert),
   };
@@ -867,10 +895,16 @@ export interface MoverRow {
   pctChange: number | null;
   /** True when any row behind either window total was flagged. */
   alert: boolean;
+  /** The movement, judged against the chart's threshold. */
+  verdict: ChangeVerdict;
 }
 
 export interface MoversData {
   rows: MoverRow[];
+  /** The threshold every row here was judged against, in percent. */
+  threshold: number;
+  /** Categories that crossed it, counted before the ranking was capped. */
+  surgingCount: number;
   previousTotal: number;
   currentTotal: number;
   /** Bucket labels each window spans, so the card can name what it compared. */
@@ -884,6 +918,8 @@ export interface MoversData {
 
 const EMPTY_MOVERS: MoversData = {
   rows: [],
+  threshold: 0,
+  surgingCount: 0,
   previousTotal: 0,
   currentTotal: 0,
   previousSpan: null,
@@ -933,6 +969,7 @@ export function buildMovers(result: ResultSet): MoversData {
   const yIndex = columns.indexOf(fields.yKey);
   const seriesIndex = columns.indexOf(fields.seriesKey);
   const warnings = [...fields.warnings];
+  const moversThreshold = resolveThreshold(result.chart.surge_threshold_pct);
 
   const label = (cell: Cell | undefined) =>
     cell === null || cell === undefined ? "" : String(cell);
@@ -941,6 +978,7 @@ export function buildMovers(result: ResultSet): MoversData {
   if (!split) {
     return {
       ...EMPTY_MOVERS,
+      threshold: moversThreshold,
       warnings: [
         ...warnings,
         "Comparing two windows needs at least two time buckets in the result.",
@@ -979,7 +1017,7 @@ export function buildMovers(result: ResultSet): MoversData {
   }
 
   if (totals.size === 0) {
-    return { ...EMPTY_MOVERS, warnings };
+    return { ...EMPTY_MOVERS, threshold: moversThreshold, warnings };
   }
 
   let ranked: MoverRow[] = [...totals.entries()]
@@ -991,10 +1029,15 @@ export function buildMovers(result: ResultSet): MoversData {
       pctChange:
         entry.previous === 0 ? null : (entry.current - entry.previous) / Math.abs(entry.previous),
       alert: entry.alert,
+      verdict: judgeChange(entry.previous, entry.current, moversThreshold),
     }))
     // Largest movement first, either direction: a terminal going dark is as
     // much a finding as one lighting up.
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  // Before the cap, so the count describes the data rather than the rows that
+  // happened to fit.
+  const moversSurging = ranked.filter((row) => row.verdict.severity !== "normal").length;
 
   if (ranked.length > MAX_MOVER_ROWS) {
     warnings.push(
@@ -1005,6 +1048,8 @@ export function buildMovers(result: ResultSet): MoversData {
 
   return {
     rows: ranked,
+    threshold: moversThreshold,
+    surgingCount: moversSurging,
     // Totalled over every category, including any the ranking cut, so the
     // headline describes the window rather than the visible rows.
     previousTotal: [...totals.values()].reduce((sum, entry) => sum + entry.previous, 0),
@@ -1033,10 +1078,31 @@ export interface ComparePanel {
   /** Largest value in either window, which is this panel's own y scale. */
   peak: number;
   alert: boolean;
+  /** The window-over-window movement, judged against the chart's threshold. */
+  verdict: ChangeVerdict;
+  /**
+   * Buckets that jumped past the threshold from the bucket directly before
+   * them - the "last hour against this hour" reading. A panel whose six-hour
+   * total barely moved can still have gone from four transactions to four
+   * hundred in one hour, and that hour is the one worth opening.
+   */
+  surges: { index: number; verdict: ChangeVerdict }[];
 }
 
 export interface CompareGridData {
   panels: ComparePanel[];
+  /** The threshold every panel here was judged against, in percent. */
+  threshold: number;
+  /**
+   * Panels worth investigating: those whose window-over-window change crossed
+   * the threshold, *or* that contain an hour that jumped past it.
+   *
+   * Both, because either alone under-reports. A terminal whose six-hour total
+   * fell 77% while one hour inside it rose 18,000% is the exact shape a fraud
+   * queue is looking for, and counting only window totals would report that
+   * card as having nothing to look at.
+   */
+  surgingCount: number;
   previousSpan: [string, string] | null;
   currentSpan: [string, string] | null;
   /** Bucket labels of the current window; every panel shares this x axis. */
@@ -1047,6 +1113,8 @@ export interface CompareGridData {
 
 const EMPTY_GRID: CompareGridData = {
   panels: [],
+  threshold: 0,
+  surgingCount: 0,
   previousSpan: null,
   currentSpan: null,
   buckets: [],
@@ -1094,11 +1162,13 @@ export function buildCompareGrid(result: ResultSet): CompareGridData {
   const yIndex = columns.indexOf(fields.yKey);
   const seriesIndex = columns.indexOf(fields.seriesKey);
   const warnings = [...fields.warnings];
+  const threshold = resolveThreshold(result.chart.surge_threshold_pct);
 
   const split = splitBucketWindows(rows, xIndex);
   if (!split) {
     return {
       ...EMPTY_GRID,
+      threshold,
       warnings: [
         ...warnings,
         "Comparing two windows needs at least two time buckets in the result.",
@@ -1168,7 +1238,7 @@ export function buildCompareGrid(result: ResultSet): CompareGridData {
   }
 
   if (byCategory.size === 0) {
-    return { ...EMPTY_GRID, warnings };
+    return { ...EMPTY_GRID, threshold, warnings };
   }
 
   const sum = (values: (number | null)[]) =>
@@ -1203,12 +1273,27 @@ export function buildCompareGrid(result: ResultSet): CompareGridData {
         0,
       ),
       alert: entry.flagged,
+      verdict: judgeChange(previousTotal, currentTotal, threshold),
+      // Judged over the current window only. Running it across the join
+      // between the two windows would compare the last hour of six hours ago
+      // against the first hour of this one - two buckets that are adjacent in
+      // the array and hours apart in time.
+      surges: bucketSurges(
+        points.map((point) => point.current),
+        threshold,
+      ),
     };
   });
 
   // Biggest movement first, either direction, so the panels worth reading are
   // in the first screen and the scan can stop when they go quiet.
   panels.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  // Counted before the cap: the card's summary describes the data, not the
+  // subset that happened to fit.
+  const surgingCount = panels.filter(
+    (panel) => panel.verdict.severity !== "normal" || panel.surges.length > 0,
+  ).length;
 
   if (panels.length > MAX_PANELS) {
     warnings.push(`Showing the ${MAX_PANELS} biggest movers of ${panels.length} categories.`);
@@ -1217,6 +1302,8 @@ export function buildCompareGrid(result: ResultSet): CompareGridData {
 
   return {
     panels,
+    threshold,
+    surgingCount,
     previousSpan: spanOf(split.previousList),
     currentSpan: spanOf(split.currentList),
     buckets: split.currentList,

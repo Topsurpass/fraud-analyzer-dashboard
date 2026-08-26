@@ -164,6 +164,8 @@ export interface QueryChart {
 	x_field: string | null;
 	y_field: string | null;
 	series_field: string | null;
+	/** Null means "follow the app-wide default", not "never flag anything". */
+	surge_threshold_pct: number | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -175,6 +177,7 @@ export interface QueryChartInput {
 	x_field?: string | null;
 	y_field?: string | null;
 	series_field?: string | null;
+	surge_threshold_pct?: number | null;
 }
 
 export interface QueryChartSet {
@@ -190,6 +193,12 @@ export interface ChartSpec {
 	x_field: string | null;
 	y_field: string | null;
 	series_field: string | null;
+	/**
+	 * Percent change past which a movement is called out, as a magnitude.
+	 * Already resolved by the engine, so this is never null on a live payload -
+	 * an unset chart arrives carrying the app-wide default.
+	 */
+	surge_threshold_pct?: number | null;
 	warnings: string[];
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChartSpec, FlagOutcome } from "@/contracts/api";
 import { MAX_PLOT_POINTS } from "./downsample";
+import { DEFAULT_SURGE_THRESHOLD_PCT } from "./severity";
 import {
   MAX_HEAT_BUCKETS,
   MAX_HEAT_ROWS,
@@ -1240,5 +1241,242 @@ describe("panelSegments", () => {
 
   it("returns nothing for an empty window", () => {
     expect(panelSegments([], 100, 20, 10)).toEqual([]);
+  });
+});
+
+describe("surge thresholds on the period charts", () => {
+  const gridSpec = (threshold: number | null) =>
+    spec({
+      type: "compare_grid",
+      x_field: "bucket",
+      y_field: "amount",
+      series_field: "terminal",
+      surge_threshold_pct: threshold,
+    });
+
+  /** T1 doubles, T2 holds steady. */
+  const twoTerminals = (threshold: number | null) => ({
+    columns: ["bucket", "terminal", "amount"],
+    rows: [
+      ["09", "T1", 100],
+      ["09", "T2", 100],
+      ["10", "T1", 200],
+      ["10", "T2", 105],
+    ],
+    chart: gridSpec(threshold),
+  });
+
+  it("judges each panel against the chart's own threshold", () => {
+    const data = buildCompareGrid(twoTerminals(50));
+
+    expect(data.threshold).toBe(50);
+    expect(data.panels.find((panel) => panel.category === "T1")?.verdict.severity).toBe("surge");
+    expect(data.panels.find((panel) => panel.category === "T2")?.verdict.severity).toBe("normal");
+  });
+
+  it("goes quiet when the threshold is raised above the movement", () => {
+    // The whole point of configuring it: a card watching the overnight window
+    // carries a bigger number so the ordinary nightly fall stays unbadged.
+    const data = buildCompareGrid(twoTerminals(150));
+
+    expect(data.panels.every((panel) => panel.verdict.severity === "normal")).toBe(true);
+    expect(data.surgingCount).toBe(0);
+  });
+
+  it("falls back to the default when a chart carries no threshold", () => {
+    const data = buildCompareGrid(twoTerminals(null));
+
+    expect(data.threshold).toBe(DEFAULT_SURGE_THRESHOLD_PCT);
+  });
+
+  it("counts surging categories before the panel cap, not after", () => {
+    // The card's summary describes the data; counting after the slice would
+    // report only the ones that happened to fit on screen.
+    const rows: (string | number)[][] = [];
+    for (let index = 0; index < MAX_PANELS + 6; index += 1) {
+      rows.push(["09", `T${index}`, 1]);
+      rows.push(["10", `T${index}`, 10]);
+    }
+
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows,
+      chart: gridSpec(50),
+    });
+
+    expect(data.panels).toHaveLength(MAX_PANELS);
+    expect(data.surgingCount).toBe(MAX_PANELS + 6);
+  });
+
+  it("finds the single hour that jumped even when the totals barely moved", () => {
+    /*
+     * The reason bucket-level surges exist at all. This terminal's two windows
+     * total 210 against 210 - dead flat - while one hour inside the current
+     * window went from 5 to 200.
+     */
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 105],
+        ["10", "T1", 105],
+        ["11", "T1", 5],
+        ["12", "T1", 205],
+      ],
+      chart: gridSpec(50),
+    });
+
+    const panel = data.panels[0];
+    expect(panel.verdict.severity).toBe("normal");
+    expect(panel.surges.map((surge) => surge.index)).toEqual([1]);
+    expect(panel.surges[0].verdict.severity).toBe("surge");
+  });
+
+  it("never compares across the join between the two windows", () => {
+    /*
+     * The previous window's last bucket and the current window's first are
+     * adjacent in the array and a whole window apart in time. Judging that
+     * step would report a surge at an hour whose neighbour was six hours ago.
+     */
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 1000],
+        ["10", "T1", 1000],
+        // A huge step down from the previous window, but flat within its own.
+        ["11", "T1", 10],
+        ["12", "T1", 10],
+      ],
+      chart: gridSpec(50),
+    });
+
+    expect(data.panels[0].surges).toEqual([]);
+    // The window-over-window verdict still catches it, which is its job.
+    expect(data.panels[0].verdict.severity).toBe("drop");
+  });
+
+  it("judges movers rows against the same threshold", () => {
+    const data = buildMovers({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 100],
+        ["09", "T2", 100],
+        ["10", "T1", 200],
+        ["10", "T2", 105],
+      ],
+      chart: spec({
+        type: "movers",
+        x_field: "bucket",
+        y_field: "amount",
+        series_field: "terminal",
+        surge_threshold_pct: 50,
+      }),
+    });
+
+    expect(data.threshold).toBe(50);
+    expect(data.surgingCount).toBe(1);
+    expect(data.rows.find((row) => row.category === "T1")?.verdict.severity).toBe("surge");
+  });
+
+  it("judges the compare headline against the threshold too", () => {
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows: [
+        ["t0", 100],
+        ["t1", 100],
+        ["t2", 300],
+        ["t3", 300],
+      ],
+      chart: spec({
+        type: "compare",
+        x_field: "bucket",
+        y_field: "amount",
+        surge_threshold_pct: 50,
+      }),
+    });
+
+    expect(data.verdict.severity).toBe("surge");
+    expect(data.verdict.pctChange).toBeCloseTo(2);
+  });
+});
+
+describe("counting what is worth investigating", () => {
+  const gridSpec = spec({
+    type: "compare_grid",
+    x_field: "bucket",
+    y_field: "amount",
+    series_field: "terminal",
+    surge_threshold_pct: 120,
+  });
+
+  it("counts a panel whose hours jumped even when its totals did not", () => {
+    /*
+     * Taken from the live Fundgate data: 7017010168's six-hour total fell 77%
+     * while one hour inside it rose 18,000%. Counting only window totals
+     * reported that card as having nothing to look at, which is the exact
+     * opposite of the truth.
+     */
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 100],
+        ["10", "T1", 100],
+        ["11", "T1", 105],
+        // Inside the current window: a 100x jump against the hour before.
+        ["12", "T1", 10_500],
+      ],
+      chart: gridSpec,
+    });
+
+    expect(data.panels[0].verdict.severity).toBe("surge");
+    expect(data.panels[0].surges).toHaveLength(1);
+    expect(data.surgingCount).toBe(1);
+  });
+
+  it("counts an hour-level jump on a panel whose window change stayed quiet", () => {
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 105],
+        ["10", "T1", 105],
+        ["11", "T1", 5],
+        ["12", "T1", 205],
+      ],
+      chart: gridSpec,
+    });
+
+    // Two windows of 210 against 210: dead flat, and still worth opening.
+    expect(data.panels[0].verdict.severity).toBe("normal");
+    expect(data.panels[0].surges.length).toBeGreaterThan(0);
+    expect(data.surgingCount).toBe(1);
+  });
+
+  it("counts a panel once however many ways it crossed", () => {
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 100],
+        ["10", "T1", 100],
+        ["11", "T1", 5000],
+        ["12", "T1", 50_000],
+      ],
+      chart: gridSpec,
+    });
+
+    expect(data.surgingCount).toBe(1);
+  });
+
+  it("stays at zero when nothing crossed either way", () => {
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows: [
+        ["09", "T1", 100],
+        ["10", "T1", 100],
+        ["11", "T1", 105],
+        ["12", "T1", 108],
+      ],
+      chart: gridSpec,
+    });
+
+    expect(data.surgingCount).toBe(0);
   });
 });

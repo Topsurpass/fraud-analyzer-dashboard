@@ -5,6 +5,7 @@ import type { ChartType, QueryChartInput } from "@/contracts/api";
 import { CHART_TYPES } from "@/contracts/api";
 import { Button, Field, Input, Panel, Select } from "@/components/ui";
 import { FieldPicker } from "@/components/FieldPicker";
+import { DEFAULT_SURGE_THRESHOLD_PCT } from "@/services/charts/severity";
 
 /**
  * Every way one query's result can be drawn.
@@ -48,6 +49,20 @@ const NEEDS_Y: ChartType[] = [
  * badly - so the editor asks for one instead of rendering a stripe.
  */
 const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers", "compare_grid"];
+
+/**
+ * Charts that judge a movement against a threshold.
+ *
+ * Only the period charts: they are the ones that hold a "before" to compare a
+ * "now" against. A pie has no time dimension at all, and a table is rows rather
+ * than a measure - offering a threshold there would be a control that silently
+ * does nothing.
+ */
+const HAS_THRESHOLD: ChartType[] = ["compare", "movers", "compare_grid"];
+
+export function hasThreshold(type: ChartType): boolean {
+  return HAS_THRESHOLD.includes(type);
+}
 
 export function needsX(type: ChartType): boolean {
   return NEEDS_X.includes(type);
@@ -172,6 +187,10 @@ export function ChartSetEditor({
     if (!needsX(chart_type)) changes.x_field = "";
     if (!needsY(chart_type)) changes.y_field = "";
     if (!needsSeries(chart_type)) changes.series_field = "";
+    // Same reasoning as the fields: a threshold left behind on a type that
+    // never reads it is invisible configuration that reappears if the type is
+    // switched back.
+    if (!hasThreshold(chart_type)) changes.surge_threshold_pct = null;
     patch(index, changes);
   };
 
@@ -333,6 +352,38 @@ export function ChartSetEditor({
                       />
                     </div>
                   ) : null}
+                </div>
+              ) : null}
+
+              {hasThreshold(chart.chart_type) ? (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[8rem]">
+                    <Field label="Flag a change past (%)" htmlFor={`chart-surge-${index}`}>
+                      <Input
+                        id={`chart-surge-${index}`}
+                        type="number"
+                        min={1}
+                        step={5}
+                        disabled={disabled}
+                        placeholder={String(DEFAULT_SURGE_THRESHOLD_PCT)}
+                        value={chart.surge_threshold_pct ?? ""}
+                        onChange={(event) => {
+                          // Empty means "follow the app default", which is not
+                          // the same as pinning that number: an unset chart
+                          // moves when the default does.
+                          const raw = event.target.value.trim();
+                          patch(index, {
+                            surge_threshold_pct: raw === "" ? null : Number(raw),
+                          });
+                        }}
+                      />
+                    </Field>
+                  </div>
+                  <p className="min-w-[12rem] flex-1 pb-1.5 text-[11.5px] text-muted">
+                    A magnitude, so {chart.surge_threshold_pct || DEFAULT_SURGE_THRESHOLD_PCT}{" "}
+                    flags a rise and a fall of that size. Percent rather than an amount, because
+                    terminals do not carry comparable volume. Blank follows the default.
+                  </p>
                 </div>
               ) : null}
 

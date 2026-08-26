@@ -257,7 +257,7 @@ export function ChartCard({
         ) : view.kind === "compare" ? (
           <CompareChartView data={view.data} title={cardTitle} />
         ) : view.kind === "compare_grid" ? (
-          <CompareGridView data={view.data} title={cardTitle} />
+          <CompareGridView data={view.data} title={cardTitle} chartId={spec?.id} />
         ) : view.kind === "movers" ? (
           <MoversView data={view.data} title={cardTitle} />
         ) : view.kind === "heatmap" ? (

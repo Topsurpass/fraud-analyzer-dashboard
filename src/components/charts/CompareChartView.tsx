@@ -16,6 +16,8 @@ import type { CompareData, ComparePoint } from "@/services/charts/shape";
 import { formatAxisValue } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { ChartEmpty } from "./ChartEmpty";
+import { ChangeBadge } from "./ChangeBadge";
+import { type ChangeVerdict, changeLabel } from "@/services/charts/severity";
 import { ChartTooltip, type TooltipEntry } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
 import {
@@ -56,19 +58,19 @@ export interface CompareChartViewProps {
   title: string;
 }
 
-/** A signed change, phrased the way an analyst says it out loud. */
-function describeChange(current: number, previous: number): string {
-  if (previous === 0) {
-    if (current === 0) return "no change";
-    // A rise from nothing has no percentage: 0 -> 40 is not "up 100%".
-    return "up from zero";
-  }
-  const ratio = (current - previous) / Math.abs(previous);
-  const pct = Math.abs(ratio) * 100;
-  // Under a tenth of a percent reads as noise, and "up 0.0%" reads as a bug.
-  if (pct < 0.05) return "flat";
-  const rounded = pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10;
-  return `${ratio > 0 ? "up" : "down"} ${rounded}%`;
+/**
+ * The same change the badge shows, phrased as prose for the plot's spoken
+ * label. "+133%" is right on a chip and wrong inside a sentence.
+ *
+ * Delegating to `changeLabel` rather than recomputing keeps one rounding rule:
+ * a badge reading "+112%" beside a label reading "up 111%" is the kind of
+ * disagreement nobody notices until a reader has to explain it.
+ */
+function describeChange(verdict: ChangeVerdict): string {
+  const label = changeLabel(verdict);
+  if (label.startsWith("+")) return `up ${label.slice(1)}`;
+  if (label.startsWith("−")) return `down ${label.slice(1)}`;
+  return label;
 }
 
 function CompareTooltip({ active, payload, label }: TooltipProps<number, string>) {
@@ -109,7 +111,7 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
     return <ChartEmpty label={data.warnings[0] ?? "No rows in range"} />;
   }
 
-  const change = describeChange(data.currentTotal, data.previousTotal);
+  const change = describeChange(data.verdict);
   const gap = data.widestGap;
 
   const legend = [
@@ -130,17 +132,13 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
         <span className="text-[11px] text-muted">
           vs <span className="tnum">{formatAxisValue(data.previousTotal)}</span> previous
         </span>
-        <span
-          className="text-[11px] font-medium"
-          style={{
-            color:
-              change === "flat" || change === "no change"
-                ? "var(--text-muted)"
-                : "var(--signal-change)",
-          }}
-        >
-          {change}
-        </span>
+        {/*
+         * One badge component across every chart, so "this moved enough to
+         * look at" cannot come to mean different things on different cards.
+         * It also stays quiet under the threshold, where the old always-amber
+         * text called a 2% drift a change worth colouring.
+         */}
+        <ChangeBadge verdict={data.verdict} subject={title} />
         {gap && (
           <span className="text-[11px] text-muted">
             widest gap at <span className="tnum">{gap.bucket}</span> (

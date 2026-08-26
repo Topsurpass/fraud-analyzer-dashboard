@@ -195,6 +195,15 @@ the scaling gives up. Panels are ranked by movement and the quiet tail sits
 behind a "show quieter" toggle, because twenty flat panels ahead of the
 interesting ones is a scroll rather than a chart.
 
+Thirty-one panels is a wall, so the grid narrows three ways. **Choose
+terminals** filters to a working set - the survivors get wider columns, which is
+the whole point of narrowing - and the choice is saved per chart, because
+re-picking four terminals out of thirty-one after every reload is the friction
+that makes a feature go unused. **Clicking a panel maximises it** over the whole
+card with its bucket labels, a crosshair readout, and every threshold crossing
+named rather than merely marked. The quiet tail sits behind a "show quieter"
+toggle.
+
 Drawn as inline SVG, not a charting library. Twenty-four recharts instances
 would mount twenty-four responsive containers and resize observers to draw two
 polylines each; at this size a `viewBox` and a `points` string do the same job
@@ -202,6 +211,50 @@ for a fraction of the work, and the geometry becomes a pure function
 (`panelSegments`) the gate lane can assert on directly. A missing bucket breaks
 the line rather than being bridged - a straight line across an hour with no rows
 invents activity that was never queried.
+
+#### Saying when a movement is worth investigating
+
+Terminals do not carry comparable volume: one does twenty times another's, so an
+absolute jump means nothing across a fleet. A *percentage* change is
+volume-independent, which is why the threshold is expressed as one - the same
+number is meaningful for the busiest terminal and the quietest.
+
+Each period chart carries its own `surge_threshold_pct` (a magnitude, so 50
+flags a rise of 50% and a fall of 50%), set in the chart editor and stored per
+chart. Blank means "follow the app-wide default" and is deliberately not the
+same as typing that default: an unset chart moves when the default does.
+
+Two different comparisons get judged, because either alone under-reports:
+
+- **Window over window** - the panel's own previous total against its current
+  one. This is what the badge on the panel shows.
+- **Hour against the hour before it** - strictly consecutive buckets inside the
+  current window. A terminal whose six-hour total fell 77% while one hour inside
+  it rose 18,000% is the exact shape a fraud queue is looking for, and the window
+  comparison reports it as "down 77%" and nothing else.
+
+Consecutive means consecutive: a step is never judged across a gap, and never
+across the join between the two windows, because those two buckets are adjacent
+in the array and a whole window apart in time. A chart that quietly widens its
+own comparison window is a chart that lies.
+
+The indicator itself is one component (`ChangeBadge`) used by every chart that
+has it, and it obeys three rules. It is **never colour alone** - a glyph and a
+signed percentage carry the finding, so it survives colour blindness, greyscale
+and forced-colours mode. It is **amber, never red**: `--signal-alert` means "a
+flag rule matched this row" and the whole flagging feature depends on that
+staying true, so a large percentage change wears `--signal-change` instead. And
+**under the threshold it is quiet** - a chart where every row wears a badge has
+told the reader nothing. Panels also carry a small `2h` chip when hours crossed,
+and hollow rings on the line mark which ones; the filled dot stays reserved for
+a rule match, so a bucket can be either, both, or neither.
+
+One honest limitation: a fixed threshold knows nothing about time of day.
+Transaction volume has a strong daily rhythm - in the Fundgate data every
+terminal falls 56-100% between 22:00 and 03:00 - so a threshold low enough to
+catch a daytime surge will badge the whole fleet overnight. That is why it is
+configurable per chart rather than global: a card watching business hours and a
+card watching the night want different numbers.
 
 **`heatmap` - a category against a time bucket, coloured by a measure.**
 Configure the bucket as `x_field` (columns), the category as `series_field`

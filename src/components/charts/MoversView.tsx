@@ -1,8 +1,9 @@
 "use client";
 
-import type { MoverRow, MoversData } from "@/services/charts/shape";
+import type { MoversData } from "@/services/charts/shape";
 import { formatAxisValue } from "@/services/format";
 import { ChartEmpty } from "./ChartEmpty";
+import { ChangeBadge } from "./ChangeBadge";
 import { ALERT_COLOR, OTHER_COLOR, seriesColor } from "./theme";
 
 /**
@@ -37,17 +38,6 @@ export interface MoversViewProps {
 function windowLabel(span: [string, string] | null): string {
   if (!span) return "";
   return span[0] === span[1] ? span[0] : `${span[0]}–${span[1]}`;
-}
-
-/** A signed proportional change, or the honest absence of one. */
-function changeText(row: MoverRow): string {
-  if (row.pctChange === null) {
-    return row.current === 0 ? "no activity" : "new";
-  }
-  const pct = Math.abs(row.pctChange) * 100;
-  if (pct < 0.05) return "flat";
-  const rounded = pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10;
-  return `${row.pctChange > 0 ? "+" : "−"}${rounded}%`;
 }
 
 export function MoversView({ data, title }: MoversViewProps) {
@@ -170,15 +160,14 @@ export function MoversView({ data, title }: MoversViewProps) {
                   <td className="tnum whitespace-nowrap py-[3px] pl-2 text-right text-[11px] text-strong">
                     {formatAxisValue(row.current)}
                   </td>
-                  <td className="tnum whitespace-nowrap py-[3px] pl-2 text-right text-[11px] text-muted">
-                    <span className="sr-only">
-                      from {formatAxisValue(row.previous)}, change{" "}
-                    </span>
-                    {/* Glyph and sign, so direction never rests on colour. */}
-                    <span aria-hidden="true">
-                      {row.delta > 0 ? "↑" : row.delta < 0 ? "↓" : "·"}{" "}
-                    </span>
-                    {changeText(row)}
+                  <td className="whitespace-nowrap py-[3px] pl-2 text-right">
+                    <span className="sr-only">from {formatAxisValue(row.previous)}, </span>
+                    {/*
+                     * One badge component across every chart, so "this moved
+                     * enough to look at" cannot come to mean different things
+                     * on different cards.
+                     */}
+                    <ChangeBadge verdict={row.verdict} subject={row.category} />
                   </td>
                 </tr>
               );

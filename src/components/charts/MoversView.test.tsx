@@ -58,15 +58,20 @@ describe("MoversView", () => {
     const t1 = screen.getByRole("row", { name: /T1/ });
     expect(within(t1).getByText("800")).toBeInTheDocument();
     // 200 -> 800 is a quadrupling.
-    expect(within(t1).getByText(/\+300%/)).toBeInTheDocument();
+    expect(t1.textContent).toContain("+300%");
   });
 
   it("marks direction with a glyph and a sign, not with colour alone", () => {
     render(<MoversView data={sample} title="Movers" />);
 
+    // Past the threshold the glyph is the badge's filled triangle; under it,
+    // a light arrow. Either way direction is a shape and a sign, not a colour.
     const t2 = screen.getByRole("row", { name: /T2/ });
-    expect(t2.textContent).toContain("↓");
+    expect(t2.textContent).toContain("▼");
     expect(t2.textContent).toContain("−98%");
+
+    const t3 = screen.getByRole("row", { name: /T3/ });
+    expect(t3.textContent).toContain("↑");
   });
 
   it("reads out the previous total for a row that only draws it as a mark", () => {
@@ -104,7 +109,8 @@ describe("MoversView", () => {
     ]);
     render(<MoversView data={data} title="Movers" />);
 
-    expect(screen.getByText("new")).toBeInTheDocument();
+    // A ratio against zero has no value, so the badge names the situation.
+    expect(screen.getByText("from nothing")).toBeInTheDocument();
   });
 
   it("says a category that stopped has no activity", () => {
@@ -116,7 +122,7 @@ describe("MoversView", () => {
     ]);
     render(<MoversView data={data} title="Movers" />);
 
-    expect(screen.getByText("no activity")).toBeInTheDocument();
+    expect(screen.getByText("no change")).toBeInTheDocument();
   });
 
   it("marks a flagged category in text as well as with a dot", () => {
