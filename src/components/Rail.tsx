@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDashboards } from "@/services/dashboards";
 import { useConnections } from "@/services/connections/ConnectionsContext";
-import { useEngineHealth } from "@/lib/useEngineHealth";
+import { useEngineHealth, type EngineStatus } from "@/lib/useEngineHealth";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
+import { useAuth } from "@/services/auth/AuthContext";
+import { AccountChip } from "./auth/AccountChip";
 import { FlaggedBadge } from "./FlaggedBadge";
 import { StatusDot } from "./StatusDot";
 
@@ -35,6 +37,15 @@ export function Rail({
   const { connections, initial, error } = useConnections();
   const { dashboards, initial: dashboardsLoading } = useDashboards();
   const flagged = useFlagged();
+  const { can } = useAuth();
+  /*
+   * An analyst queries these databases but never adds one, so the "+ New" affordance
+   * is absent rather than disabled. A disabled control in a nav rail is a
+   * permanent reminder of something you will never be allowed to do; the admin
+   * section below is absent for the same reason.
+   */
+  const mayAddConnection = can("connections.create");
+  const mayAdminister = can("users.manage");
 
   const liveCount = connections.filter((connection) => connection.status === "ok").length;
 
@@ -54,7 +65,7 @@ export function Rail({
           meta={
             connections.length > 0 ? `${liveCount}/${connections.length}` : null
           }
-          action={{ href: "/connections/new", label: "New" }}
+          action={mayAddConnection ? { href: "/connections/new", label: "New" } : undefined}
           onNavigate={onNavigate}
           collapsed={collapsed}
         >
@@ -63,8 +74,12 @@ export function Rail({
           ) : error ? (
             <RailNote collapsed={collapsed}>Engine unreachable</RailNote>
           ) : connections.length === 0 ? (
-            <RailNote collapsed={collapsed} href="/connections/new" onNavigate={onNavigate}>
-              Connect a database
+            <RailNote
+              collapsed={collapsed}
+              href={mayAddConnection ? "/connections/new" : undefined}
+              onNavigate={onNavigate}
+            >
+              {mayAddConnection ? "Connect a database" : "No connections yet"}
             </RailNote>
           ) : (
             <ul>
@@ -146,8 +161,43 @@ export function Rail({
             </ul>
           )}
         </Section>
+
+        {mayAdminister ? (
+          <>
+            <div className="mx-3 my-2 border-t border-line" />
+            <Section title="Administration" onNavigate={onNavigate} collapsed={collapsed}>
+              <ul>
+                <li>
+                  <RailLink
+                    href="/admin/users"
+                    active={pathname.startsWith("/admin/users")}
+                    onNavigate={onNavigate}
+                    collapsed={collapsed}
+                    title="People"
+                  >
+                    <AdminGlyph kind="people" />
+                    {collapsed ? null : <span className="truncate">People</span>}
+                  </RailLink>
+                </li>
+                <li>
+                  <RailLink
+                    href="/admin/audit-log"
+                    active={pathname.startsWith("/admin/audit-log")}
+                    onNavigate={onNavigate}
+                    collapsed={collapsed}
+                    title="Audit log"
+                  >
+                    <AdminGlyph kind="log" />
+                    {collapsed ? null : <span className="truncate">Audit log</span>}
+                  </RailLink>
+                </li>
+              </ul>
+            </Section>
+          </>
+        ) : null}
       </div>
 
+      <AccountChip collapsed={collapsed} onNavigate={onNavigate} />
       <EngineFoot collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </nav>
   );
@@ -223,9 +273,10 @@ function EngineFoot({
 }) {
   const { status, message, check } = useEngineHealth();
 
-  const label = status === "checking" ? "checking" : status === "ok" ? "live" : "no answer";
-  const tone =
-    status === "ok" ? "text-live" : status === "checking" ? "text-muted" : "text-change";
+  /* Four states, because "up but cannot serve" needs different people from
+     "nothing answered" - see useEngineHealth. */
+  const label = ENGINE_LABEL[status];
+  const tone = ENGINE_TONE[status];
 
   if (collapsed) {
     return (
@@ -262,7 +313,22 @@ function EngineFoot({
   );
 }
 
-function EngineDot({ status }: { status: "checking" | "ok" | "down" }) {
+/** One word each. `degraded` is the state the two-probe check exists to name. */
+const ENGINE_LABEL: Record<EngineStatus, string> = {
+  checking: "checking",
+  ok: "live",
+  degraded: "not ready",
+  down: "no answer",
+};
+
+const ENGINE_TONE: Record<EngineStatus, string> = {
+  checking: "text-muted",
+  ok: "text-live",
+  degraded: "text-change",
+  down: "text-change",
+};
+
+function EngineDot({ status }: { status: EngineStatus }) {
   return (
     <svg viewBox="0 0 10 10" width={8} height={8} aria-hidden="true" className="shrink-0">
       <circle
@@ -270,10 +336,21 @@ function EngineDot({ status }: { status: "checking" | "ok" | "down" }) {
         cy={5}
         r={3.25}
         fill={status === "ok" ? "var(--signal-live)" : "none"}
-        stroke={status === "ok" ? "var(--signal-live)" : "var(--text-muted)"}
+        stroke={
+          status === "ok"
+            ? "var(--signal-live)"
+            : status === "degraded"
+              ? "var(--signal-change)"
+              : "var(--text-muted)"
+        }
         strokeWidth={1.25}
       />
-      {/* A cross, not just a hollow dot: down and untested must not look alike. */}
+      {/* Three shapes, not three colours: a hollow ring is "checking", a half-
+          filled ring is "answering but not serving", a cross is "no answer".
+          Reading the state must not depend on telling amber from grey. */}
+      {status === "degraded" ? (
+        <path d="M5 1.75 A3.25 3.25 0 0 1 5 8.25 Z" fill="var(--signal-change)" />
+      ) : null}
       {status === "down" ? (
         <line x1={2.2} y1={7.8} x2={7.8} y2={2.2} stroke="var(--signal-change)" strokeWidth={1.25} />
       ) : null}
@@ -326,7 +403,8 @@ function Section({
 }: {
   title: string;
   meta?: string | null;
-  action: { href: string; label: string };
+  /** Omitted when the signed-in role cannot create one of these. */
+  action?: { href: string; label: string };
   children: React.ReactNode;
   onNavigate?: () => void;
   collapsed: boolean;
@@ -334,32 +412,59 @@ function Section({
   return (
     <section className="py-1.5">
       {collapsed ? (
-        <div className="flex justify-center pb-1">
-          <Link
-            href={action.href}
-            onClick={onNavigate}
-            title={`${title}: ${action.label}`}
-            aria-label={`${title}: ${action.label}`}
-            className="text-[13px] leading-none text-muted transition-colors hover:text-live"
-          >
-            +
-          </Link>
-        </div>
+        action ? (
+          <div className="flex justify-center pb-1">
+            <Link
+              href={action.href}
+              onClick={onNavigate}
+              title={`${title}: ${action.label}`}
+              aria-label={`${title}: ${action.label}`}
+              className="text-[13px] leading-none text-muted transition-colors hover:text-live"
+            >
+              +
+            </Link>
+          </div>
+        ) : null
       ) : (
         <div className="flex items-center gap-2 px-3 pb-1.5">
           <h2 className="t-eyebrow">{title}</h2>
           {meta ? <span className="tnum text-[10px] text-muted/60">{meta}</span> : null}
-          <Link
-            href={action.href}
-            onClick={onNavigate}
-            className="ml-auto text-[10px] text-muted transition-colors hover:text-live"
-          >
-            + {action.label}
-          </Link>
+          {action ? (
+            <Link
+              href={action.href}
+              onClick={onNavigate}
+              className="ml-auto text-[10px] text-muted transition-colors hover:text-live"
+            >
+              + {action.label}
+            </Link>
+          ) : null}
         </div>
       )}
       {children}
     </section>
+  );
+}
+
+/**
+ * A glyph per admin destination, so the collapsed rail keeps two distinguishable
+ * rows instead of two identical dots.
+ */
+function AdminGlyph({ kind }: { kind: "people" | "log" }) {
+  return (
+    <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden="true" className="shrink-0">
+      {kind === "people" ? (
+        <>
+          <circle cx={4.5} cy={4} r={2} fill="none" stroke="currentColor" strokeWidth={1.1} />
+          <path d="M1.5 10c0-1.7 1.3-2.8 3-2.8s3 1.1 3 2.8" fill="none" stroke="currentColor" strokeWidth={1.1} />
+          <path d="M8.5 10c0-1.4-.5-2.3-1.3-2.8" fill="none" stroke="currentColor" strokeWidth={1.1} opacity={0.55} />
+        </>
+      ) : (
+        <>
+          <rect x={2} y={1.5} width={8} height={9} rx={1} fill="none" stroke="currentColor" strokeWidth={1.1} />
+          <path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="currentColor" strokeWidth={1.1} />
+        </>
+      )}
+    </svg>
   );
 }
 

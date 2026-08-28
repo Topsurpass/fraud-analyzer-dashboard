@@ -17,6 +17,8 @@ import { ConnectionForm, type ConnectionFormValues } from "@/components/Connecti
 import { TestOutcome } from "@/components/TestOutcome";
 import { Button, ErrorState, Panel } from "@/components/ui";
 import { SchemaBrowser } from "@/components/SchemaBrowser";
+import { ConnectionFacts } from "@/components/ConnectionFacts";
+import { useAuth } from "@/services/auth/AuthContext";
 import { formatDateTime } from "@/services/format";
 
 /** Edit credentials, re-test, browse the schema, or delete the connection. */
@@ -31,6 +33,16 @@ export default function ConnectionSettingsPage({
 
   const load = useCallback((signal: AbortSignal) => getConnection(id, { signal }), [id]);
   const connection = useResource(load);
+  /*
+   * An analyst reaches this page for the schema browser, which is how they find
+   * out what to write SQL against - so the page is not gated as a whole. What
+   * they lose is the half that changes the connection: credentials, the test
+   * button and the delete. The engine refuses all three with 403 regardless;
+   * this decides whether the analyst sees a form that will not save or the
+   * read-only facts they actually came for.
+   */
+  const { can } = useAuth();
+  const mayEdit = can("connections.edit");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -113,6 +125,9 @@ export default function ConnectionSettingsPage({
         />
       ) : (
         <div className="grid max-w-5xl gap-3 lg:grid-cols-2">
+          {!mayEdit ? (
+            <ConnectionFacts connection={connection.data} loading={connection.initial} />
+          ) : (
           <Panel
             title="Credentials"
             actions={
@@ -164,10 +179,12 @@ export default function ConnectionSettingsPage({
               ) : null}
             </div>
           </Panel>
+          )}
 
           <div className="space-y-3">
             <SchemaBrowser connectionId={id} />
 
+            {mayEdit ? (
             <Panel title="Danger zone">
               <div className="p-3">
                 <p className="text-[12px] text-muted">
@@ -195,6 +212,7 @@ export default function ConnectionSettingsPage({
                 )}
               </div>
             </Panel>
+            ) : null}
           </div>
         </div>
       )}

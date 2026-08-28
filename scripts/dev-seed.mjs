@@ -17,12 +17,20 @@
  *   --db=<path>      target SQLite file       (default ./.dev/payments.db)
  *   --rows=<n>       seed row count           (default 4000)
  *   --interval=<ms>  --tick insert cadence    (default 2000)
+ *   --email=<addr>   admin to seed as         (default admin@example.com)
+ *   --password=<pw>  that admin's password    (or set FAE_SMOKE_PASSWORD)
+ *
+ * Registering a connection is an administrator's act, so this signs in first.
+ * The account has to exist already - the engine has no endpoint that mints an
+ * administrator, on purpose. Create one from services/analyzer with
+ * `uv run switchboard create-admin`.
  */
 
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { rmSync } from "node:fs";
+import { DEFAULT_EMAIL, signIn } from "./lib/session.mjs";
 
 const args = new Map(
   process.argv.slice(2).map((raw) => {
@@ -36,6 +44,11 @@ const DB_PATH = resolve(String(args.get("db") ?? ".dev/payments.db"));
 const SEED_ROWS = Number(args.get("rows") ?? 4000);
 const TICK_INTERVAL_MS = Number(args.get("interval") ?? 2000);
 const CONNECTION_NAME = "Payments DB";
+const EMAIL = String(args.get("email") ?? DEFAULT_EMAIL);
+const PASSWORD = args.get("password") === undefined ? undefined : String(args.get("password"));
+
+/** Set once, by `main`, before anything calls the engine. */
+let sessionToken = null;
 
 /* ------------------------------------------------------------ deterministic RNG */
 
@@ -177,7 +190,10 @@ function buildDatabase() {
 async function api(path, init = {}) {
   const response = await fetch(ENGINE + path, {
     ...init,
-    headers: init.body ? { "content-type": "application/json" } : undefined,
+    headers: {
+      ...(init.body ? { "content-type": "application/json" } : {}),
+      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+    },
   });
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -523,6 +539,14 @@ async function tick() {
 const { inserted, total } = buildDatabase();
 console.log(`database            ${DB_PATH}`);
 console.log(`rows                ${total} (${inserted} inserted this run)`);
+
+// Registering a connection needs an administrator, so sign in before the first
+// call rather than discovering it as a 401 halfway through.
+if (!args.has("tick")) {
+  const session = await signIn(ENGINE, { email: EMAIL, password: PASSWORD });
+  sessionToken = session.token;
+  console.log(`signed in as        ${session.user.email} (${session.user.role})`);
+}
 
 if (args.has("tick")) {
   await tick();

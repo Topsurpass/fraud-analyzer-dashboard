@@ -18,9 +18,16 @@
  *
  * Flags: --base=<url> (default http://localhost:3000)
  *        --engine=<url> (default http://127.0.0.1:8000)
+ *        --email=<addr> / --password=<pw>  (or set FAE_SMOKE_PASSWORD)
+ *
+ * Every engine endpoint but the probes and login needs a session now, so this
+ * signs in first and hands the browser the same token rather than driving the
+ * login form - a chart-rendering lane should not fail because of an unrelated
+ * regression in a password field. Signing in is its own lane: smoke-auth.mjs.
  */
 
 import { chromium } from "playwright";
+import { DEFAULT_EMAIL, authed, seedSession, signIn } from "./lib/session.mjs";
 
 const args = new Map(
   process.argv.slice(2).map((raw) => {
@@ -31,6 +38,8 @@ const args = new Map(
 
 const BASE = String(args.get("base") ?? "http://localhost:3000").replace(/\/+$/, "");
 const ENGINE = String(args.get("engine") ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const EMAIL = String(args.get("email") ?? DEFAULT_EMAIL);
+const PASSWORD = args.get("password") === undefined ? undefined : String(args.get("password"));
 
 /**
  * `localhost`, not `127.0.0.1`: Next's dev-origin protection answers its own
@@ -63,14 +72,18 @@ const EXPECTATIONS = {
 };
 
 async function main() {
-  const connections = await fetch(`${ENGINE}/connections`).then((r) => r.json());
+  const { token, user } = await signIn(ENGINE, { email: EMAIL, password: PASSWORD });
+  const get = authed(token);
+  console.log(`signed in as ${user.email} (${user.role})`);
+
+  const connections = await get(`${ENGINE}/connections`).then((r) => r.json());
   if (!Array.isArray(connections) || connections.length === 0) {
     console.error("no connections on the engine - run: node scripts/dev-seed.mjs");
     process.exit(2);
   }
 
   const connection = connections[0];
-  const queries = await fetch(`${ENGINE}/connections/${connection.id}/queries`).then((r) =>
+  const queries = await get(`${ENGINE}/connections/${connection.id}/queries`).then((r) =>
     r.json(),
   );
   if (queries.length === 0) {
@@ -79,7 +92,9 @@ async function main() {
   }
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  await seedSession(context, token);
+  const page = await context.newPage();
 
   const consoleErrors = [];
   page.on("pageerror", (error) => consoleErrors.push(String(error).slice(0, 200)));
@@ -124,7 +139,7 @@ async function main() {
      * a chart that failed to draw - that would make this lane cry wolf and get
      * ignored, which is worse than not having it.
      */
-    const poll = await fetch(`${ENGINE}/queries/${query.id}/poll?force=true`).then((r) =>
+    const poll = await get(`${ENGINE}/queries/${query.id}/poll?force=true`).then((r) =>
       r.json(),
     );
     const rows = poll.row_count ?? 0;

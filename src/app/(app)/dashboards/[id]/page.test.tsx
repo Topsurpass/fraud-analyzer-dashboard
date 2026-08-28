@@ -17,7 +17,7 @@ import DashboardPage from "./page";
 
 const getDashboard = vi.hoisted(() => vi.fn());
 const updateDashboard = vi.hoisted(() => vi.fn());
-const getQuery = vi.hoisted(() => vi.fn());
+const listQueriesByIds = vi.hoisted(() => vi.fn());
 const listDashboards = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api-client", async () => {
@@ -27,7 +27,7 @@ vi.mock("@/services/api-client", async () => {
   return {
     ...actual,
     getDashboard,
-    getQuery,
+    listQueriesByIds,
     listDashboards,
     createDashboard: vi.fn(),
     updateDashboard,
@@ -120,7 +120,11 @@ beforeEach(() => {
   // The list is deliberately empty: this browser has never seen the board.
   listDashboards.mockReset().mockResolvedValue([]);
   getDashboard.mockReset().mockResolvedValue(board());
-  getQuery.mockReset().mockResolvedValue(query());
+  // One request for the whole board, in the order asked for. The helper below
+  // answers from a table so a test only has to say which queries exist.
+  listQueriesByIds.mockReset().mockImplementation((ids: readonly string[]) =>
+    Promise.resolve(ids.map((id) => query({ id }))),
+  );
   updateDashboard.mockReset().mockImplementation((id: string, patch: { chart_ids?: string[] }) =>
     Promise.resolve(board({ chart_ids: patch.chart_ids ?? ["q1"] })),
   );
@@ -158,17 +162,52 @@ describe("DashboardPage", () => {
     getDashboard.mockResolvedValue(board({ chart_ids: [] }));
     await open();
     expect(await screen.findByText("This dashboard is empty")).toBeInTheDocument();
-    expect(getQuery).not.toHaveBeenCalled();
+    expect(listQueriesByIds).not.toHaveBeenCalled();
+  });
+
+  it("resolves a whole board in one request, not one per card", async () => {
+    /*
+     * This was a getQuery per id. On a twenty-card board that is twenty
+     * requests and twenty round trips before the first chart can draw, and the
+     * browser only opens six connections at a time - so the last cards waited
+     * on the first ones for no reason but the shape of the fetch.
+     */
+    const ids = Array.from({ length: 20 }, (_, index) => `q${index}`);
+    getDashboard.mockResolvedValue(board({ chart_ids: ids }));
+
+    await open();
+    await waitFor(() => expect(listQueriesByIds).toHaveBeenCalled());
+
+    expect(listQueriesByIds).toHaveBeenCalledTimes(1);
+    expect(listQueriesByIds.mock.calls[0][0]).toEqual(ids);
+  });
+
+  it("asks for a query once even when two cards show it", async () => {
+    /*
+     * A board showing one result as a trend line and as the rows behind it
+     * holds two charts of one query - two chart ids, one query_id. Asking for
+     * that id twice would make the engine resolve it twice and reintroduce the
+     * per-card cost the query/chart split removed.
+     */
+    getDashboard.mockResolvedValue(
+      board({
+        chart_ids: ["q1", "c2", "q2"],
+        charts: [chart("q1"), chart("c2", "q1"), chart("q2")],
+      }),
+    );
+
+    await open();
+    await waitFor(() => expect(listQueriesByIds).toHaveBeenCalled());
+
+    expect(listQueriesByIds.mock.calls[0][0]).toEqual(["q1", "q2"]);
   });
 
   it("refetches the board when a card resolves to a deleted query", async () => {
     getDashboard.mockResolvedValue(board({ chart_ids: ["q1", "gone"] }));
-    getQuery.mockImplementation((id: string) =>
-      id === "gone"
-        ? Promise.reject(
-            new ApiError({ kind: "http", status: 404, message: "no", url: `/queries/${id}` }),
-          )
-        : Promise.resolve(query()),
+    // The endpoint returns what it found rather than 404-ing the batch, so a
+    // deleted query shows up as a short list, not as an error.
+    listQueriesByIds.mockImplementation((ids: readonly string[]) =>
+      Promise.resolve(ids.filter((id) => id !== "gone").map(() => query())),
     );
 
     await open();
@@ -179,9 +218,9 @@ describe("DashboardPage", () => {
   describe("ordering", () => {
     const twoUp = () => {
       getDashboard.mockResolvedValue(board({ chart_ids: ["q1", "q2"] }));
-      getQuery.mockImplementation((id: string) =>
+      listQueriesByIds.mockImplementation((ids: readonly string[]) =>
         Promise.resolve(
-          id === "q1" ? query() : query({ id: "q2", name: "Chargeback rate" }),
+          ids.map((id) => (id === "q1" ? query() : query({ id: "q2", name: "Chargeback rate" }))),
         ),
       );
     };

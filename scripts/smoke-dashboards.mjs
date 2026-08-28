@@ -19,6 +19,7 @@
  */
 
 import { chromium } from "playwright";
+import { DEFAULT_EMAIL, authed, seedSession, signIn } from "./lib/session.mjs";
 
 const args = new Map(
   process.argv.slice(2).map((raw) => {
@@ -29,6 +30,11 @@ const args = new Map(
 
 const BASE = String(args.get("base") ?? "http://localhost:3000").replace(/\/+$/, "");
 const ENGINE = String(args.get("engine") ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const EMAIL = String(args.get("email") ?? DEFAULT_EMAIL);
+const PASSWORD = args.get("password") === undefined ? undefined : String(args.get("password"));
+
+/** `fetch` with this lane's session on it. Set by `main` before anything runs. */
+let get = fetch;
 
 if (BASE.includes("127.0.0.1")) {
   console.warn("warning: use http://localhost:3000, not 127.0.0.1 - dev chunks 403 otherwise");
@@ -59,17 +65,21 @@ const NAME = `Smoke board ${new Date().toISOString().slice(11, 19)}`;
 const RENAMED = `${NAME} (renamed)`;
 
 async function engineBoards() {
-  return fetch(`${ENGINE}/dashboards`).then((r) => r.json());
+  return get(`${ENGINE}/dashboards`).then((r) => r.json());
 }
 
 async function main() {
-  const connections = await fetch(`${ENGINE}/connections`).then((r) => r.json());
+  const { token, user } = await signIn(ENGINE, { email: EMAIL, password: PASSWORD });
+  get = authed(token);
+  console.log(`signed in as ${user.email} (${user.role})`);
+
+  const connections = await get(`${ENGINE}/connections`).then((r) => r.json());
   if (!Array.isArray(connections) || connections.length === 0) {
     console.error("no connections on the engine - run: node scripts/dev-seed.mjs");
     process.exit(2);
   }
   const connection = connections.find((c) => c.status === "ok") ?? connections[0];
-  const queries = await fetch(`${ENGINE}/connections/${connection.id}/queries`).then((r) =>
+  const queries = await get(`${ENGINE}/connections/${connection.id}/queries`).then((r) =>
     r.json(),
   );
   if (queries.length === 0) {
@@ -81,6 +91,7 @@ async function main() {
 
   const browser = await chromium.launch();
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  await seedSession(context, token);
   const page = await context.newPage();
 
   const consoleErrors = [];
@@ -147,15 +158,27 @@ async function main() {
     await page.getByRole("button", { name: new RegExp(`Add to ${escapeRe(NAME)}`) }).click();
     await page.waitForTimeout(1500);
 
+    /*
+     * `chart_ids` holds *chart* ids, not query ids - charts were split out of
+     * queries so that one result can be a trend line and a table at once. The
+     * board's resolved `charts` are what map back to the query, so that is what
+     * these checks read. Comparing the two id spaces directly is how this lane
+     * silently stopped meaning anything after the split.
+     */
+    const placedQueries = (board) => (board?.charts ?? []).map((chart) => chart.query_id);
+
     const afterAdd = (await engineBoards()).find((b) => b.id === boardId);
     check(
-      afterAdd?.query_ids.includes(query.id) === true,
-      "adding a card writes the query id to the board",
-      `query_ids=${JSON.stringify(afterAdd?.query_ids)}`,
+      placedQueries(afterAdd).includes(query.id),
+      "adding a card writes the query to the board",
+      `queries=${JSON.stringify(placedQueries(afterAdd))}`,
     );
 
     // --- deep link from a browser that has never listed this board --------
     const fresh = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+    // A brand-new context has empty storage, so it needs the session too - it
+    // is a second browser as far as the app is concerned.
+    await seedSession(fresh, token);
     const cold = await fresh.newPage();
     await cold.goto(`${BASE}/dashboards/${boardId}`, { waitUntil: "networkidle" });
     await cold.waitForTimeout(6000);
@@ -187,9 +210,9 @@ async function main() {
 
       const before = (await engineBoards()).find((b) => b.id === boardId);
       check(
-        JSON.stringify(before?.query_ids) === JSON.stringify([query.id, second.id]),
+        JSON.stringify(placedQueries(before)) === JSON.stringify([query.id, second.id]),
         "cards land in the order they were added",
-        `query_ids=${JSON.stringify(before?.query_ids)}`,
+        `queries=${JSON.stringify(placedQueries(before))}`,
       );
 
       await page.goto(`${BASE}/dashboards/${boardId}`, { waitUntil: "networkidle" });
@@ -199,9 +222,9 @@ async function main() {
 
       const after = (await engineBoards()).find((b) => b.id === boardId);
       check(
-        JSON.stringify(after?.query_ids) === JSON.stringify([second.id, query.id]),
+        JSON.stringify(placedQueries(after)) === JSON.stringify([second.id, query.id]),
         "reordering writes the whole new order through",
-        `query_ids=${JSON.stringify(after?.query_ids)}`,
+        `queries=${JSON.stringify(placedQueries(after))}`,
       );
 
       // Take it back off so the remove/delete steps below stay as written.
@@ -231,9 +254,9 @@ async function main() {
     await page.waitForTimeout(1500);
     const afterRemove = (await engineBoards()).find((b) => b.id === boardId);
     check(
-      afterRemove?.query_ids.length === 0,
+      afterRemove?.chart_ids.length === 0,
       "removing a card writes through",
-      `query_ids=${JSON.stringify(afterRemove?.query_ids)}`,
+      `chart_ids=${JSON.stringify(afterRemove?.chart_ids)}`,
     );
 
     // --- delete -----------------------------------------------------------
@@ -268,7 +291,7 @@ async function main() {
       .then((boards) => boards.filter((b) => b.id === boardId || b.name.startsWith(NAME)))
       .catch(() => []);
     for (const leftover of mine) {
-      await fetch(`${ENGINE}/dashboards/${leftover.id}`, { method: "DELETE" }).catch(() => {});
+      await get(`${ENGINE}/dashboards/${leftover.id}`, { method: "DELETE" }).catch(() => {});
     }
     await browser.close();
   }

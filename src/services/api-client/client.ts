@@ -25,6 +25,20 @@ import type {
 	SavedQueryUpdate,
 	TableList,
 } from "@/contracts/api";
+import type {
+	AuditEntryRead,
+	BatchPollRequest,
+	BatchPollResponse,
+	ChangePasswordRequest,
+	LoginRequest,
+	LoginResponse,
+	TemporaryPasswordResponse,
+	UserCreate,
+	UserCreateResponse,
+	UserRead,
+	UserUpdate,
+} from "@/contracts/api";
+import { clearToken, getToken } from "@/services/auth/token";
 import { ApiError, messageFromBody } from "./errors";
 
 /** Ceiling on any single request. Poll callers pass something tighter. */
@@ -51,7 +65,14 @@ export interface RequestOptions {
 }
 
 interface RequestInput extends RequestOptions {
-	method: "GET" | "POST" | "PUT" | "DELETE";
+	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+	/**
+	 * Send no `Authorization` header. Only `/auth/login` sets this: it is the
+	 * one endpoint where a stale token must not travel, because the engine
+	 * would resolve it and the response would describe a session the caller is
+	 * in the middle of replacing.
+	 */
+	anonymous?: boolean;
 	path: string;
 	query?: Record<string, string | number | boolean | null | undefined>;
 	body?: unknown;
@@ -94,12 +115,34 @@ export async function request<T>(input: RequestInput): Promise<T> {
 		controller.abort(new DOMException("timeout", "TimeoutError"));
 	}, timeoutMs);
 
+	const headers: Record<string, string> = {};
+	if (input.body !== undefined) headers["content-type"] = "application/json";
+	const bearer = input.anonymous ? null : getToken();
+	if (bearer) headers.authorization = `Bearer ${bearer}`;
+
+	/**
+	 * Drop a session the engine will not accept.
+	 *
+	 * The rule is deliberately about *this* request rather than about the
+	 * response body: if a request that carried a token comes back 401, that
+	 * token is not being accepted, whatever envelope came with it - and a bare
+	 * 401 from a proxy sitting in front of the engine carries no envelope at all.
+	 *
+	 * Keying on "did this request send a token" is also what keeps a failed
+	 * login out of it. `/auth/login` is `anonymous`, so `bearer` is null there
+	 * and a wrong password can never sign anybody out of another tab. That is
+	 * structural: it cannot be got wrong by adding a new error code later.
+	 */
+	const dropSessionOn401 = () => {
+		if (bearer !== null) clearToken();
+	};
+
 	let response: Response;
 	try {
 		response = await fetch(url, {
 			method: input.method,
 			signal: controller.signal,
-			headers: input.body === undefined ? undefined : { "content-type": "application/json" },
+			headers: Object.keys(headers).length > 0 ? headers : undefined,
 			body: input.body === undefined ? undefined : JSON.stringify(input.body),
 			cache: "no-store",
 		});
@@ -122,6 +165,7 @@ export async function request<T>(input: RequestInput): Promise<T> {
 
 	if (response.status === 204 || response.headers.get("content-length") === "0") {
 		if (!response.ok) {
+			if (response.status === 401) dropSessionOn401();
 			throw new ApiError({
 				kind: "http",
 				message: `Engine returned HTTP ${response.status}`,
@@ -144,6 +188,11 @@ export async function request<T>(input: RequestInput): Promise<T> {
 
 	if (!response.ok) {
 		const { message, errorCode, detail } = messageFromBody(parsed, response.status);
+		// Dropped here rather than by whichever screen happened to make the
+		// call. Every caller would otherwise need the same branch, and the ones
+		// that forgot it would keep a signed-out interface on screen collecting
+		// 401s. See `dropSessionOn401` above for why it is keyed this way.
+		if (response.status === 401) dropSessionOn401();
 		throw new ApiError({
 			kind: "http",
 			message,
@@ -529,3 +578,140 @@ export const reconnectConnection = (connectionId: string, options?: RequestOptio
 		timeoutMs: 30_000,
 		...options,
 	});
+
+/* ---------------------------------------------------------------------- auth */
+
+/**
+ * Exchange credentials for a session token.
+ *
+ * Sent anonymously so a stale token cannot travel with it, and given a longer
+ * deadline than the default: the engine hashes with Argon2id, which is
+ * deliberately slow, and a login that times out on a loaded machine looks to
+ * the user exactly like a wrong password.
+ *
+ * Does not store the token. `AuthProvider` owns that decision, so a caller
+ * cannot half-sign-in by calling this and forgetting the rest.
+ */
+export const login = (body: LoginRequest, options?: RequestOptions) =>
+	request<LoginResponse>({
+		method: "POST",
+		path: "/auth/login",
+		body,
+		anonymous: true,
+		timeoutMs: 30_000,
+		...options,
+	});
+
+/** End this session on the engine. Succeeds even if the session already expired. */
+export const logout = (options?: RequestOptions) =>
+	request<void>({ method: "POST", path: "/auth/logout", ...options });
+
+/** Who the current token belongs to. 401 when it belongs to nobody. */
+export const me = (options?: RequestOptions) =>
+	request<UserRead>({ method: "GET", path: "/auth/me", ...options });
+
+/**
+ * Change your own password.
+ *
+ * Ends every *other* session on the account and keeps this one, so the browser
+ * you just used stays signed in while an intercepted session does not.
+ */
+export const changePassword = (body: ChangePasswordRequest, options?: RequestOptions) =>
+	request<void>({
+		method: "POST",
+		path: "/auth/change-password",
+		body,
+		timeoutMs: 30_000,
+		...options,
+	});
+
+/* --------------------------------------------------------------------- users */
+
+/** Every account, newest first. Administrators only. */
+export const listUsers = (options?: RequestOptions) =>
+	request<UserRead[]>({ method: "GET", path: "/users", ...options });
+
+/**
+ * Open an account with a system-generated password.
+ *
+ * The plaintext temporary password is in this response and nowhere else - not
+ * in a later read of the account, and not in the audit entry the engine writes
+ * for it. A caller that discards it has to issue a reset.
+ */
+export const createUser = (body: UserCreate, options?: RequestOptions) =>
+	request<UserCreateResponse>({
+		method: "POST",
+		path: "/users",
+		body,
+		timeoutMs: 30_000,
+		...options,
+	});
+
+/**
+ * Deactivate/reactivate an account, change its role, or both.
+ *
+ * Refused with `LAST_ADMIN` if the change would leave no active administrator.
+ */
+export const updateUser = (userId: string, body: UserUpdate, options?: RequestOptions) =>
+	request<UserRead>({
+		method: "PATCH",
+		path: `/users/${encodeURIComponent(userId)}`,
+		body,
+		...options,
+	});
+
+/** Issue a fresh temporary password and end every live session on the account. */
+export const resetUserPassword = (userId: string, options?: RequestOptions) =>
+	request<TemporaryPasswordResponse>({
+		method: "POST",
+		path: `/users/${encodeURIComponent(userId)}/reset-password`,
+		timeoutMs: 30_000,
+		...options,
+	});
+
+/* ----------------------------------------------------------------- audit log */
+
+/** Every audit entry, newest first, with the actor's email resolved. */
+export const listAuditLog = (options?: RequestOptions) =>
+	request<AuditEntryRead[]>({ method: "GET", path: "/audit-log", ...options });
+
+/* --------------------------------------------------------- queries in bulk */
+
+/**
+ * Saved queries by id, in the order asked for. Omit `ids` for every query the
+ * caller can see - which is their own for an analyst, and all of them for an
+ * admin.
+ */
+export const listQueriesByIds = (ids?: readonly string[], options?: RequestOptions) =>
+	request<SavedQueryRead[]>({
+		method: "GET",
+		path: "/queries",
+		query: ids === undefined ? undefined : { ids: ids.join(",") },
+		...options,
+	});
+
+/**
+ * Poll many queries in one request.
+ *
+ * What a dashboard uses instead of a request per card: twenty cards on a board
+ * is twenty sockets and twenty round trips on every tick, and the engine
+ * answers the batch from one pass over its result cache. Capped at
+ * `MAX_BATCH_POLL_QUERIES` by the engine, so a caller with more splits.
+ */
+export const batchPoll = (body: BatchPollRequest, options?: RequestOptions) =>
+	request<BatchPollResponse>({
+		method: "POST",
+		path: "/queries/poll",
+		body,
+		timeoutMs: 30_000,
+		...options,
+	});
+
+/* --------------------------------------------------------------------- meta */
+
+/**
+ * Readiness: whether this instance can actually serve, not just whether the
+ * process is up. `health` is the liveness half and deliberately checks nothing.
+ */
+export const ready = (options?: RequestOptions) =>
+	request<{ status: string }>({ method: "GET", path: "/ready", ...options });

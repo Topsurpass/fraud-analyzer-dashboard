@@ -11,7 +11,25 @@ vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",
   );
-  return { ...actual, pollQuery };
+  return {
+    ...actual,
+    pollQuery,
+    /*
+     * The coalescer batches, so the normal path leaves as one
+     * `POST /queries/poll` rather than a request per card. These tests are
+     * about one card's loop - what it sends, how it backs off, when it stops -
+     * and none of that changes with the transport, so the batch is served here
+     * by the same single-query fake. That keeps every assertion below about
+     * `pollQuery` meaning what it says, while the batching itself is tested
+     * where it lives, in coalesce.test.ts.
+     */
+    batchPoll: (body: { queries: Array<{ query_id: string; since_hash?: string | null }> }) =>
+      Promise.all(
+        body.queries.map((entry) =>
+          pollQuery(entry.query_id, { sinceHash: entry.since_hash ?? null }),
+        ),
+      ).then((results) => ({ results })),
+  };
 });
 
 /** A full payload, the shape the engine returns on a changed poll. */
@@ -53,17 +71,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Let queued microtasks settle without advancing the clock. */
+/**
+ * Let a poll settle.
+ *
+ * The coalescer holds a poll for one frame to see whether another card is
+ * ticking alongside it, so settling now means letting that window elapse as
+ * well as draining microtasks. Still no meaningful clock movement: 16ms is far
+ * below any poll interval in these tests.
+ */
 async function flush() {
   await act(async () => {
+    await vi.advanceTimersByTimeAsync(20);
     await Promise.resolve();
     await Promise.resolve();
   });
 }
 
+/** Move the clock by exactly this much, and no further. */
 async function advance(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+/**
+ * Let a poll whose timer has already fired actually leave.
+ *
+ * The coalescer holds a queued poll for one frame to see whether another card
+ * is ticking alongside it, so "the timer fired" and "the request went out" are
+ * 16ms apart. Kept separate from `advance` on purpose: several tests below
+ * check the scheduler to the millisecond - that it has *not* polled at
+ * interval-minus-one - and folding the window into every advance would blur
+ * exactly the boundary they exist to pin down.
+ */
+async function settle() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(20);
   });
 }
 
@@ -102,6 +145,7 @@ describe("useQueryPolling", () => {
     renderHook(() => useQueryPolling("q1"));
     await flush();
     await advance(3000);
+    await settle();
 
     expect(pollQuery).toHaveBeenCalledTimes(2);
     expect(pollQuery.mock.calls[1][1]).toEqual({ sinceHash: "sha256:aaa" });
@@ -112,6 +156,7 @@ describe("useQueryPolling", () => {
     const { result } = renderHook(() => useQueryPolling("q1"));
     await flush();
     await advance(3000);
+    await settle();
 
     expect(result.current.pollSeq).toBe(2);
     expect(result.current.changeSeq).toBe(1); // did not move
@@ -128,9 +173,11 @@ describe("useQueryPolling", () => {
     const { result } = renderHook(() => useQueryPolling("q1"));
     await flush();
     await advance(3000);
+    await settle();
     expect(result.current.changeSeq).toBe(1);
 
     await advance(3000);
+    await settle();
     expect(result.current.changeSeq).toBe(2);
     expect(result.current.snapshot?.rows).toEqual([[2]]);
   });
@@ -141,9 +188,12 @@ describe("useQueryPolling", () => {
     await flush();
     expect(result.current.pollIntervalMs).toBe(8000);
 
+    // Still waiting a millisecond before the interval is up. Deliberately no
+    // `settle` here: the point is that nothing has even been queued yet.
     await advance(7999);
     expect(pollQuery).toHaveBeenCalledTimes(1);
     await advance(1);
+    await settle();
     expect(pollQuery).toHaveBeenCalledTimes(2);
   });
 
@@ -154,6 +204,7 @@ describe("useQueryPolling", () => {
     const { result } = renderHook(() => useQueryPolling("q1"));
     await flush();
     await advance(3000);
+    await settle();
 
     expect(result.current.phase).toBe("error");
     expect(result.current.error?.kind).toBe("timeout");
@@ -176,12 +227,14 @@ describe("useQueryPolling", () => {
     await advance(1999);
     expect(pollQuery).toHaveBeenCalledTimes(1);
     await advance(1);
+    await settle();
     expect(pollQuery).toHaveBeenCalledTimes(2);
 
-    // Second retry waits 4x.
+    // Second retry waits 4x, measured from when that retry failed.
     await advance(3999);
     expect(pollQuery).toHaveBeenCalledTimes(2);
     await advance(1);
+    await settle();
     expect(pollQuery).toHaveBeenCalledTimes(3);
     expect(result.current.consecutiveErrors).toBe(3);
   });
@@ -197,6 +250,7 @@ describe("useQueryPolling", () => {
     expect(result.current.phase).toBe("error");
 
     await advance(2000);
+    await settle();
     expect(result.current.phase).toBe("live");
     expect(result.current.error).toBeNull();
     expect(result.current.consecutiveErrors).toBe(0);
@@ -350,6 +404,9 @@ describe("useQueryPolling", () => {
     expect(result.current.snapshot).toBeNull();
     expect(result.current.changeSeq).toBe(0);
     expect(result.current.phase).toBe("loading");
+
+    // The request for q2 leaves a frame later, once the batch window closes.
+    await settle();
     expect(pollQuery.mock.calls[1][0]).toBe("q2");
     // A new query must not inherit the previous query's hash.
     expect(pollQuery.mock.calls[1][1]).toEqual({ sinceHash: null });
@@ -381,7 +438,8 @@ describe("remounting while a poll is in flight", () => {
     unmount();
 
     const { result } = renderHook(() => useQueryPolling("q1"));
-    await advance(60);
+    // Long enough for the batch window and the mock's own 50ms delay after it.
+    await advance(100);
     await advance(0);
 
     expect(result.current.error).toBeNull();

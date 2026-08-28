@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
     "check:endpoints": "node scripts/check-endpoints.mjs",
-    "smoke:dashboards": "node scripts/smoke-dashboards.mjs"
+    "smoke:dashboards": "node scripts/smoke-dashboards.mjs",
+    "smoke:auth": "node scripts/smoke-auth.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

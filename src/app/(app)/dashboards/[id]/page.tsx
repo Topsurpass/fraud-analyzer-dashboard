@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SavedQueryRead } from "@/contracts/api";
-import { ApiError, getDashboard, getQuery } from "@/services/api-client";
+import { ApiError, getDashboard, listQueriesByIds } from "@/services/api-client";
 import { findDashboard, useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
 import { useExpandedCards } from "@/lib/useExpandedCards";
@@ -22,36 +22,34 @@ import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/
  * every board by the time this list is fetched.
  */
 /**
- * Fetch the queries behind a board's charts, once each.
+ * Fetch the queries behind a board's charts, in one request.
  *
- * Deduplicated on purpose: a board showing one result as a trend line and as
- * the rows behind it holds two charts of one query, and fetching that query
- * twice would reintroduce the per-card cost the query/chart split removed.
+ * This used to be a `getQuery` per id. On a twenty-card board that is twenty
+ * requests, twenty sockets and twenty round trips before the first chart can
+ * draw - and the browser only opens six connections at a time, so the last
+ * cards waited on the first ones for no reason but the shape of the fetch.
+ * `GET /queries?ids=` answers the whole list at once and returns them in the
+ * order asked for.
+ *
+ * Deduplicated before the request rather than after: a board showing one result
+ * as a trend line and as the rows behind it holds two charts of one query, and
+ * asking for the same id twice would make the engine resolve it twice.
+ *
+ * A query deleted between the board being fetched and this call simply does not
+ * come back - the endpoint returns what it found rather than 404-ing the batch,
+ * which is the behaviour that matters here. That gap is the `stale` flag: the
+ * engine has already taken the query off the board, so the fix is to refetch the
+ * board, not to patch the list locally.
  */
 async function resolveQueries(
   key: string,
   signal: AbortSignal,
 ): Promise<{ found: SavedQueryRead[]; stale: boolean }> {
   const ids = key ? [...new Set(key.split(","))] : [];
-  const settled = await Promise.all(
-    ids.map((queryId) =>
-      getQuery(queryId, { signal }).then(
-        (query) => query as SavedQueryRead | null,
-        (cause: unknown) => {
-          // Narrow race only: the query was deleted between this board being
-          // fetched and its cards being resolved. The engine has already taken
-          // it off the board, so the fix is to refetch, not to patch locally.
-          if (cause instanceof ApiError && cause.status === 404) return null;
-          throw cause;
-        },
-      ),
-    ),
-  );
+  if (ids.length === 0) return { found: [], stale: false };
 
-  return {
-    found: settled.filter((query): query is SavedQueryRead => query !== null),
-    stale: settled.some((query) => query === null),
-  };
+  const found = await listQueriesByIds(ids, { signal });
+  return { found, stale: found.length !== ids.length };
 }
 
 export default function DashboardPage({ params }: { params: Promise<{ id: string }> }) {

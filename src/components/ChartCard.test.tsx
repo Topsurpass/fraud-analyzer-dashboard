@@ -16,7 +16,20 @@ vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
     "@/services/api-client",
   );
-  return { ...actual, pollQuery };
+  return {
+    ...actual,
+    pollQuery,
+    // The coalescer batches, so a card's normal poll leaves as one
+    // `POST /queries/poll`. These tests are about what the card renders, not
+    // about the transport, so the batch is served here by the same
+    // single-query fake. Batching itself is tested in coalesce.test.ts.
+    batchPoll: (body: { queries: Array<{ query_id: string; since_hash?: string | null }> }) =>
+      Promise.all(
+        body.queries.map((entry) =>
+          pollQuery(entry.query_id, { sinceHash: entry.since_hash ?? null }),
+        ),
+      ).then((results) => ({ results })),
+  };
 });
 
 const query: SavedQueryRead = {
@@ -59,9 +72,18 @@ function changed(hash: string, value: number): PollResponse {
   };
 }
 
+/**
+ * Let a poll go out and come back.
+ *
+ * The wait covers the coalescer's batch window: a queued poll waits one frame
+ * to see whether another card is ticking alongside it, so draining microtasks
+ * is no longer enough to get an answer on screen. Sized well above that 16ms
+ * rather than just over it - this suite shares a machine with a dev server and
+ * an engine, and a wait tuned to an idle box is how a gate test turns flaky.
+ */
 async function settle() {
   await act(async () => {
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await Promise.resolve();
   });
 }
@@ -122,7 +144,9 @@ describe("ChartCard", () => {
       } as PollResponse);
 
     render(<ChartCard query={query} />);
+    // 20ms covers the coalescer's batch window before the first poll leaves.
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
       await Promise.resolve();
     });
     expect(screen.getByText("changed")).toBeInTheDocument();
@@ -130,6 +154,7 @@ describe("ChartCard", () => {
     // The next poll brings nothing new, so the label clears.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(20);
     });
     expect(screen.queryByText("changed")).not.toBeInTheDocument();
   });
@@ -168,11 +193,14 @@ describe("ChartCard", () => {
       .mockRejectedValue(new ApiError({ kind: "timeout", message: "Timed out", url: "/x" }));
 
     render(<ChartCard query={query} />);
+    // 20ms covers the coalescer's batch window before the first poll leaves.
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
       await Promise.resolve();
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(20);
     });
 
     // The figure survives, and the card says it is no longer fresh.

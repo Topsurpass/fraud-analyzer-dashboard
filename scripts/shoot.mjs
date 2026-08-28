@@ -2,9 +2,14 @@
 /**
  * Dev-only: screenshot a list of routes so the UI can actually be looked at.
  * node scripts/shoot.mjs <outDir> [--width=1440] [--height=900] [--wait=3500]
+ *
+ * Every route but /login sits behind a session, so pass --password (or set
+ * FAE_SMOKE_PASSWORD) to shoot anything else. Without one it shoots signed out,
+ * which is the right behaviour for capturing the login screen itself.
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { DEFAULT_EMAIL, seedSession, signIn } from "./lib/session.mjs";
 
 const args = new Map(
   process.argv.slice(2).filter((a) => a.startsWith("--")).map((raw) => {
@@ -18,6 +23,9 @@ const height = Number(args.get("height") ?? 900);
 const wait = Number(args.get("wait") ?? 3500);
 const base = String(args.get("base") ?? "http://127.0.0.1:3000");
 const routes = String(args.get("routes") ?? "/").split(",");
+const engine = String(args.get("engine") ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const email = String(args.get("email") ?? DEFAULT_EMAIL);
+const password = args.get("password") === undefined ? undefined : String(args.get("password"));
 
 mkdirSync(outDir, { recursive: true });
 
@@ -28,6 +36,13 @@ const context = await browser.newContext({
   colorScheme: "dark",
   reducedMotion: args.has("reduced") ? "reduce" : "no-preference",
 });
+// Signed out unless a password is given: that is what makes the login screen
+// shootable, and every other route redirects to it and says so plainly.
+if (password || process.env.FAE_SMOKE_PASSWORD) {
+  const { token } = await signIn(engine, { email, password });
+  await seedSession(context, token);
+}
+
 const page = await context.newPage();
 
 const problems = [];

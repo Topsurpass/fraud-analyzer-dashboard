@@ -1,7 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
-import { resetCoalesced } from "@/services/polling/coalesce";
 
 /*
  * Testing Library's `waitFor` defaults to a 1s budget. The assertions here
@@ -13,7 +12,7 @@ import { resetCoalesced } from "@/services/polling/coalesce";
  */
 configure({ asyncUtilTimeout: 4_000 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   /*
    * The poll coalescer is module state, so a request answered in one test is
@@ -21,7 +20,15 @@ afterEach(() => {
    * test file runs faster than that, and the symptom is the worst kind: a
    * later test sees a poll it did not make suppressed and reads as a real
    * failure of the polling loop.
+   *
+   * Imported here rather than at the top of this file, and that is load-order
+   * rather than style. A setup file runs before the test file that mocks
+   * `@/services/api-client`, so importing the coalescer up here pinned it - and
+   * the real client it now batches through - into the module cache before any
+   * mock could be registered. Every poll test then reached the network. Loading
+   * it at teardown resolves it from the test file's own graph, mocks included.
    */
+  const { resetCoalesced } = await import("@/services/polling/coalesce");
   resetCoalesced();
 });
 

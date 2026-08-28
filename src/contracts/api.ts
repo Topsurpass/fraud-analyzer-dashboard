@@ -564,3 +564,163 @@ export interface ApiErrorBody {
 	message?: string | null;
 	detail?: unknown;
 }
+
+/* ------------------------------------------------------------------- identity */
+
+/**
+ * What a signed-in person may do.
+ *
+ * Two roles, mirroring `UserRole` in the engine. The engine's own note on that
+ * enum is worth repeating here because it constrains this file too: a third
+ * role is a permission system in disguise, and the moment roles need combining
+ * they should become a permission table rather than a longer union.
+ */
+export type UserRole = "admin" | "analyst";
+
+export const USER_ROLES: readonly UserRole[] = ["admin", "analyst"];
+
+/** Sentence case, for prose. The raw value is lowercase and reads badly mid-line. */
+export const ROLE_LABELS: Record<UserRole, string> = {
+	admin: "Administrator",
+	analyst: "Analyst",
+};
+
+/** One line each, for the role picker. Says what the role can do, not what it is. */
+export const ROLE_HINTS: Record<UserRole, string> = {
+	admin: "Manages connections, accounts and the audit log. Sees every saved query.",
+	analyst: "Writes and runs queries against existing connections. Sees only their own work.",
+};
+
+export interface UserRead {
+	id: string;
+	email: string;
+	full_name: string;
+	role: UserRole;
+	is_active: boolean;
+	/** Set on a new account and after an admin reset. Blocks every endpoint
+	 *  except `/auth/me` and `/auth/change-password` until it is cleared. */
+	must_change_password: boolean;
+	last_login_at: string | null;
+	created_at: string;
+}
+
+export interface LoginRequest {
+	email: string;
+	password: string;
+}
+
+export interface LoginResponse {
+	token: string;
+	user: UserRead;
+}
+
+export interface ChangePasswordRequest {
+	current_password: string;
+	new_password: string;
+}
+
+/**
+ * The engine's password rules, mirrored so the form can say what is wrong
+ * before spending a round trip on it.
+ *
+ * Length and a blocklist, no composition rules: the engine follows NIST here
+ * (see `app/security/passwords.py`), which dropped "one symbol, one digit, one
+ * capital" because it pushes people toward "Password1!". The client copy of
+ * the blocklist is a courtesy, never the control - `_COMMON` on the engine is
+ * the list that decides, and a password this file waves through can still come
+ * back `WEAK_PASSWORD`.
+ */
+export const MIN_PASSWORD_LENGTH = 12;
+
+/* --------------------------------------------------------------- admin: users */
+
+export interface UserCreate {
+	email: string;
+	full_name: string;
+	role: UserRole;
+}
+
+/** A partial edit. An omitted field is left alone; neither can be set to null. */
+export interface UserUpdate {
+	is_active?: boolean;
+	role?: UserRole;
+}
+
+/** The one and only place a freshly issued temporary password appears. */
+export interface UserCreateResponse {
+	user: UserRead;
+	temporary_password: string;
+}
+
+/** The one and only place a reset's temporary password appears. */
+export interface TemporaryPasswordResponse {
+	temporary_password: string;
+}
+
+export type AuditAction =
+	| "user_created"
+	| "user_deactivated"
+	| "user_reactivated"
+	| "user_role_changed"
+	| "user_password_reset";
+
+export const AUDIT_ACTIONS: readonly AuditAction[] = [
+	"user_created",
+	"user_deactivated",
+	"user_reactivated",
+	"user_role_changed",
+	"user_password_reset",
+];
+
+/**
+ * Past tense and no subject: the row already carries who did it, and "Created
+ * account" beside an actor column reads as a sentence where "user_created"
+ * reads as a database value that leaked into the interface.
+ */
+export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
+	user_created: "Created account",
+	user_deactivated: "Deactivated account",
+	user_reactivated: "Reactivated account",
+	user_role_changed: "Changed role",
+	user_password_reset: "Reset password",
+};
+
+export interface AuditEntryRead {
+	id: string;
+	actor_id: string;
+	/** Resolved by the engine so the log does not cost a lookup per row. */
+	actor_email: string;
+	action: AuditAction;
+	target_type: string;
+	target_id: string;
+	detail: Record<string, unknown> | null;
+	created_at: string;
+}
+
+/* ----------------------------------------------------------------- batch poll */
+
+/**
+ * The largest batch the engine accepts in one poll. Enforced there as
+ * `maxItems`, mirrored here so a caller splits its own list rather than
+ * discovering the ceiling as a 422 halfway through a dashboard render.
+ */
+export const MAX_BATCH_POLL_QUERIES = 100;
+
+/** One query's place in a batch poll: the hash the caller already holds, or null. */
+export interface BatchPollItem {
+	query_id: string;
+	/** Omit or null to be sent the rows regardless of whether they changed. */
+	since_hash?: string | null;
+}
+
+export interface BatchPollRequest {
+	queries: BatchPollItem[];
+	/** Bypass the result cache. Costs a real execution per query. */
+	force?: boolean;
+}
+
+export interface BatchPollResponse {
+	/** Same order as the request. Each entry is the single-query poll shape,
+	 *  so `isPollChanged` discriminates them exactly as it does elsewhere. */
+	results: PollResponse[];
+}

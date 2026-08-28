@@ -6,6 +6,7 @@ import type { ConnectionCreateResult } from "@/contracts/api";
 import { ApiError, createConnection } from "@/services/api-client";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { PageBody } from "@/components/PageBody";
+import { RequireCapability } from "@/components/auth/RequireCapability";
 import { ConnectionForm, type ConnectionFormValues } from "@/components/ConnectionForm";
 import { Panel } from "@/components/ui";
 import { TestOutcome } from "@/components/TestOutcome";
@@ -15,7 +16,17 @@ import { TestOutcome } from "@/components/TestOutcome";
  * answer is worse than no connection at all, so the test result is shown here
  * and the analyst decides whether to move on or go back and fix it.
  */
+const CRUMBS = [{ label: "Connections", href: "/" }, { label: "New" }];
+
 export default function NewConnectionPage() {
+  return (
+    <RequireCapability capability="connections.create" crumbs={CRUMBS}>
+      <NewConnectionScreen />
+    </RequireCapability>
+  );
+}
+
+function NewConnectionScreen() {
   const router = useRouter();
   const { reload } = useConnections();
   const [busy, setBusy] = useState(false);
@@ -46,7 +57,7 @@ export default function NewConnectionPage() {
   };
 
   return (
-    <PageBody crumbs={[{ label: "Connections", href: "/" }, { label: "New" }]}>
+    <PageBody crumbs={CRUMBS}>
       <Panel title="New connection" className="max-w-2xl">
         <div className="p-3">
           <ConnectionForm

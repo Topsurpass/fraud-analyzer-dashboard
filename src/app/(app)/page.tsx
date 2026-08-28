@@ -10,6 +10,7 @@ import { FlaggedBadge } from "@/components/FlaggedBadge";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { formatDateTime, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
+import { useAuth } from "@/services/auth/AuthContext";
 
 /**
  * The front door.
@@ -25,6 +26,12 @@ export default function OverviewPage() {
 	const { connections, initial, error, reload } = useConnections();
 	const { dashboards, initial: dashboardsLoading } = useDashboards();
 	const now = useNow(5000);
+	// Adding a connection is an administrator's act. Absent rather than
+	// disabled, matching the rail: an analyst never gains this, so a permanently
+	// dead primary button on the front door is only a standing reminder of
+	// something they cannot do.
+	const { can } = useAuth();
+	const mayAddConnection = can("connections.create");
 
 	const live = connections.filter((connection) => connection.status === "ok").length;
 	const failed = connections.filter((connection) => connection.status === "failed").length;
@@ -33,9 +40,11 @@ export default function OverviewPage() {
 		<PageBody
 			crumbs={[{ label: "Connections" }]}
 			actions={
-				<LinkButton href="/connections/new" tone="primary">
-					New connection
-				</LinkButton>
+				mayAddConnection ? (
+					<LinkButton href="/connections/new" tone="primary">
+						New connection
+					</LinkButton>
+				) : null
 			}
 		>
 			{error ? (
@@ -53,11 +62,17 @@ export default function OverviewPage() {
 			) : connections.length === 0 ? (
 				<EmptyState
 					title="No connections yet"
-					body="A connection points the engine at a database. Saved queries and dashboards hang off it."
+					body={
+						mayAddConnection
+							? "A connection points the engine at a database. Saved queries and dashboards hang off it."
+							: "A connection points the engine at a database. An administrator adds them; once one exists, your queries and dashboards hang off it."
+					}
 					action={
-						<LinkButton href="/connections/new" tone="primary">
-							Add the first connection
-						</LinkButton>
+						mayAddConnection ? (
+							<LinkButton href="/connections/new" tone="primary">
+								Add the first connection
+							</LinkButton>
+						) : null
 					}
 				/>
 			) : (

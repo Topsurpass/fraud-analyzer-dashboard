@@ -6,6 +6,10 @@ result and exposes it as chart-ready JSON. This app is the surface an analyst
 watches: a dense grid of cards, each polling its own query, each showing at a
 glance whether its data just moved, is idle, or has gone stale.
 
+Two roles use it. An **analyst** writes and runs queries against connections
+somebody else set up, and sees their own saved work. An **administrator** does
+that, plus manages the connections, the accounts and the audit log.
+
 ```
 ┌──────────┬────────────────────────────────────────────┐
 │ FRAUD    │  Connections › Payments DB          ● live  │
@@ -16,6 +20,13 @@ glance whether its data just moved, is idle, or has gone stale.
 │──────────│  ┌───────────────┐ ┌───────────────┐        │
 │DASHBOARDS│  │ ChartCard     │ │ ChartCard     │        │
 │ + New    │  └───────────────┘ └───────────────┘        │
+│──────────│                                             │
+│ADMIN     │   (this section only for administrators)    │
+│ People   │                                             │
+│ Audit log│                                             │
+│──────────│                                             │
+│ GH  Grace│                                             │
+│ ● ENGINE │                                             │
 └──────────┴────────────────────────────────────────────┘
 ```
 
@@ -38,6 +49,24 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 > dev-origin protection serves its own chunks with a 403 to the second, and the
 > page renders its server markup but never hydrates.
 
+### Signing in
+
+Every screen but `/login` needs a session, and every engine endpoint but
+`/health`, `/ready` and `/auth/login` refuses a request without one. There is no
+sign-up: accounts are opened by an administrator, and the first administrator is
+created with the engine's own CLI rather than over HTTP, because an endpoint
+that mints an administrator is reachable by anything that can reach the service.
+
+From the engine's `services/analyzer`:
+
+```bash
+uv run switchboard create-admin        # prompts for email, name and password
+```
+
+Then sign in at `http://localhost:3000/login`. The scripts below need those
+credentials too - pass `--password=...` or set `FAE_SMOKE_PASSWORD` (and
+`FAE_SMOKE_EMAIL` if the account is not `admin@example.com`).
+
 ### A demo database
 
 `scripts/dev-seed.mjs` builds a realistic payments table, registers it with a
@@ -45,10 +74,14 @@ running engine, and saves one query per chart type. It only talks to the engine
 URL you give it and only writes the SQLite file you point it at.
 
 ```bash
-node scripts/dev-seed.mjs                    # build + register
+node scripts/dev-seed.mjs --password=...      # build + register
 node scripts/dev-seed.mjs --tick             # stream new rows, so polls change
 node scripts/dev-seed.mjs --reset            # drop and rebuild
 ```
+
+Registering a connection is an administrator's act, so the first form signs in
+before it writes anything. `--tick` only touches the SQLite file and needs no
+session.
 
 `--tick` is what makes the pulse line worth looking at: it writes new
 transactions continuously, so polls return `changed: true` and the cards
@@ -63,7 +96,7 @@ Two lanes, different budgets.
 
 ```bash
 scripts/install-hooks.sh
-npm test               # 265 tests, ~70s
+npm test               # 748 tests, ~3m
 npm run lint
 npm run typecheck
 npm run build
@@ -73,8 +106,9 @@ npm run build
 
 ```bash
 node scripts/dev-seed.mjs && npm run dev   # in another shell
-npm run smoke                              # every chart type puts marks on screen
-npm run smoke:dashboards                   # a board is really server-owned
+npm run smoke -- --password=...            # every chart type puts marks on screen
+npm run smoke:dashboards -- --password=...  # a board is really server-owned
+npm run smoke:auth -- --password=...        # roles hold on both sides
 npm run check:endpoints                    # every documented operation is used
 ```
 
@@ -92,6 +126,25 @@ another menu opens, checks that no card sits in a stale state, and checks that t
 `<defs>` child and Recharts decides what to do with children by scanning their
 component type - the same mechanism behind both of the blank-chart defects
 above.
+
+`scripts/smoke-auth.mjs` is here for the sharpest version of the same problem.
+Every role assertion in the gate suite is written against a mocked engine, which
+is to say against one understanding of what the engine does - and the thing
+actually worth proving is that the two halves agree: that a screen the rail
+hides is also a screen the engine refuses, and that the role the interface draws
+is the role the engine enforces. So it signs in as a real administrator and a
+real analyst and checks both sides of every rule. It walks the whole account
+lifecycle in a browser - open an account, read the temporary password that is
+shown exactly once, sign in with it, be held on the change-password screen until
+it is replaced, then be refused `/admin/users` by URL - and then asks the engine
+the same questions directly, expecting 403 for an analyst on `/users`,
+`/audit-log` and `POST /connections`, 200 on `/connections`, and 401 rather than
+403 with no session at all. It also checks the two failure modes that would be
+worst to get wrong: that `?next=` cannot redirect a sign-in off this origin, and
+that the last active administrator cannot deactivate or demote themselves. It
+finishes by confirming that signing out kills the session on the engine and not
+only in the browser. Accounts are never deleted - an audit trail that can lose
+its subject is not one - so it deactivates the throwaway accounts it created.
 
 `scripts/smoke-dashboards.mjs` is here for a related reason. The gate suite mocks
 the engine, so it can prove the client calls the right endpoints and no more.
@@ -412,6 +465,97 @@ spikes collapse to instant state changes under `prefers-reduced-motion`, while
 still delivering the information the animation carried.
 
 ## Decisions worth knowing
+
+**Roles are one table, not fourteen `role === "admin"` checks.**
+`src/services/auth/permissions.ts` holds what each role may do, and every screen
+asks it. The alternative form has two failure modes and both are silent: a
+screen that forgets the check ships an action which 403s on click, and a screen
+that checks the wrong way round hides a control from the person whose job it is.
+Neither shows up in a review of the component doing it, because the rule is not
+written down anywhere to compare against.
+
+The table mirrors the engine's own dependencies file for file - every
+capability marked admin-only is a route the engine guards with `require_admin`,
+every capability both roles hold is a route guarded only by `require_user`. The
+engine is the control; the table is what stops the interface offering an action
+the engine will refuse. `permissions.test.ts` carries that mapping as data, one
+row per endpoint, so a reviewer can check one column against one Python file
+rather than reading both codebases at once.
+
+Two roles on purpose, following the engine: a third is a permission system in
+disguise, and the moment roles need combining they should become a permission
+table rather than a longer union.
+
+Ownership is deliberately not modelled client-side. An analyst may edit their
+own saved query and not somebody else's, but which rows those are is a fact
+about data, not about roles - the engine scopes the list it returns, so a query
+the analyst can see is a query they may act on, and a second client-side rule
+could only disagree with it.
+
+**Controls a role will never gain are absent, not disabled.** A disabled button
+in a nav rail is a permanent reminder of something you will never be allowed to
+do. Where a page would otherwise be half-empty, the absent control is replaced
+by what the analyst actually came for: on a connection's settings page an
+administrator sees the credentials form and the delete, and an analyst sees the
+same connection's facts read-only above the schema browser they came to read.
+The one place a disabled control is right is the last active administrator's own
+row, where the control exists, is normally usable, and is refused for a reason
+worth stating - so it is disabled and says why, rather than vanishing.
+
+**The session token lives in `localStorage`, read through
+`useSyncExternalStore`.** The engine reads `Authorization: Bearer` and is
+configured with `allow_credentials=False`, so a cookie would never reach it -
+which also means this app has no CSRF surface on the engine, since a cross-site
+form post carries cookies and never a header this code attaches by hand. The
+trade-off that comes with that, stated rather than left implicit: a token in
+`localStorage` is readable by any script that runs on this origin, where an
+httpOnly cookie is not, and the mitigation for that is upstream - a strict CSP
+and no third-party scripts - not a different store here.
+
+`token.ts` keeps a module-level copy because `request()` reads it on every call,
+hundreds of times a minute during polling, and `localStorage` is a synchronous
+main-thread disk read. It also listens for `storage` events, so signing out in
+one tab does not leave a second tab rendering a live-looking interface over a
+dead session.
+
+A 401 drops the session in the request layer rather than in whichever screen
+made the call. The rule is about the request, not the response body: if a
+request that *carried* a token comes back 401, that token is not being accepted,
+whatever envelope came with it - and a bare 401 from a proxy carries no envelope
+at all. `/auth/login` is sent anonymously, so a wrong password can never sign
+anybody out of another tab. That is structural, not a special case somebody has
+to remember when a new error code appears.
+
+**Polling leaves as one request per tick, not one per card.**
+`src/services/polling/coalesce.ts` collapses three things: several charts of one
+query share a request, a poll landing moments after another reuses its answer,
+and polls for *different* queries raised in the same frame leave together as one
+`POST /queries/poll`. A twenty-card board was twenty requests and twenty round
+trips against a browser that opens six connections at a time.
+
+The batch keeps paying off rather than only helping on first paint, and nothing
+has to align the cards on a grid for that: every card in a batch is answered at
+the same instant, so every card in it schedules its next poll from the same
+moment. Cards sharing an interval stay in phase; cards on different intervals
+drift apart, which is correct, because they are not asking at the same time. No
+poll is ever delayed to make a batch bigger.
+
+Results are matched back to their waiters by `query_id`, never by position. A
+batch is the one place an off-by-one shows up as a card rendering another card's
+rows, and every response already names itself.
+
+**The engine readout asks both probes.** `/health` is liveness and deliberately
+checks nothing - the engine's own note says a probe that fails on a database
+outage turns a dependency outage into a restart loop - so it answers 200 from a
+process whose app-state database is unreachable and whose every real request is
+500-ing. `/ready` runs a `SELECT 1` and answers 503 when it cannot. A failed
+readiness check falls through to liveness, and the difference between the two
+answers is the third state the rail shows: not "live" and not "no answer" but
+"not ready", the engine up and unable to serve. Three shapes, not three colours:
+a hollow ring, a half-filled ring and a cross, so reading the state never
+depends on telling amber from grey. The second request only happens on the
+unhappy path, so the steady state is one request per interval.
+
 
 **Dashboards live on the engine; nothing about them is in `localStorage`.** A
 dashboard is a named, ordered set of query ids, served by five endpoints:

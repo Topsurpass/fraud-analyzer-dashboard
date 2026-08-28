@@ -10,6 +10,7 @@ import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/Char
 import { AddToDashboardMenu } from "@/components/AddToDashboardMenu";
 import { useExpandedCards } from "@/lib/useExpandedCards";
 import { EmptyState, ErrorState, LinkButton } from "@/components/ui";
+import { useAuth } from "@/services/auth/AuthContext";
 import {
   ConnectionPowerButton,
   DisconnectedNotice,
@@ -29,13 +30,18 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
   const expanded = useExpandedCards();
 
   const name = connection?.name ?? "Connection";
+  // Pausing a connection stops every card on it at once, which is why the
+  // engine keeps it admin-only alongside delete. Absent rather than disabled:
+  // an analyst never gains this, so a permanently dead button is only clutter.
+  const { can } = useAuth();
+  const mayPause = can("connections.pause");
 
   return (
     <PageBody
       crumbs={[{ label: "Connections", href: "/" }, { label: name }]}
       actions={
-        <div className="flex items-center gap-2">
-          {connection ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {connection && mayPause ? (
             <ConnectionPowerButton connection={connection} onChanged={reload} />
           ) : null}
           <LinkButton href={`/connections/${id}/flagged`}>Flagged</LinkButton>

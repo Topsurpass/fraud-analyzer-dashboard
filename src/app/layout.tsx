@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { AuthProvider } from "@/services/auth/AuthContext";
 import { inter, jetBrainsMono, spaceGrotesk } from "./fonts";
 import "./globals.css";
 
@@ -18,7 +19,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${spaceGrotesk.variable} ${inter.variable} ${jetBrainsMono.variable} h-full`}
     >
-      <body className="min-h-full bg-bg text-ink">{children}</body>
+      <body className="min-h-full bg-bg text-ink">
+        {/* Above both route groups: the signed-out screens need to know when a
+            session already exists, and the app needs it to render at all. */}
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
