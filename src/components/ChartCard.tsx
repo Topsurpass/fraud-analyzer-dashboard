@@ -41,6 +41,14 @@ import { TableView } from "./charts/TableView";
 
 export interface ChartCardProps {
   query: SavedQueryRead;
+  /**
+   * Render somebody else's published chart: poll by chart id through the
+   * ownership-ignoring path, and hide every control that edits.
+   *
+   * A viewer has no rights over this chart at all, so showing them a menu
+   * whose every item would be refused is worse than showing no menu.
+   */
+  published?: boolean;
   /** Rendered in the header, e.g. "add to dashboard". */
   actions?: React.ReactNode;
   /** Extra items inside the card's action menu. */
@@ -68,6 +76,7 @@ export interface ChartCardProps {
 
 export function ChartCard({
   query,
+  published = false,
   actions,
   menuExtra,
   enabled = true,
@@ -83,8 +92,9 @@ export function ChartCard({
   const flagged = useFlagged();
   const flaggedCount = flagged.countForQuery(query.id);
   const flaggedSeverity = flagged.severityForQuery(query.id);
-  const poll = useQueryPolling(query.id, {
+  const poll = useQueryPolling(published && chartId ? chartId : query.id, {
     enabled,
+    published,
     fallbackIntervalMs: query.poll_interval_ms ?? undefined,
   });
   const now = useNow();
@@ -233,6 +243,7 @@ export function ChartCard({
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
+            {published ? null : (
             <CardMenu
               query={query}
               chartId={chartId}
@@ -247,6 +258,7 @@ export function ChartCard({
               onDeleted={onDeleted}
               extra={menuExtra}
             />
+            )}
           </div>
         </div>
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PollResponse, RunResponse } from "@/contracts/api";
 import { isPollChanged } from "@/contracts/api";
-import { ApiError, pollQuery } from "@/services/api-client";
+import { ApiError, pollPublishedChart, pollQuery } from "@/services/api-client";
 import { coalescedPoll } from "./coalesce";
 
 /**
@@ -65,6 +65,16 @@ export interface QueryPollingControls {
 export type UseQueryPolling = QueryPollingState & QueryPollingControls;
 
 export interface UseQueryPollingOptions {
+  /**
+   * Poll a *published chart* by its chart id instead of a query by query id.
+   *
+   * A viewer of somebody else's published chart cannot reach the query
+   * endpoint at all, so the id means a different thing and the path does too.
+   * Everything else about the loop is identical, which is why this is a flag
+   * rather than a second hook.
+   */
+  published?: boolean;
+
   /** Stop polling without unmounting. Defaults to true. */
   enabled?: boolean;
   /** Stop polling while the tab is hidden. Defaults to true. */
@@ -122,6 +132,7 @@ export function useQueryPolling(
 ): UseQueryPolling {
   const {
     enabled = true,
+    published = false,
     pauseWhenHidden = true,
     fallbackIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_POLL_TIMEOUT_MS,
@@ -278,8 +289,12 @@ export function useQueryPolling(
         // its own loop. Without this they make identical requests on the same
         // interval, which is the waste the query/chart split removed from the
         // engine reappearing in the browser.
+        // A published chart is polled by chart id through a path that ignores
+        // ownership, because the viewer does not own the query behind it. Same
+        // loop, same coalescing, same backoff: only the source differs.
+        const fetchPoll = published ? pollPublishedChart : pollQuery;
         const response = await coalescedPoll(queryId, hashRef.current, force, () =>
-          pollQuery(
+          fetchPoll(
             queryId,
             // A forced refresh must not send since_hash, or the engine answers
             // "unchanged" and the analyst gets nothing back for their click.
@@ -315,7 +330,7 @@ export function useQueryPolling(
       clearTimer();
       controllerRef.current?.abort();
     };
-  }, [queryId, active, timeoutMs, maxBackoffMs, fallbackIntervalMs, clearTimer]);
+  }, [queryId, active, published, timeoutMs, maxBackoffMs, fallbackIntervalMs, clearTimer]);
 
   /**
    * Poll now, bypassing both the engine cache and our own change detection.

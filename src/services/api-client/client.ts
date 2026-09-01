@@ -328,6 +328,29 @@ export const runQuery = (queryId: string, options?: RequestOptions) =>
 		...options,
 	});
 
+/**
+ * Poll one published chart, as somebody who does not own it.
+ *
+ * The only read path in the app that deliberately ignores ownership: being
+ * published is the whole permission. The engine trims what comes back to the
+ * one published chart and never includes the SQL, so a viewer gets the result
+ * without the query behind it.
+ */
+export const pollPublishedChart = (
+	chartId: string,
+	params: { sinceHash?: string | null; force?: boolean } = {},
+	options?: RequestOptions,
+) =>
+	request<PollResponse>({
+		method: "GET",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/poll`,
+		query: {
+			since_hash: params.sinceHash ?? undefined,
+			force: params.force ? true : undefined,
+		},
+		...options,
+	});
+
 export const pollQuery = (
 	queryId: string,
 	params: { sinceHash?: string | null; force?: boolean } = {},
