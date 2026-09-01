@@ -38,6 +38,30 @@ vi.mock("@/services/api-client", async () => {
   };
 });
 
+// The page asks who is signed in, to decide whether a board is the viewer's
+// own. Boards in these tests are owned by "me" unless a test says otherwise.
+vi.mock("@/services/auth/AuthContext", () => ({
+  useAuth: () => ({
+    status: "signedIn",
+    user: {
+      id: "me",
+      email: "ada@example.com",
+      full_name: "Ada Lovelace",
+      role: "analyst",
+      is_active: true,
+      must_change_password: false,
+      last_login_at: null,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    busy: false,
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    changeOwnPassword: vi.fn(),
+    refresh: vi.fn(),
+    can: () => true,
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/dashboards/d1",
@@ -96,6 +120,7 @@ const board = (over: Partial<DashboardRead> = {}): DashboardRead => {
     // Kept in step with chart_ids unless a test supplies its own, so a board
     // never claims to place a chart it cannot describe.
     charts: over.charts ?? base.chart_ids.map((id) => chart(id)),
+    owner_id: "me",
     created_at: "2026-08-23T09:00:00",
     updated_at: "2026-08-23T09:00:00",
     ...base,
@@ -209,6 +234,7 @@ describe("DashboardPage", () => {
     getDashboard.mockResolvedValue(
       board({
         chart_ids: ["q1", "c2", "q2"],
+        owner_id: null,
         charts: [chart("q1"), chart("c2", "q1"), chart("q2")],
       }),
     );
@@ -351,6 +377,32 @@ describe("published charts on a board", () => {
     await screen.findByLabelText("Declines by hour");
     expect(screen.getAllByLabelText("Declines by hour")).toHaveLength(1);
     expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+  });
+
+  it("leaves somebody else's board showing only what its owner placed", async () => {
+    /*
+     * An admin sees every board. Appending shared cards to all of them repeated
+     * the same set on every one, and misrepresented boards the admin was merely
+     * inspecting: cards their owner never placed and cannot see, presented as
+     * part of that person's board.
+     */
+    getDashboard.mockResolvedValue(board({ owner_id: "somebody-else" }));
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+
+    await screen.findByLabelText("Declines by hour");
+    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Terminal movers")).not.toBeInTheDocument();
+  });
+
+  it("still shows shared charts on a board the viewer owns", async () => {
+    getDashboard.mockResolvedValue(board({ owner_id: "me" }));
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+
+    expect(await screen.findByText("Published by the team")).toBeInTheDocument();
   });
 
   it("asks for the published set once, not on every render", async () => {

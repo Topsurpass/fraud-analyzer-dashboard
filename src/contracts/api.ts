@@ -548,6 +548,8 @@ export interface DashboardRead {
 	/** The placed charts, in the same order. Resolved by the engine so a board
 	 *  does not cost a request per card just to learn what to poll. */
 	charts: QueryChart[];
+	/** Who built this board. Null for boards that predate accounts. */
+	owner_id: string | null;
 	created_at: string;
 	updated_at: string;
 }

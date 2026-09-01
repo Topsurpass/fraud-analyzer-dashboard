@@ -10,6 +10,7 @@ import { useExpandedCards } from "@/lib/useExpandedCards";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
 import { getPublishedCharts } from "@/services/api-client";
+import { useAuth } from "@/services/auth/AuthContext";
 import { MenuButton } from "@/components/CardMenu";
 import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/ui";
@@ -115,12 +116,26 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   const published = useResource<QueryChart[]>(loadPublished);
 
   const placedIds = useMemo(() => new Set(placed.map((chart) => chart.id)), [placed]);
+  /*
+   * Shared cards belong on your own boards, not on somebody else's.
+   *
+   * An admin sees every board, so without this the same published set repeats
+   * on every one of them - and worse, a board an admin is *inspecting* would
+   * show cards its owner never placed and cannot see, which misrepresents what
+   * that person's board actually holds.
+   */
+  const { user } = useAuth();
+  const isMyBoard = Boolean(
+    dashboard && user && dashboard.owner_id !== null && dashboard.owner_id === user.id,
+  );
+
   const shared = useMemo(
     // A chart the viewer already placed themselves is theirs to edit and
     // remove, so their own placement wins and the shared copy is dropped.
     // The same card twice on one board is only noise.
-    () => (published.data ?? []).filter((chart) => !placedIds.has(chart.id)),
-    [published.data, placedIds],
+    () =>
+      isMyBoard ? (published.data ?? []).filter((chart) => !placedIds.has(chart.id)) : [],
+    [published.data, placedIds, isMyBoard],
   );
   const expandedCards = useExpandedCards();
 
