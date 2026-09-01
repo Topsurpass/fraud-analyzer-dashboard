@@ -45,16 +45,33 @@ import { ApiError, messageFromBody } from "./errors";
 /** Ceiling on any single request. Poll callers pass something tighter. */
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * A header a cross-site form post cannot set, and a cross-origin fetch cannot
+ * send without passing preflight. Sent on every mutating request so the BFF
+ * proxy (`src/app/api/[...path]/route.ts`) can refuse anything that lacks it.
+ * See that file for the other half of the story: SameSite=Lax on the session
+ * cookie plus this header closes CSRF without a token round trip.
+ */
+const CSRF_HEADER = "x-switchboard-request";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Where the browser sends its requests.
+ *
+ * Defaults to `/api` - the BFF proxy, not the engine. The browser holds no
+ * session token of its own any more (it lives in an httpOnly cookie Next.js
+ * holds) and has no CORS story to configure, because every request this
+ * function issues is same-origin against Next.js, which forwards to the
+ * engine with a bearer header attached server-side.
+ *
+ * `NEXT_PUBLIC_API_BASE_URL` still overrides this for the rare caller that
+ * needs somewhere else (tests pass an absolute `baseUrl` for exactly that
+ * reason), but its absence is no longer a misconfiguration to fail loudly
+ * over - a relative default is the normal, expected shape of this app now.
+ */
 export function resolveBaseUrl(raw?: string | undefined): string {
 	const value = (raw ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
-	if (!value) {
-		throw new ApiError({
-			kind: "network",
-			message:
-				"NEXT_PUBLIC_API_BASE_URL is not set. Add it to .env.local and restart the dev server.",
-			url: "",
-		});
-	}
+	if (!value) return "/api";
 	return value.replace(/\/+$/, "");
 }
 
@@ -81,7 +98,16 @@ interface RequestInput extends RequestOptions {
 
 function buildUrl(input: RequestInput): string {
 	const base = resolveBaseUrl(input.baseUrl);
-	const url = new URL(base + input.path);
+	/*
+	 * `base` is relative ("/api") in the normal browser case, and `URL` needs
+	 * an origin to resolve a relative string against. `window.location.origin`
+	 * supplies it. `base` can also be absolute - only when a caller (tests,
+	 * the mock runner) passes `baseUrl` directly - and `URL`'s second argument
+	 * is ignored whenever the first is already absolute, so one construction
+	 * covers both without branching on which case this is.
+	 */
+	const origin = typeof window !== "undefined" ? window.location.origin : undefined;
+	const url = new URL(base + input.path, origin);
 	for (const [key, value] of Object.entries(input.query ?? {})) {
 		if (value === null || value === undefined) continue;
 		url.searchParams.set(key, String(value));
@@ -120,6 +146,10 @@ export async function request<T>(input: RequestInput): Promise<T> {
 	if (input.body !== undefined) headers["content-type"] = "application/json";
 	const bearer = input.anonymous ? null : getToken();
 	if (bearer) headers.authorization = `Bearer ${bearer}`;
+	// See CSRF_HEADER above: required by the proxy on every mutating request,
+	// harmless to send on requests that go straight to the engine (tests, the
+	// mock runner) since the engine simply ignores a header it does not check.
+	if (MUTATING_METHODS.has(input.method)) headers[CSRF_HEADER] = "1";
 
 	/**
 	 * Drop a session the engine will not accept.

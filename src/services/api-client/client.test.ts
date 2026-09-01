@@ -45,8 +45,13 @@ describe("resolveBaseUrl", () => {
     expect(resolveBaseUrl("http://engine.test///")).toBe("http://engine.test");
   });
 
-  it("fails loudly rather than requesting a relative URL", () => {
-    expect(() => resolveBaseUrl("")).toThrowError(/NEXT_PUBLIC_API_BASE_URL/);
+  it("defaults to the BFF proxy rather than throwing", () => {
+    // Since Task 3, the browser talks to Next.js's own /api/* proxy, not the
+    // engine directly - a relative default is the normal configuration now,
+    // not a misconfiguration worth failing loudly over. See src/lib/session.ts
+    // and src/app/api/[...path]/route.ts for the other half of this.
+    expect(resolveBaseUrl("")).toBe("/api");
+    expect(resolveBaseUrl(undefined)).toBe("/api");
   });
 
   it("falls back to the environment variable", () => {
@@ -77,8 +82,31 @@ describe("request", () => {
     });
 
     const init = fetchMock.mock.calls[0][1];
-    expect(init.headers).toEqual({ "content-type": "application/json" });
+    // Also carries the CSRF header the BFF proxy requires on every mutating
+    // request - see the "CSRF header" describe block below for the dedicated
+    // coverage of that behaviour across methods.
+    expect(init.headers).toEqual({
+      "content-type": "application/json",
+      "x-switchboard-request": "1",
+    });
     expect(init.body).toBe('{"name":"Payments DB"}');
+  });
+
+  describe("CSRF header", () => {
+    it("attaches it to every mutating method, and only mutating methods", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({}));
+
+      await request({ method: "GET", path: "/connections", baseUrl: BASE });
+      expect(fetchMock.mock.calls[0][1].headers).toBeUndefined();
+
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
+        fetchMock.mockClear();
+        fetchMock.mockResolvedValue(jsonResponse({}));
+        await request({ method, path: "/connections/c1", baseUrl: BASE });
+        const init = fetchMock.mock.calls[0][1];
+        expect(init.headers["x-switchboard-request"]).toBe("1");
+      }
+    });
   });
 
   it("drops null and undefined query params instead of sending 'null'", async () => {
