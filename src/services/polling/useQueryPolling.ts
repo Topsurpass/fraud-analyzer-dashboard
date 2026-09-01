@@ -293,14 +293,22 @@ export function useQueryPolling(
         // ownership, because the viewer does not own the query behind it. Same
         // loop, same coalescing, same backoff: only the source differs.
         const fetchPoll = published ? pollPublishedChart : pollQuery;
-        const response = await coalescedPoll(queryId, hashRef.current, force, () =>
-          fetchPoll(
-            queryId,
-            // A forced refresh must not send since_hash, or the engine answers
-            // "unchanged" and the analyst gets nothing back for their click.
-            force ? { force: true } : { sinceHash: hashRef.current },
-            controller ? { signal: controller.signal, timeoutMs } : { timeoutMs },
-          ),
+        const response = await coalescedPoll(
+          queryId,
+          hashRef.current,
+          force,
+          () =>
+            fetchPoll(
+              queryId,
+              // A forced refresh must not send since_hash, or the engine
+              // answers "unchanged" and the analyst gets nothing for their
+              // click.
+              force ? { force: true } : { sinceHash: hashRef.current },
+              controller ? { signal: controller.signal, timeoutMs } : { timeoutMs },
+            ),
+          // A published chart must not join the batch: that endpoint is
+          // query-scoped and owner-only, and this id is a chart id.
+          !published,
         );
         if (stoppedRef.current || controller?.signal.aborted) return;
         applyResponse(response);

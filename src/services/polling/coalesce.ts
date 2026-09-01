@@ -167,8 +167,43 @@ export function coalescedPoll(
 	sinceHash: string | null,
 	force: boolean,
 	fetcher: () => Promise<PollResponse>,
+	batchable = true,
 ): Promise<PollResponse> {
 	if (force) return fetcher();
+
+	/*
+	 * A published chart cannot join a batch.
+	 *
+	 * The batch endpoint is `POST /queries/poll`, which is query-scoped and
+	 * owner-only. A viewer of somebody else's published chart owns neither the
+	 * query nor a right to name it, and the id they hold is a *chart* id, so
+	 * putting it in a batch asks the wrong endpoint the wrong question with the
+	 * wrong id. It answers not-found, and the card polls forever.
+	 *
+	 * Sharing and de-duplication above still apply, so several cards of one
+	 * published chart still make one request. Only the batching is skipped.
+	 */
+	if (!batchable) {
+		const soloKey = keyOf(queryId, sinceHash);
+		const openSolo = inFlight.get(soloKey);
+		if (openSolo) return openSolo;
+
+		const recentSolo = settled.get(soloKey);
+		if (recentSolo && Date.now() - recentSolo.at < REUSE_WINDOW_MS) {
+			return Promise.resolve(recentSolo.value);
+		}
+
+		const solo = fetcher()
+			.then((value) => {
+				settled.set(soloKey, { at: Date.now(), value });
+				return value;
+			})
+			.finally(() => {
+				if (inFlight.get(soloKey) === solo) inFlight.delete(soloKey);
+			});
+		inFlight.set(soloKey, solo);
+		return solo;
+	}
 
 	const key = keyOf(queryId, sinceHash);
 
