@@ -353,6 +353,30 @@ describe("published charts on a board", () => {
     expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
   });
 
+  it("asks for the published set once, not on every render", async () => {
+    /*
+     * useResource re-runs whenever its loader's identity changes, so an inline
+     * arrow turns one fetch into an unbounded loop against the engine. This
+     * shipped that way: the board worked, and hammered /queries/charts/published
+     * forever behind it.
+     *
+     * Asserting the charts appear would not have caught it - they appeared
+     * fine. Only the call count shows it.
+     */
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+    await screen.findByText("Published by the team");
+    const afterFirstRender = getPublishedCharts.mock.calls.length;
+
+    // Give any render loop room to run away.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(afterFirstRender).toBe(1);
+    expect(getPublishedCharts.mock.calls.length).toBe(1);
+  });
+
   it("says nothing about publishing when the team has shared nothing", async () => {
     getDashboard.mockResolvedValue(board());
     getPublishedCharts.mockResolvedValue([]);

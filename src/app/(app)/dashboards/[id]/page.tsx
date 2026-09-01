@@ -105,7 +105,14 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
    * them from here - they appear because their author shared them and they
    * leave when the author retracts.
    */
-  const published = useResource<QueryChart[]>((signal) => getPublishedCharts({ signal }));
+  // useCallback, because useResource re-runs whenever this function's identity
+  // changes. An inline arrow is a new identity on every render, which turns one
+  // fetch into an unbounded loop against the engine.
+  const loadPublished = useCallback(
+    (signal: AbortSignal) => getPublishedCharts({ signal }),
+    [],
+  );
+  const published = useResource<QueryChart[]>(loadPublished);
 
   const placedIds = useMemo(() => new Set(placed.map((chart) => chart.id)), [placed]);
   const shared = useMemo(
