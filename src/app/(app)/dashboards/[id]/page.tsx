@@ -274,7 +274,33 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
             const query = (queries.data?.found ?? []).find(
               (candidate) => candidate.id === chart.query_id,
             );
-            if (!query) return null;
+            if (!query) {
+              /*
+               * The board places this card and the viewer cannot resolve the
+               * query behind it, so there is nothing to draw. Returning null
+               * made the card vanish with no trace, which reads as "my chart
+               * disappeared" rather than "somebody else owns this one".
+               *
+               * It happens when a card was placed before ownership was
+               * enforced, or when its query's owner changed. Saying so is the
+               * difference between a bug report and a person knowing who to
+               * ask.
+               */
+              return (
+                <div
+                  key={chart.id}
+                  className="flex min-h-[8rem] flex-col justify-center gap-1 border border-line bg-surface p-4"
+                >
+                  <p className="t-card truncate" title={chart.name}>
+                    {chart.name}
+                  </p>
+                  <p className="t-sub">
+                    This card belongs to somebody else, so it cannot be shown here. Ask an
+                    administrator to publish it or to transfer the query.
+                  </p>
+                </div>
+              );
+            }
             return (
               <ChartCard
                 key={chart.id}
