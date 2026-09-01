@@ -39,7 +39,6 @@ import type {
 	UserRead,
 	UserUpdate,
 } from "@/contracts/api";
-import { clearToken, getToken } from "@/services/auth/token";
 import { ApiError, messageFromBody } from "./errors";
 
 /** Ceiling on any single request. Poll callers pass something tighter. */
@@ -84,13 +83,6 @@ export interface RequestOptions {
 
 interface RequestInput extends RequestOptions {
 	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-	/**
-	 * Send no `Authorization` header. Only `/auth/login` sets this: it is the
-	 * one endpoint where a stale token must not travel, because the engine
-	 * would resolve it and the response would describe a session the caller is
-	 * in the middle of replacing.
-	 */
-	anonymous?: boolean;
 	path: string;
 	query?: Record<string, string | number | boolean | null | undefined>;
 	body?: unknown;
@@ -144,29 +136,11 @@ export async function request<T>(input: RequestInput): Promise<T> {
 
 	const headers: Record<string, string> = {};
 	if (input.body !== undefined) headers["content-type"] = "application/json";
-	const bearer = input.anonymous ? null : getToken();
-	if (bearer) headers.authorization = `Bearer ${bearer}`;
-	// See CSRF_HEADER above: required by the proxy on every mutating request,
-	// harmless to send on requests that go straight to the engine (tests, the
-	// mock runner) since the engine simply ignores a header it does not check.
+	// No `Authorization` header to attach here any more. The session lives in
+	// an httpOnly cookie the proxy reads, and the browser sends cookies on
+	// every same-origin request on its own - there is nothing this function
+	// needs to read out of storage and forward by hand.
 	if (MUTATING_METHODS.has(input.method)) headers[CSRF_HEADER] = "1";
-
-	/**
-	 * Drop a session the engine will not accept.
-	 *
-	 * The rule is deliberately about *this* request rather than about the
-	 * response body: if a request that carried a token comes back 401, that
-	 * token is not being accepted, whatever envelope came with it - and a bare
-	 * 401 from a proxy sitting in front of the engine carries no envelope at all.
-	 *
-	 * Keying on "did this request send a token" is also what keeps a failed
-	 * login out of it. `/auth/login` is `anonymous`, so `bearer` is null there
-	 * and a wrong password can never sign anybody out of another tab. That is
-	 * structural: it cannot be got wrong by adding a new error code later.
-	 */
-	const dropSessionOn401 = () => {
-		if (bearer !== null) clearToken();
-	};
 
 	let response: Response;
 	try {
@@ -196,7 +170,6 @@ export async function request<T>(input: RequestInput): Promise<T> {
 
 	if (response.status === 204 || response.headers.get("content-length") === "0") {
 		if (!response.ok) {
-			if (response.status === 401) dropSessionOn401();
 			throw new ApiError({
 				kind: "http",
 				message: `Engine returned HTTP ${response.status}`,
@@ -219,11 +192,6 @@ export async function request<T>(input: RequestInput): Promise<T> {
 
 	if (!response.ok) {
 		const { message, errorCode, detail } = messageFromBody(parsed, response.status);
-		// Dropped here rather than by whichever screen happened to make the
-		// call. Every caller would otherwise need the same branch, and the ones
-		// that forgot it would keep a signed-out interface on screen collecting
-		// 401s. See `dropSessionOn401` above for why it is keyed this way.
-		if (response.status === 401) dropSessionOn401();
 		throw new ApiError({
 			kind: "http",
 			message,
@@ -649,22 +617,22 @@ export const reconnectConnection = (connectionId: string, options?: RequestOptio
 /* ---------------------------------------------------------------------- auth */
 
 /**
- * Exchange credentials for a session token.
+ * Exchange credentials for a session.
  *
- * Sent anonymously so a stale token cannot travel with it, and given a longer
- * deadline than the default: the engine hashes with Argon2id, which is
- * deliberately slow, and a login that times out on a loaded machine looks to
- * the user exactly like a wrong password.
+ * Given a longer deadline than the default: the engine hashes with Argon2id,
+ * which is deliberately slow, and a login that times out on a loaded machine
+ * looks to the user exactly like a wrong password.
  *
- * Does not store the token. `AuthProvider` owns that decision, so a caller
- * cannot half-sign-in by calling this and forgetting the rest.
+ * Returns only the signed-in user. The proxy route (`src/app/api/auth/login/
+ * route.ts`) is the one holding a token at all - it folds the engine's token
+ * into an httpOnly cookie on this same response and never puts it in the
+ * body, so there is nothing for this function, or its caller, to store.
  */
 export const login = (body: LoginRequest, options?: RequestOptions) =>
 	request<LoginResponse>({
 		method: "POST",
 		path: "/auth/login",
 		body,
-		anonymous: true,
 		timeoutMs: 30_000,
 		...options,
 	});
@@ -673,7 +641,7 @@ export const login = (body: LoginRequest, options?: RequestOptions) =>
 export const logout = (options?: RequestOptions) =>
 	request<void>({ method: "POST", path: "/auth/logout", ...options });
 
-/** Who the current token belongs to. 401 when it belongs to nobody. */
+/** Who the current session cookie belongs to. 401 when it belongs to nobody. */
 export const me = (options?: RequestOptions) =>
 	request<UserRead>({ method: "GET", path: "/auth/me", ...options });
 

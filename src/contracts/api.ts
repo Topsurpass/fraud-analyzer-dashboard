@@ -614,10 +614,16 @@ export interface LoginRequest {
 	password: string;
 }
 
-export interface LoginResponse {
-	token: string;
-	user: UserRead;
-}
+/**
+ * What `POST /api/auth/login` actually hands the browser.
+ *
+ * The engine's own `/auth/login` answers `{token, user}`, but the BFF route
+ * (`src/app/api/auth/login/route.ts`) folds `token` into an httpOnly cookie
+ * server-side and forwards only `user` on. This type describes that second,
+ * browser-facing response, not the engine's - the client (`api-client/client.ts`)
+ * only ever talks to the proxy, so this is the shape it needs.
+ */
+export type LoginResponse = UserRead;
 
 export interface ChangePasswordRequest {
 	current_password: string;

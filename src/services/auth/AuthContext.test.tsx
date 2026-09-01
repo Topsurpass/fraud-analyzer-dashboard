@@ -1,10 +1,9 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { AuthProvider, useAuth } from "./AuthContext";
-import { getToken, resetTokenForTests, setToken } from "./token";
 
 const me = vi.hoisted(() => vi.fn());
 const login = vi.hoisted(() => vi.fn());
@@ -60,28 +59,26 @@ function mount() {
 const status = () => screen.getByTestId("status").textContent;
 
 beforeEach(() => {
-	window.localStorage.clear();
-	resetTokenForTests();
 	me.mockReset();
 	login.mockReset();
 	logout.mockReset().mockResolvedValue(undefined);
 	changePassword.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(() => resetTokenForTests());
-
 describe("bootstrapping", () => {
-	it("settles straight to signed out with no token, and asks the engine nothing", async () => {
-		// A visitor with no session should see the login form immediately rather
-		// than a spinner waiting on a request that was never worth making.
+	it("asks /auth/me once on mount - there is no token to check first", async () => {
+		// The session lives in an httpOnly cookie this code cannot read, so
+		// unlike the old token-gated version, "is anybody signed in" can only be
+		// answered by asking the engine. There is no shortcut that skips it.
+		me.mockRejectedValue(new ApiError({ kind: "http", message: "no", url: "", status: 401 }));
+
 		mount();
 
 		await waitFor(() => expect(status()).toBe("signedOut"));
-		expect(me).not.toHaveBeenCalled();
+		expect(me).toHaveBeenCalledTimes(1);
 	});
 
-	it("resolves a stored token into a user", async () => {
-		setToken("stored");
+	it("resolves a live cookie into a user", async () => {
 		me.mockResolvedValue(user());
 
 		mount();
@@ -93,7 +90,6 @@ describe("bootstrapping", () => {
 	it("reports mustChangePassword as its own state, not as signed in", async () => {
 		// Every route guard has to treat it as "not usable yet". A boolean on
 		// signedIn is the shape that invites the guard which forgets to check.
-		setToken("stored");
 		me.mockResolvedValue(user({ must_change_password: true }));
 
 		mount();
@@ -102,7 +98,6 @@ describe("bootstrapping", () => {
 	});
 
 	it("grants no capability while that gate is up, even to an admin", async () => {
-		setToken("stored");
 		me.mockResolvedValue(user({ role: "admin", must_change_password: true }));
 
 		mount();
@@ -112,54 +107,48 @@ describe("bootstrapping", () => {
 	});
 
 	it("falls back to signed out when the very first read fails", async () => {
-		setToken("stored");
 		me.mockRejectedValue(new ApiError({ kind: "network", message: "offline", url: "" }));
 
 		mount();
 
 		await waitFor(() => expect(status()).toBe("signedOut"));
-	});
-
-	it("keeps the token after a network failure, so a retry can still work", async () => {
-		// Only the engine gets to end a session. Signing somebody out over a
-		// dropped packet would mean retyping a password because of a blip.
-		setToken("stored");
-		me.mockRejectedValue(new ApiError({ kind: "network", message: "offline", url: "" }));
-
-		mount();
-
-		await waitFor(() => expect(status()).toBe("signedOut"));
-		expect(getToken()).toBe("stored");
 	});
 });
 
 describe("signing in", () => {
-	it("stores the token and shows the user from the login response", async () => {
-		login.mockResolvedValue({ token: "fresh", user: user({ role: "admin" }) });
+	it("shows the user from the login response - there is no token in it to store", async () => {
+		// Since the BFF migration, POST /api/auth/login returns the user object
+		// alone; the session cookie is set server-side and never reaches this
+		// code. Asserting the bare user here is the regression test for the
+		// break this task fixes: the old mock shape, {token, user}, hid it.
+		me.mockRejectedValue(new ApiError({ kind: "http", message: "no", url: "", status: 401 }));
+		login.mockResolvedValue(user({ role: "admin" }));
 		mount();
 		await waitFor(() => expect(status()).toBe("signedOut"));
 
 		await userEvent.click(screen.getByText("sign in"));
 
 		await waitFor(() => expect(status()).toBe("signedIn"));
-		expect(getToken()).toBe("fresh");
 		expect(screen.getByTestId("manage")).toHaveTextContent("true");
 	});
 
 	it("does not spend a second round trip asking who just signed in", async () => {
 		// The login response already carries the user. Re-reading /auth/me would
 		// be a wasted request on the one screen where latency is most visible.
-		login.mockResolvedValue({ token: "fresh", user: user() });
+		me.mockResolvedValue(user({ role: "analyst", email: "before@example.com" }));
+		login.mockResolvedValue(user());
 		mount();
-		await waitFor(() => expect(status()).toBe("signedOut"));
+		await waitFor(() => expect(status()).toBe("signedIn"));
+		const callsBeforeSignIn = me.mock.calls.length;
 
 		await userEvent.click(screen.getByText("sign in"));
-		await waitFor(() => expect(status()).toBe("signedIn"));
+		await waitFor(() => expect(screen.getByTestId("who")).toHaveTextContent("ada@example.com"));
 
-		expect(me).not.toHaveBeenCalled();
+		expect(me).toHaveBeenCalledTimes(callsBeforeSignIn);
 	});
 
-	it("stays signed out and keeps no token when the engine refuses", async () => {
+	it("stays signed out when the engine refuses", async () => {
+		me.mockRejectedValue(new ApiError({ kind: "http", message: "no", url: "", status: 401 }));
 		login.mockRejectedValue(
 			new ApiError({ kind: "http", message: "no", url: "", status: 401 }),
 		);
@@ -169,28 +158,29 @@ describe("signing in", () => {
 		await userEvent.click(screen.getByText("sign in"));
 
 		await waitFor(() => expect(status()).toBe("signedOut"));
-		expect(getToken()).toBeNull();
 	});
 });
 
 describe("signing out", () => {
-	it("drops the token and the user", async () => {
-		setToken("stored");
+	it("drops the user immediately, without asking /auth/me again", async () => {
+		// The logout call is what ends the session server-side; there is nothing
+		// left for /auth/me to usefully confirm once it has succeeded, so this
+		// should not cost a second round trip.
 		me.mockResolvedValue(user());
 		mount();
 		await waitFor(() => expect(status()).toBe("signedIn"));
+		const callsBeforeSignOut = me.mock.calls.length;
 
 		await userEvent.click(screen.getByText("sign out"));
 
 		await waitFor(() => expect(status()).toBe("signedOut"));
-		expect(getToken()).toBeNull();
 		expect(screen.getByTestId("who")).toHaveTextContent("nobody");
+		expect(me).toHaveBeenCalledTimes(callsBeforeSignOut);
 	});
 
 	it("signs out locally even when the engine never answers", async () => {
 		// A sign-out that fails because the network is down, and leaves somebody
 		// looking signed in, is the worst of both.
-		setToken("stored");
 		me.mockResolvedValue(user());
 		logout.mockRejectedValue(new ApiError({ kind: "network", message: "offline", url: "" }));
 		mount();
@@ -199,38 +189,6 @@ describe("signing out", () => {
 		await userEvent.click(screen.getByText("sign out"));
 
 		await waitFor(() => expect(status()).toBe("signedOut"));
-		expect(getToken()).toBeNull();
-	});
-});
-
-describe("a token that changes underneath the app", () => {
-	it("signs this tab out when another tab does", async () => {
-		setToken("stored");
-		me.mockResolvedValue(user());
-		mount();
-		await waitFor(() => expect(status()).toBe("signedIn"));
-
-		act(() => {
-			window.localStorage.removeItem("fae.session-token");
-			window.dispatchEvent(
-				new StorageEvent("storage", { key: "fae.session-token", newValue: null }),
-			);
-		});
-
-		await waitFor(() => expect(status()).toBe("signedOut"));
-	});
-
-	it("re-resolves when a different session appears", async () => {
-		setToken("first");
-		me.mockResolvedValue(user());
-		mount();
-		await waitFor(() => expect(status()).toBe("signedIn"));
-
-		me.mockResolvedValue(user({ id: "u2", email: "grace@navy.example", role: "admin" }));
-		act(() => setToken("second"));
-
-		await waitFor(() => expect(screen.getByTestId("who")).toHaveTextContent("grace@navy.example"));
-		expect(screen.getByTestId("manage")).toHaveTextContent("true");
 	});
 });
 
@@ -242,7 +200,6 @@ describe("changing your own password", () => {
 		 * had not landed, the user would be bounced back to the screen they
 		 * just completed.
 		 */
-		setToken("stored");
 		me.mockResolvedValue(user({ must_change_password: true }));
 		mount();
 		await waitFor(() => expect(status()).toBe("mustChangePassword"));
@@ -256,7 +213,6 @@ describe("changing your own password", () => {
 
 describe("refreshing", () => {
 	it("picks up a role that changed, without blanking the app first", async () => {
-		setToken("stored");
 		me.mockResolvedValue(user({ role: "analyst" }));
 		mount();
 		await waitFor(() => expect(screen.getByTestId("manage")).toHaveTextContent("false"));
@@ -270,7 +226,6 @@ describe("refreshing", () => {
 	});
 
 	it("keeps the known user when the refresh itself fails", async () => {
-		setToken("stored");
 		me.mockResolvedValue(user());
 		mount();
 		await waitFor(() => expect(status()).toBe("signedIn"));

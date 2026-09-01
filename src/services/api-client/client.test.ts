@@ -61,6 +61,30 @@ describe("resolveBaseUrl", () => {
   });
 });
 
+describe("buildUrl", () => {
+  it("resolves the relative default against window.location.origin", async () => {
+    /*
+     * This is the path a real browser actually takes: nothing outside tests
+     * and the mock runner passes `baseUrl`, so `resolveBaseUrl` returns the
+     * relative "/api" and the URL constructor needs an origin to resolve that
+     * against - `window.location.origin` supplies it. Every other test in
+     * this file passes an absolute `baseUrl`, which sidesteps that branch of
+     * `buildUrl` entirely. That gap is exactly how this broke before: reverting
+     * `buildUrl` to its pre-proxy form (`new URL(input.path, base)`, with
+     * `base` as the origin argument instead of folded into the path) leaves
+     * every one of those 21 tests green while a real browser call throws
+     * `Invalid URL`, because a relative string is not a valid second argument
+     * to `URL()` there. Calling `request()` with no `baseUrl` at all, the way
+     * every real caller does, is what catches it.
+     */
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await request({ method: "GET", path: "/connections" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${window.location.origin}/api/connections`);
+  });
+});
+
 describe("request", () => {
   it("sends no content-type on a bodyless request", async () => {
     fetchMock.mockResolvedValue(jsonResponse([]));

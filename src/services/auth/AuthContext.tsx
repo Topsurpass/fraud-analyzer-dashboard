@@ -1,17 +1,8 @@
 "use client";
 
-import {
-	createContext,
-	useCallback,
-	useContext,
-	useEffect,
-	useMemo,
-	useState,
-	useSyncExternalStore,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { UserRead } from "@/contracts/api";
 import { ApiError, changePassword, login, logout, me } from "@/services/api-client";
-import { clearToken, getToken, setToken, subscribeToken } from "./token";
 import type { Capability } from "./permissions";
 import { can as hasCapability } from "./permissions";
 
@@ -25,9 +16,9 @@ import { can as hasCapability } from "./permissions";
  * and "was not allowed" have to look different.
  */
 export type AuthStatus =
-	/** A token exists and `/auth/me` has not answered for it yet. */
+	/** The first `/auth/me` has not answered yet. */
 	| "loading"
-	/** No token, or the engine would not tell us who it belongs to. */
+	/** The engine has no session to answer for, or refused the one the cookie carried. */
 	| "signedOut"
 	/** Signed in, and free to use the app. */
 	| "signedIn"
@@ -56,19 +47,21 @@ export interface AuthValue {
 const AuthContext = createContext<AuthValue | null>(null);
 
 /**
- * One resolved answer about one token.
+ * One resolved answer about one `/auth/me` read.
  *
- * Keyed by `${token}#${nonce}` so a deliberate refresh re-runs while an
- * unchanged token does not. Holding the token alongside the user is what lets
- * the status below be *derived* rather than cleared in an effect: when the
- * token changes, every field of the old session is stale by construction and
- * there is nothing to reset.
+ * Keyed on the nonce alone (`String(nonce)`) rather than on `${token}#${nonce}`
+ * the way this used to be keyed: the session now lives in an httpOnly cookie
+ * that this code cannot read, so there is nothing client-side left to fold
+ * into the key except "which generation of the question this is the answer
+ * to". Holding the user alongside `ok` is what still lets `status` below be
+ * *derived* rather than reset in an effect - when the nonce changes there is a
+ * new question in flight, but the old answer stays on screen until the new
+ * one lands.
  */
 interface Session {
 	key: string;
-	token: string;
 	user: UserRead | null;
-	/** False when the engine would not identify this token. */
+	/** False when the engine would not identify the current session. */
 	ok: boolean;
 }
 
@@ -76,35 +69,33 @@ function statusFor(user: UserRead): AuthStatus {
 	return user.must_change_password ? "mustChangePassword" : "signedIn";
 }
 
-/** The server has no token, and neither does the first client render. */
-const NO_TOKEN_ON_SERVER = () => null;
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-	/*
-	 * The token is external state - the request layer drops it on a 401, and
-	 * another tab can sign out - so it is read through the hook built for
-	 * exactly that. It also settles hydration: the server snapshot is `null`, so
-	 * the first client render agrees with the server and the real value arrives
-	 * on subscription rather than as a mismatch.
-	 */
-	const token = useSyncExternalStore(subscribeToken, getToken, NO_TOKEN_ON_SERVER);
-
 	const [session, setSession] = useState<Session | null>(null);
 	const [nonce, setNonce] = useState(0);
 	const [busy, setBusy] = useState(false);
 
-	const wanted = `${token ?? ""}#${nonce}`;
+	const wanted = String(nonce);
 	const resolvedKey = session?.key ?? null;
 
+	/*
+	 * Runs at least once, unconditionally, on mount. There is no token to gate
+	 * on any more: an httpOnly cookie is invisible to this code by design, so
+	 * "is anybody signed in" is a question only the engine can answer, and the
+	 * first render has no way to know without asking. `session` starts `null`
+	 * on both the server and the first client render - there is no external
+	 * store being read here the way the old token read was, so unlike that
+	 * read there is nothing that can disagree between the two and produce a
+	 * hydration mismatch.
+	 */
 	useEffect(() => {
-		if (token === null || resolvedKey === wanted) return;
+		if (resolvedKey === wanted) return;
 
 		const controller = new AbortController();
 		let live = true;
 
 		me({ signal: controller.signal })
 			.then((user) => {
-				if (live) setSession({ key: wanted, token, user, ok: true });
+				if (live) setSession({ key: wanted, user, ok: true });
 			})
 			.catch((cause) => {
 				if (!live) return;
@@ -118,9 +109,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				 * it resolves to signed out and the login screen offers a retry.
 				 */
 				setSession((previous) =>
-					previous && previous.token === token && previous.ok
+					previous && previous.ok
 						? { ...previous, key: wanted }
-						: { key: wanted, token, user: null, ok: false },
+						: { key: wanted, user: null, ok: false },
 				);
 			});
 
@@ -128,35 +119,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			live = false;
 			controller.abort();
 		};
-	}, [token, wanted, resolvedKey]);
+	}, [wanted, resolvedKey]);
 
-	const current = session && session.token === token ? session : null;
-	const user = current?.user ?? null;
+	const user = session?.user ?? null;
 
 	const status: AuthStatus =
-		token === null
-			? "signedOut"
-			: current === null
-				? "loading"
-				: current.ok && current.user
-					? statusFor(current.user)
-					: "signedOut";
+		session === null
+			? "loading"
+			: session.ok && session.user
+				? statusFor(session.user)
+				: "signedOut";
 
-	const signIn = useCallback(async (email: string, password: string) => {
-		setBusy(true);
-		try {
-			const response = await login({ email, password });
-			// Seeded before the token is set, so the effect above sees a session
-			// that already matches and the app does not spend a second round trip
-			// asking who just signed in.
-			setSession({ key: `${response.token}#0`, token: response.token, user: response.user, ok: true });
-			setNonce(0);
-			setToken(response.token);
-			return response.user;
-		} finally {
-			setBusy(false);
-		}
-	}, []);
+	const signIn = useCallback(
+		async (email: string, password: string) => {
+			setBusy(true);
+			try {
+				const nextUser = await login({ email, password });
+				/*
+				 * Seeded under the key the effect above is already looking for, so
+				 * the app does not spend a second round trip asking who just signed
+				 * in. There is nothing to store beyond that: the engine set the
+				 * session cookie on this same response, server-side, and the browser
+				 * cannot read it - that is the entire point of the BFF proxy this
+				 * migration moves onto.
+				 */
+				setSession({ key: wanted, user: nextUser, ok: true });
+				return nextUser;
+			} finally {
+				setBusy(false);
+			}
+		},
+		[wanted],
+	);
 
 	const signOut = useCallback(async () => {
 		setBusy(true);
@@ -165,11 +159,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			// leaves somebody looking signed in is the worst of both.
 			await logout().catch(() => undefined);
 		} finally {
-			setSession(null);
-			clearToken();
+			/*
+			 * Set directly rather than cleared to `null`. The call above just told
+			 * the server to drop the cookie, so there is nothing left to resolve -
+			 * `ok: true` with no user reads as signed out below, without spending
+			 * another `/auth/me` round trip that could only confirm what this call
+			 * already caused.
+			 */
+			setSession({ key: wanted, user: null, ok: true });
 			setBusy(false);
 		}
-	}, []);
+	}, [wanted]);
 
 	const refresh = useCallback(() => setNonce((count) => count + 1), []);
 
@@ -190,16 +190,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				 * yet would bounce the user back to the form they just completed.
 				 *
 				 * The engine keeps this session alive through the change (it
-				 * revokes every *other* one), so the existing token is still the
-				 * right one to ask with.
+				 * revokes every *other* one), so the same cookie is still the
+				 * right one to ask with - the browser attaches it on its own,
+				 * there is nothing here that needs to re-supply it.
 				 */
-				const settled = getToken();
-				if (settled !== null) {
-					const updated = await me();
-					// Stored under the key the effect is already looking for, so
-					// this counts as that fetch rather than racing a second one.
-					setSession({ key: wanted, token: settled, user: updated, ok: true });
-				}
+				const updated = await me();
+				// Stored under the key the effect is already looking for, so this
+				// counts as that fetch rather than racing a second one.
+				setSession({ key: wanted, user: updated, ok: true });
 			} finally {
 				setBusy(false);
 			}

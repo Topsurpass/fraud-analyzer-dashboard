@@ -1,14 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getToken, resetTokenForTests, setToken } from "@/services/auth/token";
 import { ApiError } from "./errors";
 import {
 	batchPoll,
 	createUser,
-	listAuditLog,
 	listQueriesByIds,
-	listUsers,
 	login,
-	me,
 	resetUserPassword,
 	updateUser,
 } from "./client";
@@ -19,13 +15,10 @@ const fetchMock = vi.fn();
 beforeEach(() => {
 	fetchMock.mockReset();
 	vi.stubGlobal("fetch", fetchMock);
-	window.localStorage.clear();
-	resetTokenForTests();
 });
 
 afterEach(() => {
 	vi.unstubAllGlobals();
-	resetTokenForTests();
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -52,86 +45,43 @@ async function failure(promise: Promise<unknown>): Promise<ApiError> {
 	throw new Error("expected the request to reject, but it resolved");
 }
 
-describe("the bearer token", () => {
-	it("rides on every request once a session exists", async () => {
-		setToken("session-abc");
-		fetchMock.mockResolvedValue(jsonResponse([]));
-
-		await listUsers({ baseUrl: BASE });
-
-		expect(sentHeaders().authorization).toBe("Bearer session-abc");
-	});
-
-	it("is absent when nobody is signed in", async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
-
-		await listUsers({ baseUrl: BASE });
-
-		expect(sentHeaders().authorization).toBeUndefined();
-	});
-
-	it("never travels with a login", async () => {
+describe("login", () => {
+	it("posts credentials and resolves the bare user the proxy returns", async () => {
 		/*
-		 * A stale token on /auth/login would be resolved by the engine, and the
-		 * response would describe a session the caller is in the middle of
-		 * replacing. The header is left off structurally rather than by
-		 * remembering to clear the token first.
+		 * Since the BFF migration (src/app/api/auth/login/route.ts), the response
+		 * body this function sees is the user object alone - the session lives in
+		 * an httpOnly cookie set on that same response, never in JSON this code
+		 * (or its caller, AuthContext) can read. This is the regression test for
+		 * the shape that broke sign-in: the old contract, {token, user}, is not
+		 * what a real request against the route returns.
 		 */
-		setToken("stale-token");
 		fetchMock.mockResolvedValue(
-			jsonResponse({ token: "fresh", user: { id: "u1", email: "a@b.test" } }),
+			jsonResponse({ id: "u1", email: "a@b.test", role: "analyst" }),
 		);
+
+		const result = await login({ email: "a@b.test", password: "x" }, { baseUrl: BASE });
+
+		expect(result).toEqual({ id: "u1", email: "a@b.test", role: "analyst" });
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe("http://engine.test/auth/login");
+		expect(init.method).toBe("POST");
+	});
+
+	it("sends no Authorization header - there is no token to attach any more", async () => {
+		// A regression guard, not a live behaviour: nothing in `request()` reads
+		// a token store any more, so this would only start failing if that
+		// plumbing came back.
+		fetchMock.mockResolvedValue(jsonResponse({ id: "u1" }));
 
 		await login({ email: "a@b.test", password: "x" }, { baseUrl: BASE });
 
 		expect(sentHeaders().authorization).toBeUndefined();
 	});
 
-	it("does not store the token itself - the provider owns that", async () => {
-		// Otherwise a caller could half-sign-in by calling the endpoint and
-		// forgetting everything else the provider does.
-		fetchMock.mockResolvedValue(jsonResponse({ token: "fresh", user: {} }));
-
-		await login({ email: "a@b.test", password: "x" }, { baseUrl: BASE });
-
-		expect(getToken()).toBeNull();
-	});
-});
-
-describe("a session the engine no longer recognises", () => {
-	it("is dropped when the engine says NOT_AUTHENTICATED", async () => {
-		setToken("expired");
-		fetchMock.mockResolvedValue(
-			jsonResponse(
-				{ error_code: "NOT_AUTHENTICATED", message: "Sign in to continue." },
-				401,
-			),
-		);
-
-		const error = await failure(listUsers({ baseUrl: BASE }));
-
-		expect(error.status).toBe(401);
-		expect(getToken()).toBeNull();
-	});
-
-	it("is dropped on a bare 401 with no body", async () => {
-		// A proxy or gateway answering instead of the engine. There is no
-		// envelope to read a code out of, so the status is all there is to go on.
-		setToken("expired");
-		fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
-
-		await failure(me({ baseUrl: BASE }));
-
-		expect(getToken()).toBeNull();
-	});
-
-	it("is kept when a login is simply refused", async () => {
-		/*
-		 * `/auth/login` answers a wrong password with 401 INVALID_CREDENTIALS.
-		 * Treating that as an expiry would sign out a second tab because
-		 * somebody mistyped a password in this one.
-		 */
-		setToken("still-good");
+	it("is kept out of retryable territory when the engine simply refuses it", async () => {
+		// `/auth/login` answers a wrong password with 401 INVALID_CREDENTIALS.
+		// Nothing local needs dropping over that any more than it did before -
+		// there was never a token here to drop.
 		fetchMock.mockResolvedValue(
 			jsonResponse(
 				{ error_code: "INVALID_CREDENTIALS", message: "Email or password is wrong." },
@@ -142,22 +92,7 @@ describe("a session the engine no longer recognises", () => {
 		const error = await failure(login({ email: "a@b.test", password: "no" }, { baseUrl: BASE }));
 
 		expect(error.errorCode).toBe("INVALID_CREDENTIALS");
-		expect(getToken()).toBe("still-good");
-	});
-
-	it("is kept on a 403, which means signed in and still not allowed", async () => {
-		setToken("analyst-token");
-		fetchMock.mockResolvedValue(
-			jsonResponse(
-				{ error_code: "FORBIDDEN", message: "This needs an administrator account." },
-				403,
-			),
-		);
-
-		const error = await failure(listAuditLog({ baseUrl: BASE }));
-
-		expect(error.status).toBe(403);
-		expect(getToken()).toBe("analyst-token");
+		expect(error.retryable).toBe(false);
 	});
 });
 
