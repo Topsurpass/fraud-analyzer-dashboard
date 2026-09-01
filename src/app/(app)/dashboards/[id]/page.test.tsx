@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DashboardRead, SavedQueryRead } from "@/contracts/api";
+import type { DashboardRead, QueryChart, SavedQueryRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { DashboardsProvider } from "@/services/dashboards";
 import DashboardPage from "./page";
@@ -19,6 +19,8 @@ const getDashboard = vi.hoisted(() => vi.fn());
 const updateDashboard = vi.hoisted(() => vi.fn());
 const listQueriesByIds = vi.hoisted(() => vi.fn());
 const listDashboards = vi.hoisted(() => vi.fn());
+// Published charts land on every board, so this page fetches them too.
+const getPublishedCharts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
@@ -32,6 +34,7 @@ vi.mock("@/services/api-client", async () => {
     createDashboard: vi.fn(),
     updateDashboard,
     deleteDashboard: vi.fn(),
+    getPublishedCharts,
   };
 });
 
@@ -45,8 +48,16 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/ChartCard", () => ({
   // The card owns a poll loop of its own; this page's job is to hand it a query
   // and a menu, so only those two are kept.
-  ChartCard: ({ query, menuExtra }: { query: SavedQueryRead; menuExtra?: React.ReactNode }) => (
-    <article aria-label={query.name}>
+  ChartCard: ({
+    query,
+    menuExtra,
+    published,
+  }: {
+    query: SavedQueryRead;
+    menuExtra?: React.ReactNode;
+    published?: boolean;
+  }) => (
+    <article aria-label={query.name} data-published={String(Boolean(published))}>
       {query.name}
       {menuExtra}
     </article>
@@ -122,6 +133,9 @@ async function open(id = "d1") {
 beforeEach(() => {
   // The list is deliberately empty: this browser has never seen the board.
   listDashboards.mockReset().mockResolvedValue([]);
+  // Nothing shared by default, so every existing test describes a board that
+  // holds only what its owner put there.
+  getPublishedCharts.mockReset().mockResolvedValue([]);
   getDashboard.mockReset().mockResolvedValue(board());
   // One request for the whole board, in the order asked for. The helper below
   // answers from a table so a test only has to say which queries exist.
@@ -281,5 +295,71 @@ describe("DashboardPage", () => {
         expect(updateDashboard).toHaveBeenCalledWith("d1", { chart_ids: ["q2"] }),
       );
     });
+  });
+});
+
+
+describe("published charts on a board", () => {
+  const shared = (over: Partial<QueryChart> = {}): QueryChart => ({
+    id: "pub1",
+    query_id: "q9",
+    name: "Terminal movers",
+    position: 0,
+    chart_type: "table",
+    x_field: null,
+    y_field: null,
+    series_field: null,
+    surge_threshold_pct: null,
+    is_public: true,
+    published_by: "admin1",
+    published_at: "2026-08-28T09:00:00",
+    created_at: "2026-08-28T09:00:00",
+    updated_at: "2026-08-28T09:00:00",
+    ...over,
+  });
+
+  it("shows what the team published, on a board the viewer did not put it on", async () => {
+    // The whole point: publishing has to land where colleagues already look.
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+
+    expect(await screen.findByText("Published by the team")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Terminal movers")).toBeInTheDocument();
+  });
+
+  it("renders a shared card read-only", async () => {
+    // A viewer owns none of it, so a menu whose every item is refused would be
+    // worse than no menu.
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+
+    const card = await screen.findByLabelText("Terminal movers");
+    expect(card).toHaveAttribute("data-published", "true");
+  });
+
+  it("does not show a chart twice when the viewer already placed it", async () => {
+    // Their own placement wins: they can edit and remove theirs.
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([shared({ id: "q1", name: "Declines by hour" })]);
+
+    await open();
+
+    await screen.findByLabelText("Declines by hour");
+    expect(screen.getAllByLabelText("Declines by hour")).toHaveLength(1);
+    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about publishing when the team has shared nothing", async () => {
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([]);
+
+    await open();
+
+    await screen.findByLabelText("Declines by hour");
+    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
   });
 });

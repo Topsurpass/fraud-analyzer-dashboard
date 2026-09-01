@@ -2,13 +2,14 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SavedQueryRead } from "@/contracts/api";
+import type { QueryChart, SavedQueryRead } from "@/contracts/api";
 import { ApiError, getDashboard, listQueriesByIds } from "@/services/api-client";
 import { findDashboard, useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
 import { useExpandedCards } from "@/lib/useExpandedCards";
 import { PageBody } from "@/components/PageBody";
 import { ChartCard } from "@/components/ChartCard";
+import { getPublishedCharts } from "@/services/api-client";
 import { MenuButton } from "@/components/CardMenu";
 import { ChartGrid, PENDING_CELL_CLASS, chartCellClass } from "@/components/ChartGrid";
 import { Button, EmptyState, ErrorState, Input, LinkButton } from "@/components/ui";
@@ -91,6 +92,29 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
 
   const load = useCallback((signal: AbortSignal) => resolveQueries(key, signal), [key]);
   const queries = useResource(load);
+
+  /*
+   * Every board also carries whatever the team has published.
+   *
+   * Publishing is the one way out of private-by-default work, and it is only
+   * worth anything if colleagues actually encounter the result. Putting shared
+   * charts on a separate page meant nobody found them; putting them on the
+   * board people already open means publishing lands where it was aimed.
+   *
+   * These are not placements. Nobody added them here and nobody can remove
+   * them from here - they appear because their author shared them and they
+   * leave when the author retracts.
+   */
+  const published = useResource<QueryChart[]>((signal) => getPublishedCharts({ signal }));
+
+  const placedIds = useMemo(() => new Set(placed.map((chart) => chart.id)), [placed]);
+  const shared = useMemo(
+    // A chart the viewer already placed themselves is theirs to edit and
+    // remove, so their own placement wins and the shared copy is dropped.
+    // The same card twice on one board is only noise.
+    () => (published.data ?? []).filter((chart) => !placedIds.has(chart.id)),
+    [published.data, placedIds],
+  );
   const expandedCards = useExpandedCards();
 
   const [renaming, setRenaming] = useState(false);
@@ -211,7 +235,10 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         </ChartGrid>
       ) : chartIds.length === 0 ? (
         <EmptyState
-          title="This dashboard is empty"
+          // "Empty" would contradict the published cards rendered below it, so
+          // the wording narrows to what is actually empty: this person's own
+          // placements. The shared charts are not theirs and never were.
+          title={shared.length > 0 ? "You have not added any cards yet" : "This dashboard is empty"}
           body="Open a connection and use the + on any card to add it here."
           action={
             <LinkButton href="/" tone="primary">
@@ -265,6 +292,52 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
           })}
         </ChartGrid>
       )}
+
+      {shared.length > 0 ? (
+        <>
+          {/*
+           * Labelled and separated rather than mixed in, because a card the
+           * viewer did not add and cannot remove needs to say why it is here.
+           * Without the heading, a board that grows cards on its own reads as
+           * a bug.
+           */}
+          <div className="mt-6 mb-2 flex items-baseline gap-2">
+            <h2 className="t-section">Published by the team</h2>
+            <span className="t-sub">{shared.length}</span>
+          </div>
+          <ChartGrid>
+            {shared.map((chart) => (
+              <ChartCard
+                key={chart.id}
+                published
+                chartId={chart.id}
+                title={chart.name}
+                className={chartCellClass(
+                  chart.chart_type,
+                  expandedCards.isExpanded(chart.id),
+                )}
+                expanded={expandedCards.isExpanded(chart.id)}
+                onToggleExpand={() => expandedCards.toggle(chart.id)}
+                /*
+                 * The viewer cannot fetch the query behind somebody else's
+                 * chart and does not need to: the published poll returns the
+                 * rows, the columns and this one chart's mapping. This carries
+                 * the name and nothing invented, and the id is the query's real
+                 * id rather than a placeholder.
+                 */
+                query={
+                  {
+                    id: chart.query_id,
+                    name: chart.name,
+                    charts: [chart],
+                    poll_interval_ms: null,
+                  } as unknown as SavedQueryRead
+                }
+              />
+            ))}
+          </ChartGrid>
+        </>
+      ) : null}
     </PageBody>
   );
 }

@@ -117,22 +117,6 @@ export function Rail({
 
         <div className="mx-3 my-2 border-t border-line" />
 
-        {/*
-         * Above Dashboards, because it answers a different question. A board is
-         * something you assembled; this is what the rest of the team chose to
-         * share, and it is the only place an analyst sees anybody else's work.
-         */}
-        <RailLink
-          href="/published"
-          active={pathname === "/published"}
-          onNavigate={onNavigate}
-          collapsed={collapsed}
-          title="Charts the team has published"
-        >
-          {collapsed ? <span aria-hidden="true">P</span> : "Published"}
-        </RailLink>
-
-        <div className="mx-3 my-2 border-t border-line" />
 
         <Section
           title="Dashboards"
