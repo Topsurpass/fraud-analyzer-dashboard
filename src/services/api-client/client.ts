@@ -18,6 +18,7 @@ import type {
 	PreviewRequest,
 	PreviewResponse,
 	QueryChartInput,
+	QueryChart,
 	QueryChartSet,
 	RunResponse,
 	SavedQueryCreate,
@@ -528,6 +529,42 @@ export const deleteFlaggedRows = (
 		...options,
 	});
 };
+
+/**
+ * Share one chart with every signed-in user.
+ *
+ * An analyst may publish a chart on a query they own; an admin may publish
+ * anyone's. Publishing freezes the query behind it, so a colleague reading the
+ * chart cannot have the definition change under them.
+ */
+export const publishChart = (chartId: string, options?: RequestOptions) =>
+	request<QueryChart>({
+		method: "POST",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/publish`,
+		...options,
+	});
+
+/**
+ * Retract a publication, which unfreezes the query.
+ *
+ * Whoever published may unpublish, and an admin always may. A chart an admin
+ * published therefore stays the admin's to retract - that asymmetry is what
+ * makes an admin's freeze over someone else's work real rather than advisory.
+ */
+export const unpublishChart = (chartId: string, options?: RequestOptions) =>
+	request<QueryChart>({
+		method: "POST",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/unpublish`,
+		...options,
+	});
+
+/** Every published chart, whoever built it. */
+export const getPublishedCharts = (options?: RequestOptions) =>
+	request<QueryChart[]>({
+		method: "GET",
+		path: "/queries/charts/published",
+		...options,
+	});
 
 /** Every way this query's result can be drawn, in display order. */
 export const getQueryCharts = (queryId: string, options?: RequestOptions) =>

@@ -19,6 +19,7 @@ import { FlaggedBadge } from "./FlaggedBadge";
 import { formatDuration, formatHash, formatInteger, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
+import { PublishedBadge } from "./PublishedBadge";
 import { PulseLine } from "./PulseLine";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
@@ -98,6 +99,17 @@ export function ChartCard({
   // the honest skeleton: it is what a query renders as until configured.
   const chartType = spec?.type ?? "table";
   const cardTitle = title ?? spec?.name ?? query.name;
+
+  /*
+   * The publication state comes from the query's own chart list rather than
+   * the run payload. The payload carries the drawing mapping, which is what a
+   * card needs to render; whether a chart is shared is a property of the saved
+   * chart, and reading it from the authoritative place keeps the badge honest
+   * when a poll answer is a moment stale.
+   */
+  const publishedChart = chartId
+    ? query.charts.find((candidate) => candidate.id === chartId)
+    : query.charts[0];
 
   const view = useMemo(() => {
     if (!snapshot) return null;
@@ -180,9 +192,15 @@ export function ChartCard({
             {/* The chart's own name, not the query's. Four charts of one query
                 all headed "Transaction Summary" are four cards nobody can tell
                 apart, which is most of the value of naming them. */}
-            <h3 className="t-card truncate" title={cardTitle}>
-              {cardTitle}
-            </h3>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <h3 className="t-card truncate" title={cardTitle}>
+                {cardTitle}
+              </h3>
+              {/* Beside the name, not below it: "who can see this" belongs to
+                  the chart's identity, and a reader scanning a board should
+                  not have to look in a second place for it. */}
+              {publishedChart ? <PublishedBadge chart={publishedChart} /> : null}
+            </div>
             {/* The query underneath, so a card still says where its data came
                 from once the heading stops saying so. */}
             {cardTitle !== query.name ? (
@@ -219,6 +237,7 @@ export function ChartCard({
               query={query}
               chartId={chartId}
               currentChartType={chartType}
+              isPublished={publishedChart?.is_public ?? false}
               onMutated={() => {
                 // Re-poll immediately so a new chart type is drawn now rather
                 // than at the end of this card's interval.

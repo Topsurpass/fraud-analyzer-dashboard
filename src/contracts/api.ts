@@ -166,6 +166,11 @@ export interface QueryChart {
 	series_field: string | null;
 	/** Null means "follow the app-wide default", not "never flag anything". */
 	surge_threshold_pct: number | null;
+	/** Readable by every signed-in user, not just the owner. */
+	is_public: boolean;
+	/** Who published it, and therefore who may retract it. An admin always may. */
+	published_by: string | null;
+	published_at: string | null;
 	created_at: string;
 	updated_at: string;
 }

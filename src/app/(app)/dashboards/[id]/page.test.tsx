@@ -70,6 +70,9 @@ const chart = (id: string, queryId = id) => ({
   y_field: null,
   series_field: null,
   surge_threshold_pct: null,
+  is_public: false,
+  published_by: null,
+  published_at: null,
   created_at: "2026-08-23T09:00:00",
   updated_at: "2026-08-23T09:00:00",
 });

@@ -8,8 +8,10 @@ import {
   ApiError,
   deleteQuery,
   getQueryCharts,
+  publishChart,
   putQueryCharts,
   runQuery,
+  unpublishChart,
 } from "@/services/api-client";
 import { invalidateCoalesced } from "@/services/polling/coalesce";
 import { useDashboards } from "@/services/dashboards";
@@ -47,6 +49,8 @@ export interface CardMenuProps {
   chartId?: string | null;
   /** What that chart is currently drawn as, for the checked state. */
   currentChartType?: ChartType;
+  /** Whether this chart is shared with the team, for the publish toggle. */
+  isPublished?: boolean;
   /** Called after the query is changed on the engine. */
   onMutated?: () => void;
   /** Called after the query is deleted. */
@@ -55,7 +59,15 @@ export interface CardMenuProps {
   extra?: React.ReactNode;
 }
 
-export function CardMenu({ query, chartId, currentChartType, onMutated, onDeleted, extra }: CardMenuProps) {
+export function CardMenu({
+  query,
+  chartId,
+  currentChartType,
+  isPublished,
+  onMutated,
+  onDeleted,
+  extra,
+}: CardMenuProps) {
   return (
     <Popover
       label={`Actions for ${query.name}`}
@@ -67,6 +79,7 @@ export function CardMenu({ query, chartId, currentChartType, onMutated, onDelete
       <CardMenuPanel
         query={query}
         chartId={chartId}
+        isPublished={isPublished}
         currentChartType={currentChartType}
         onMutated={onMutated}
         onDeleted={onDeleted}
@@ -80,10 +93,18 @@ export function CardMenu({ query, chartId, currentChartType, onMutated, onDelete
  * Split from the trigger so everything here sits *inside* the popover and can
  * therefore reach `usePopoverClose`.
  */
-function CardMenuPanel({ query, chartId, currentChartType, onMutated, onDeleted, extra }: CardMenuProps) {
+function CardMenuPanel({
+  query,
+  chartId,
+  currentChartType,
+  isPublished = false,
+  onMutated,
+  onDeleted,
+  extra,
+}: CardMenuProps) {
   const close = usePopoverClose();
   const { reload: reloadDashboards } = useDashboards();
-  const [busy, setBusy] = useState<null | "chart" | "run" | "delete">(null);
+  const [busy, setBusy] = useState<null | "chart" | "run" | "delete" | "publish">(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -175,6 +196,34 @@ function CardMenuPanel({ query, chartId, currentChartType, onMutated, onDeleted,
    * a half-finished delete confirmation cannot be waiting the next time it
    * opens.
    */
+  /**
+   * Publish or retract this chart.
+   *
+   * Publishing freezes the query behind it, which is the part a person is most
+   * likely to be surprised by, so the button says so before the click rather
+   * than letting them discover it the next time they try to edit the SQL.
+   */
+  const togglePublished = async () => {
+    if (!chartId) return;
+    setBusy("publish");
+    setError(null);
+    let ok = false;
+    try {
+      if (isPublished) await unpublishChart(chartId);
+      else await publishChart(chartId);
+      invalidateCoalesced(query.id);
+      onMutated?.();
+      ok = true;
+    } catch (cause) {
+      // The engine refuses an analyst unpublishing what an admin published,
+      // and that message explains the rule better than anything generic here.
+      fail(cause, isPublished ? "Could not unpublish" : "Could not publish");
+    } finally {
+      setBusy(null);
+    }
+    if (ok) close();
+  };
+
   return (
     <>
         <p className="px-2.5 pt-1 pb-1.5 text-[10px] tracking-widest text-muted uppercase">
@@ -210,6 +259,18 @@ function CardMenuPanel({ query, chartId, currentChartType, onMutated, onDeleted,
           <MenuButton onClick={run} disabled={busy !== null} keepOpen>
             {busy === "run" ? "Running…" : "Run now"}
           </MenuButton>
+
+          {chartId ? (
+            <MenuButton onClick={togglePublished} disabled={busy !== null} keepOpen>
+              {busy === "publish"
+                ? isPublished
+                  ? "Unpublishing…"
+                  : "Publishing…"
+                : isPublished
+                  ? "Unpublish (unfreezes the query)"
+                  : "Publish to the team (freezes the query)"}
+            </MenuButton>
+          ) : null}
 
           <Link
             href={`/queries/${query.id}`}
