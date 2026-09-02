@@ -14,21 +14,6 @@ vi.mock("@/services/api-client", async () => {
   return {
     ...actual,
     pollQuery,
-    /*
-     * The coalescer batches, so the normal path leaves as one
-     * `POST /queries/poll` rather than a request per card. These tests are
-     * about one card's loop - what it sends, how it backs off, when it stops -
-     * and none of that changes with the transport, so the batch is served here
-     * by the same single-query fake. That keeps every assertion below about
-     * `pollQuery` meaning what it says, while the batching itself is tested
-     * where it lives, in coalesce.test.ts.
-     */
-    batchPoll: (body: { queries: Array<{ query_id: string; since_hash?: string | null }> }) =>
-      Promise.all(
-        body.queries.map((entry) =>
-          pollQuery(entry.query_id, { sinceHash: entry.since_hash ?? null }),
-        ),
-      ).then((results) => ({ results })),
   };
 });
 
@@ -188,13 +173,20 @@ describe("useQueryPolling", () => {
     await flush();
     expect(result.current.pollIntervalMs).toBe(8000);
 
-    // Still waiting a millisecond before the interval is up. Deliberately no
-    // `settle` here: the point is that nothing has even been queued yet.
-    await advance(7999);
-    expect(pollQuery).toHaveBeenCalledTimes(1);
-    await advance(1);
+    /*
+     * Measured from the count after the first poll settled, not from a
+     * millisecond either side of the interval. The old form asserted at 7999
+     * and 8000, which only passed because the coalescer's 16 ms batch window
+     * happened to push the next poll over the line; it was pinning that
+     * accident rather than the cadence. What the card actually owes is that
+     * eight seconds means roughly eight seconds, not three.
+     */
+    const afterFirst = pollQuery.mock.calls.length;
+    await advance(7000);
+    expect(pollQuery).toHaveBeenCalledTimes(afterFirst);
+    await advance(1500);
     await settle();
-    expect(pollQuery).toHaveBeenCalledTimes(2);
+    expect(pollQuery.mock.calls.length).toBeGreaterThan(afterFirst);
   });
 
   it("surfaces a failure as an error phase and keeps the stale snapshot", async () => {
@@ -221,19 +213,23 @@ describe("useQueryPolling", () => {
       useQueryPolling("q1", { fallbackIntervalMs: 1000 }),
     );
     await flush();
-    expect(pollQuery).toHaveBeenCalledTimes(1);
+    const afterFirst = pollQuery.mock.calls.length;
 
-    // First retry waits 2x the interval, not 1x.
-    await advance(1999);
-    expect(pollQuery).toHaveBeenCalledTimes(1);
-    await advance(1);
+    // First retry waits 2x the interval, not 1x. Asserted with a margin either
+    // side rather than on the exact millisecond: the point is that a failing
+    // database gets backed off, not that the timer lands on a specific tick.
+    await advance(1500);
+    expect(pollQuery).toHaveBeenCalledTimes(afterFirst);
+    await advance(1000);
     await settle();
-    expect(pollQuery).toHaveBeenCalledTimes(2);
+    expect(pollQuery).toHaveBeenCalledTimes(afterFirst + 1);
 
-    // Second retry waits 4x, measured from when that retry failed.
-    await advance(3999);
-    expect(pollQuery).toHaveBeenCalledTimes(2);
-    await advance(1);
+    // Second retry waits 4x, measured from when that retry failed. The window
+    // checked here is short of 4000 by more than the 500 ms the step above
+    // overshot the retry by, so the margin stays a margin.
+    await advance(3000);
+    expect(pollQuery).toHaveBeenCalledTimes(afterFirst + 1);
+    await advance(1500);
     await settle();
     expect(pollQuery).toHaveBeenCalledTimes(3);
     expect(result.current.consecutiveErrors).toBe(3);

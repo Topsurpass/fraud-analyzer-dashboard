@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { HeatCell, HeatmapData } from "@/services/charts/shape";
+import { memo, useCallback, useState } from "react";
+import type { HeatCell, HeatRow, HeatmapData } from "@/services/charts/shape";
 import { formatAxisValue } from "@/services/format";
 import { ChartEmpty } from "./ChartEmpty";
 import { ALERT_COLOR, seriesColor } from "./theme";
@@ -44,17 +44,105 @@ function alpha(intensity: number): number {
   return MIN_ALPHA + Math.sqrt(Math.max(0, Math.min(1, intensity))) * (1 - MIN_ALPHA);
 }
 
+/**
+ * Fill for one cell, cached by quantised intensity.
+ *
+ * A full grid is 40 x 96 cells, so this used to build 3,840 `color-mix`
+ * strings on every render. 64 steps is finer than the eye resolves in a tint
+ * and collapses those to at most 65 distinct strings, which the browser then
+ * gets to parse 65 times instead of 3,840.
+ */
+const SWATCH_STEPS = 64;
+const swatches = new Map<number, string>();
+
+function swatch(intensity: number): string {
+  const step = Math.round(Math.max(0, Math.min(1, intensity)) * SWATCH_STEPS);
+  let colour = swatches.get(step);
+  if (colour === undefined) {
+    colour = `color-mix(in srgb, ${BASE_COLOR} ${(alpha(step / SWATCH_STEPS) * 100).toFixed(2)}%, transparent)`;
+    swatches.set(step, colour);
+  }
+  return colour;
+}
+
+function cellLabel(cell: HeatCell): string {
+  return cell.value === null ? "no rows" : formatAxisValue(cell.value);
+}
+
+/**
+ * One category's row of swatches.
+ *
+ * Memoised, and that is the whole point of it being a component. Hover state
+ * lives in the parent so the readout line can show it, and without this every
+ * pointer move re-rendered all 3,840 cells to change one line of text. The row
+ * objects are stable for as long as the shaped data is, so a hover now
+ * re-renders the readout and nothing else.
+ */
+const HeatmapRow = memo(function HeatmapRow({
+  row,
+  onHover,
+}: {
+  row: HeatRow;
+  onHover: (category: string, cell: HeatCell | null) => void;
+}) {
+  return (
+    <tr>
+      <th
+        scope="row"
+        className="sticky left-0 z-10 max-w-[9rem] truncate bg-raised pr-2 text-right text-[11px] font-normal text-muted"
+        title={row.category}
+      >
+        {row.category}
+      </th>
+      {row.cells.map((cell) => (
+        <td key={cell.bucket} className="p-[1px]">
+          <div
+            // A div inside the cell, not the cell itself: a td with a
+            // height and a border collapses differently across
+            // browsers, and this keeps every swatch the same size.
+            className="h-4 w-full min-w-[8px]"
+            style={{
+              backgroundColor: cell.value === null ? "transparent" : swatch(cell.intensity),
+              outline: cell.alert ? `1.5px solid ${ALERT_COLOR}` : undefined,
+              outlineOffset: "-1.5px",
+            }}
+            onMouseEnter={() => onHover(row.category, cell)}
+            onMouseLeave={() => onHover(row.category, null)}
+            title={`${row.category} · ${cell.bucket} · ${cellLabel(cell)}`}
+          >
+            {/*
+             * The value as text, not only as a colour and a `title`.
+             * A title attribute is announced inconsistently and never
+             * reachable by keyboard, so without this the grid carries
+             * no data at all for a screen reader.
+             */}
+            <span className="sr-only">
+              {cellLabel(cell)}
+              {cell.alert ? ", flagged" : ""}
+            </span>
+          </div>
+        </td>
+      ))}
+    </tr>
+  );
+});
+
 export function HeatmapView({ data, title }: HeatmapViewProps) {
   const [hover, setHover] = useState<{ row: string; cell: HeatCell } | null>(null);
+
+  // Stable, so the memoised rows above actually bail out on a hover.
+  const onHover = useCallback((category: string, cell: HeatCell | null) => {
+    setHover(cell === null ? null : { row: category, cell });
+  }, []);
 
   if (data.rows.length === 0) {
     return <ChartEmpty label={data.warnings[0] ?? "No rows in range"} />;
   }
 
   const readout = hover
-    ? `${hover.row} · ${hover.cell.bucket} · ${
-        hover.cell.value === null ? "no rows" : formatAxisValue(hover.cell.value)
-      }${hover.cell.alert ? " · flagged" : ""}`
+    ? `${hover.row} · ${hover.cell.bucket} · ${cellLabel(hover.cell)}${
+        hover.cell.alert ? " · flagged" : ""
+      }`
     : null;
 
   return (
@@ -97,49 +185,7 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
           </thead>
           <tbody>
             {data.rows.map((row) => (
-              <tr key={row.category}>
-                <th
-                  scope="row"
-                  className="sticky left-0 z-10 max-w-[9rem] truncate bg-raised pr-2 text-right text-[11px] font-normal text-muted"
-                  title={row.category}
-                >
-                  {row.category}
-                </th>
-                {row.cells.map((cell) => (
-                  <td key={cell.bucket} className="p-[1px]">
-                    <div
-                      // A div inside the cell, not the cell itself: a td with a
-                      // height and a border collapses differently across
-                      // browsers, and this keeps every swatch the same size.
-                      className="h-4 w-full min-w-[8px]"
-                      style={{
-                        backgroundColor:
-                          cell.value === null
-                            ? "transparent"
-                            : `color-mix(in srgb, ${BASE_COLOR} ${alpha(cell.intensity) * 100}%, transparent)`,
-                        outline: cell.alert ? `1.5px solid ${ALERT_COLOR}` : undefined,
-                        outlineOffset: "-1.5px",
-                      }}
-                      onMouseEnter={() => setHover({ row: row.category, cell })}
-                      onMouseLeave={() => setHover(null)}
-                      title={`${row.category} · ${cell.bucket} · ${
-                        cell.value === null ? "no rows" : formatAxisValue(cell.value)
-                      }`}
-                    >
-                      {/*
-                       * The value as text, not only as a colour and a `title`.
-                       * A title attribute is announced inconsistently and never
-                       * reachable by keyboard, so without this the grid carries
-                       * no data at all for a screen reader.
-                       */}
-                      <span className="sr-only">
-                        {cell.value === null ? "no rows" : formatAxisValue(cell.value)}
-                        {cell.alert ? ", flagged" : ""}
-                      </span>
-                    </div>
-                  </td>
-                ))}
-              </tr>
+              <HeatmapRow key={row.category} row={row} onHover={onHover} />
             ))}
           </tbody>
         </table>

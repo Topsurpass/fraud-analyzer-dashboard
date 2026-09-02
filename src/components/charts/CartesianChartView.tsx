@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -23,6 +23,7 @@ import { ChartTooltip, type TooltipEntry } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
 import {
   ALERT_COLOR,
+  ANIMATION_MARK_BUDGET,
   AXIS_TICK,
   CHART_MARGIN,
   CURSOR_STROKE,
@@ -68,7 +69,10 @@ interface AlertDotProps {
  * design brief forbids.
  */
 function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) {
-  if (cx === undefined || cy === undefined) return <g />;
+  // `null`, not `<g />`. Recharts calls this once per point per series, so an
+  // empty group for an unmarked point is a real DOM node per point - 900 of
+  // them on a full plot, all of them invisible.
+  if (cx === undefined || cy === undefined) return null;
 
   const flagged = typeof dataKey === "string" && payload?.__alert?.[dataKey] === true;
 
@@ -83,12 +87,33 @@ function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) 
 
   if (showAll) return <circle cx={cx} cy={cy} r={2.5} fill={stroke ?? "currentColor"} />;
 
-  return <g />;
+  return null;
 }
 
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
   const reducedMotion = useReducedMotion();
   const [activeSeries, setActiveSeries] = useState<string | null>(null);
+
+  /*
+   * Which series carry a flagged point, in one pass over the plot rather than
+   * one pass per series.
+   *
+   * It answers two questions at once, and the second is the expensive one: a
+   * series with no flagged point needs no dot layer and no per-bar cell at all,
+   * and skipping those is the difference between 900 invisible SVG nodes per
+   * line and none.
+   */
+  const alerted = useMemo(() => {
+    const keys = new Set<string>();
+    for (const point of data.data) {
+      const mask = point.__alert;
+      if (!mask) continue;
+      for (const key of Object.keys(mask)) {
+        if (mask[key]) keys.add(key);
+      }
+    }
+    return keys;
+  }, [data.data]);
 
   // A series key is already unique here - the pivot dedupes them - so it is
   // both the identity and the label. The two are separate in the legend's
@@ -97,7 +122,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
     id: key,
     label: key,
     color: seriesColor(index),
-    alert: data.data.some((point) => point.__alert?.[key] === true),
+    alert: alerted.has(key),
   }));
 
   // One hatch pattern per series colour actually on this chart.
@@ -105,6 +130,12 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
 
   // Axes over an empty plot look like a failure. Say what actually happened.
   if (data.data.length === 0) return <ChartEmpty />;
+
+  // A single-point series has no segment to draw, so its points are rendered
+  // explicitly rather than leaving an empty plot.
+  const showAllDots = data.data.length < 2;
+  const animate =
+    !reducedMotion && data.data.length * data.seriesKeys.length <= ANIMATION_MARK_BUDGET;
 
   const renderTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (!active || !payload?.length) return null;
@@ -192,11 +223,12 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                   stroke={seriesColor(index)}
                   strokeWidth={2}
                   strokeOpacity={opacityFor(key)}
-                  // A single-point series has no segment to draw, so its points
-                  // are rendered explicitly rather than leaving an empty plot.
-                  dot={<AlertDot showAll={data.data.length < 2} />}
+                  // `false`, not a component, when this series has nothing to
+                  // mark: recharts skips the dot layer entirely rather than
+                  // calling a renderer 900 times to be told "draw nothing".
+                  dot={showAllDots || alerted.has(key) ? <AlertDot showAll={showAllDots} /> : false}
                   activeDot={{ r: 3.5, strokeWidth: 0 }}
-                  isAnimationActive={!reducedMotion}
+                  isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
                   connectNulls
                 />
@@ -212,7 +244,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                   dataKey={key}
                   fill={seriesColor(index)}
                   fillOpacity={opacityFor(key)}
-                  isAnimationActive={!reducedMotion}
+                  isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
                   radius={[2, 2, 0, 0]}
                 >
@@ -220,18 +252,25 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                    * A flagged bar keeps its series colour and takes the hatch
                    * plus an alert outline. Repainting it solid alert would make
                    * two flagged bars from different series identical.
+                   *
+                   * Emitted only for a series that actually has a flagged bar.
+                   * A Cell is a React element per bar, so an unflagged series
+                   * was paying 900 elements to restate the fill the Bar already
+                   * carries.
                    */}
-                  {data.data.map((point, pointIndex) => {
-                    const flagged = point.__alert?.[key] === true;
-                    return (
-                      <Cell
-                        key={pointIndex}
-                        fill={hatch.fill(seriesColor(index), flagged)}
-                        stroke={flagged ? ALERT_COLOR : undefined}
-                        strokeWidth={flagged ? 1 : 0}
-                      />
-                    );
-                  })}
+                  {alerted.has(key)
+                    ? data.data.map((point, pointIndex) => {
+                        const flagged = point.__alert?.[key] === true;
+                        return (
+                          <Cell
+                            key={pointIndex}
+                            fill={hatch.fill(seriesColor(index), flagged)}
+                            stroke={flagged ? ALERT_COLOR : undefined}
+                            strokeWidth={flagged ? 1 : 0}
+                          />
+                        );
+                      })
+                    : null}
                 </Bar>
               ))}
             </BarChart>

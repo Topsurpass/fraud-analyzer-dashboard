@@ -54,4 +54,16 @@ export const ALERT_COLOR = "var(--signal-alert)";
 /** Short enough that the panel still feels fast, per the brief. */
 export const DATA_TWEEN_MS = 360;
 
+/**
+ * Marks past which the entry tween is dropped.
+ *
+ * Recharts animates a bar chart per rectangle, so the tween is one interpolated
+ * style write per mark per frame: at 900 points across five series that is
+ * 4,500 writes a frame for an effect nobody can follow. The information the
+ * animation carries - "this data just changed" - is already on the card's pulse
+ * line and its change chip, so dropping it above this budget costs the reader
+ * nothing.
+ */
+export const ANIMATION_MARK_BUDGET = 400;
+
 export const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: 0 } as const;

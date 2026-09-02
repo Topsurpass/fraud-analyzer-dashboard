@@ -7,6 +7,26 @@ import { ApiError } from "@/services/api-client";
 import { ChartCard } from "./ChartCard";
 
 const pollQuery = vi.hoisted(() => vi.fn());
+const shapeCalls = vi.hoisted(() => vi.fn());
+
+/*
+ * The real shaping, counted. Shaping is the expensive half of a card at
+ * 25,000 rows, and the property under test below is that it does not happen
+ * again when the engine hands back the same data - which has no user-visible
+ * proxy to assert on instead.
+ */
+vi.mock("@/services/charts/shape", async () => {
+  const actual = await vi.importActual<typeof import("@/services/charts/shape")>(
+    "@/services/charts/shape",
+  );
+  return {
+    ...actual,
+    buildNumber: (...args: Parameters<typeof actual.buildNumber>) => {
+      shapeCalls();
+      return actual.buildNumber(...args);
+    },
+  };
+});
 
 vi.mock("@/services/dashboards", () => ({
   useDashboards: () => ({ reload: vi.fn() }),
@@ -90,6 +110,7 @@ async function settle() {
 
 beforeEach(() => {
   pollQuery.mockReset();
+  shapeCalls.mockReset();
 });
 
 afterEach(() => {
@@ -157,6 +178,49 @@ describe("ChartCard", () => {
       await vi.advanceTimersByTimeAsync(20);
     });
     expect(screen.queryByText("changed")).not.toBeInTheDocument();
+  });
+
+  it("re-shapes when the data moves and not when the payload merely repeats", async () => {
+    /*
+     * A forced refresh - the retry button, a chart-type change - answers with
+     * the whole result again under the same `data_hash`: a new object holding
+     * identical rows. Keyed on the object, every one of those clicks re-shaped
+     * 25,000 rows on every card of the board; keyed on the hash, the work
+     * happens when the data moved and not otherwise.
+     */
+    vi.useFakeTimers();
+    pollQuery
+      .mockResolvedValueOnce(changed("aaa", 20))
+      // Same hash, a different object each time, exactly as a forced refresh
+      // or a cache-served answer arrives.
+      .mockResolvedValueOnce(changed("aaa", 20))
+      .mockResolvedValue(changed("bbb", 55));
+
+    render(<ChartCard query={query} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+      await Promise.resolve();
+    });
+    const afterFirst = shapeCalls.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(screen.getByText("20")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(shapeCalls.mock.calls.length).toBe(afterFirst);
+    expect(screen.getByText("20")).toBeInTheDocument();
+
+    // A genuinely new hash still gets shaped, or the card would go stale.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(shapeCalls.mock.calls.length).toBeGreaterThan(afterFirst);
+    // The hash readout, not the big number: that one counts up to its new
+    // value over 500 real milliseconds, which fake timers never deliver.
+    expect(screen.getByText("bbb")).toBeInTheDocument();
   });
 
   it("never fails silently: a first-poll failure shows the reason and a retry", async () => {

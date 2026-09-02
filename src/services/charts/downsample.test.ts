@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_PLOT_POINTS,
+  downsampleIndicesPreservingAlerts,
   downsampleLTTB,
   downsamplePreservingAlerts,
 } from "./downsample";
@@ -127,5 +128,74 @@ describe("downsamplePreservingAlerts", () => {
   it("leaves a small series untouched", () => {
     const points = flat(20);
     expect(downsamplePreservingAlerts(points, 900, valueOf, isAlert)).toBe(points);
+  });
+});
+
+describe("downsampleIndicesPreservingAlerts", () => {
+  const valueAt = (points: Point[]) => (index: number) => points[index].y;
+  const alertAt = (points: Point[]) => (index: number) => points[index].alert === true;
+
+  it("returns null rather than every index when the series already fits", () => {
+    // Null is what lets a caller skip rebuilding an array it will use whole.
+    const points = flat(50);
+    expect(
+      downsampleIndicesPreservingAlerts(points.length, valueAt(points), alertAt(points), 900),
+    ).toBeNull();
+  });
+
+  it("hands back ascending indices inside the threshold", () => {
+    const points = flat(10_000);
+    for (const index of [11, 5_555, 9_999]) points[index] = { x: index, y: 3, alert: true };
+
+    const kept = downsampleIndicesPreservingAlerts(
+      points.length,
+      valueAt(points),
+      alertAt(points),
+      500,
+    );
+
+    expect(kept).not.toBeNull();
+    expect(kept!.length).toBeLessThanOrEqual(500);
+    expect([...kept!].sort((a, b) => a - b)).toEqual(kept);
+    for (const index of [11, 5_555, 9_999]) expect(kept).toContain(index);
+  });
+
+  it("holds the threshold on a series of repeated values", () => {
+    /*
+     * The object-shaped version deduped through a Set of the points
+     * themselves, so a series of primitives collapsed to its set of distinct
+     * values: a flat run of 5,000 sevens matched `chosen.has(7)` at every
+     * position and the "downsampled" series came back 5,000 long - the bound
+     * this whole module exists to enforce, silently gone. Indices are unique by
+     * construction, so the bound holds whatever the values are.
+     */
+    const values = new Array<number>(5_000).fill(7);
+    values[2_500] = 99;
+
+    const kept = downsampleIndicesPreservingAlerts(
+      values.length,
+      (index) => values[index],
+      (index) => index === 2_500,
+      300,
+    );
+
+    expect(kept).not.toBeNull();
+    expect(kept!.length).toBeLessThanOrEqual(300);
+    expect(new Set(kept!).size).toBe(kept!.length);
+    expect(kept).toContain(2_500);
+  });
+
+  it("holds the threshold through the point-shaped wrapper too", () => {
+    const values = new Array<number>(5_000).fill(7);
+    values[2_500] = 99;
+
+    const kept = downsamplePreservingAlerts(
+      values,
+      300,
+      (value) => value,
+      () => false,
+    );
+
+    expect(kept.length).toBeLessThanOrEqual(300);
   });
 });

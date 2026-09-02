@@ -45,10 +45,25 @@ export interface RowAnomalyResult {
   severities: (FlagSeverity | null)[];
 }
 
+/**
+ * One frozen array shared by every unflagged row.
+ *
+ * `Array.from({ length: 25_000 }, () => [])` allocates twenty-five thousand
+ * distinct empty arrays, and at 25,000 rows across a board of ten cards that
+ * was the single largest cost in shaping - roughly 13ms per card for arrays
+ * whose entire contents are "nothing matched".
+ *
+ * Sharing is safe because nothing mutates a row's entry: the only writer,
+ * `maskFromFlagOutcome`, *assigns* a fresh array at the flagged index, and
+ * every reader (`TableView`, `ruleSummary`) only iterates. Frozen so that stops
+ * being a convention and starts being enforced.
+ */
+const NO_RULES: string[] = Object.freeze([]) as unknown as string[];
+
 function unlabelled(count: number): Pick<RowAnomalyResult, "ruleNames" | "severities"> {
   return {
-    ruleNames: Array.from({ length: count }, () => [] as string[]),
-    severities: Array.from({ length: count }, () => null as FlagSeverity | null),
+    ruleNames: new Array<string[]>(count).fill(NO_RULES),
+    severities: new Array<FlagSeverity | null>(count).fill(null),
   };
 }
 
@@ -76,7 +91,7 @@ export function maskFromFlagOutcome(
   outcome: FlagOutcome,
   rowCount: number,
 ): RowAnomalyResult {
-  const mask = Array.from({ length: rowCount }, () => false);
+  const mask = new Array<boolean>(rowCount).fill(false);
   const { ruleNames, severities } = unlabelled(rowCount);
   const ruleById = new Map(outcome.rules.map((rule) => [rule.id, rule]));
 
@@ -119,7 +134,9 @@ export function detectRowAnomalies(input: RowAnomalyInput): RowAnomalyResult {
   }
 
   return {
-    flags: rows.map(() => false),
+    // `fill` rather than `rows.map`: the callback form walks the row array and
+    // allocates a closure frame per row for an answer that never varies.
+    flags: new Array<boolean>(rows.length).fill(false),
     reason: "none",
     source: null,
     ...unlabelled(rows.length),

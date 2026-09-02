@@ -17,7 +17,13 @@ import {
   judgeChange,
   resolveThreshold,
 } from "./severity";
-import { MAX_PLOT_POINTS, downsamplePreservingAlerts } from "./downsample";
+import {
+  MAX_PLOT_POINTS,
+  MAX_PLOT_SERIES,
+  OTHER_SERIES_LABEL,
+  downsampleIndicesPreservingAlerts,
+  downsamplePreservingAlerts,
+} from "./downsample";
 
 export interface ResultSet {
   columns: string[];
@@ -188,6 +194,86 @@ export const EMPTY_CARTESIAN: CartesianData = {
  * long form (one row per x/series pair) and have to be pivoted to the wide form
  * Recharts expects (one object per x, one key per series).
  */
+/**
+ * Fold every series past the palette into one bucket, in place.
+ *
+ * Points are mutated rather than rebuilt because they were created a few lines
+ * above and nothing else has seen them yet, and rebuilding 625 objects to
+ * change four keys is work with no reader.
+ *
+ * The kept series stay in first-seen order rather than being re-ranked by
+ * volume. Colour comes from position, and this chart re-polls every few
+ * seconds: ranking would let two terminals swap colours mid-shift because one
+ * overtook the other, which is a worse lie than an arbitrary but stable order.
+ */
+function foldSeriesTail(
+  points: ChartPoint[],
+  xKey: string,
+  seriesKeys: string[],
+  totals: Map<string, number>,
+): { seriesKeys: string[]; label: string; folded: number } {
+  const ranked = [...seriesKeys].sort(
+    (a, b) => Math.abs(totals.get(b) ?? 0) - Math.abs(totals.get(a) ?? 0),
+  );
+  const kept = new Set(ranked.slice(0, MAX_PLOT_SERIES - 1));
+  const tail = ranked.slice(MAX_PLOT_SERIES - 1);
+
+  // A series genuinely called "Other" must not be silently swallowed by the
+  // bucket named after it, so the label is nudged until it is free.
+  let label = OTHER_SERIES_LABEL;
+  let suffix = 2;
+  while (seriesKeys.includes(label)) {
+    label = `${OTHER_SERIES_LABEL} (${suffix})`;
+    suffix += 1;
+  }
+
+  // Kept series in first-seen order rather than re-ranked by volume. Colour
+  // comes from position and this chart re-polls every few seconds: ranking
+  // would let two terminals swap colours mid-shift because one overtook the
+  // other, which is a worse lie than an arbitrary but stable order.
+  const keptOrder = seriesKeys.filter((name) => kept.has(name));
+
+  /*
+   * Each point is rebuilt rather than having its folded keys deleted. `delete`
+   * drops a V8 object out of its hidden class into dictionary mode, and at 625
+   * buckets against 36 folded terminals that is 22,500 of them - measurably
+   * more expensive than building 625 small objects from scratch.
+   */
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const mask = (point.__alert ?? {}) as Record<string, boolean>;
+
+    let sum = 0;
+    let present = false;
+    let alert = false;
+    for (const name of tail) {
+      const value = point[name];
+      if (typeof value === "number") {
+        sum += value;
+        present = true;
+      }
+      if (mask[name] === true) alert = true;
+    }
+
+    const nextMask: Record<string, boolean> = {};
+    const next: ChartPoint = { [xKey]: point[xKey] as Cell };
+    for (const name of keptOrder) {
+      const value = point[name];
+      if (value !== undefined) next[name] = value;
+      if (mask[name] === true) nextMask[name] = true;
+    }
+    // A bucket with no rows in any folded series stays absent rather than
+    // becoming a zero: the two mean different things on a line chart.
+    if (present) next[label] = sum;
+    if (alert) nextMask[label] = true;
+    next.__alert = nextMask;
+
+    points[index] = next;
+  }
+
+  return { seriesKeys: [...keptOrder, label], label, folded: tail.length };
+}
+
 export function buildCartesian(result: ResultSet): CartesianData {
   const { columns, rows } = result;
   const fields = resolveFields(result);
@@ -197,36 +283,70 @@ export function buildCartesian(result: ResultSet): CartesianData {
 
   const xIndex = columns.indexOf(fields.xKey);
   const yIndex = columns.indexOf(fields.yKey);
+  const warnings = [...fields.warnings];
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: fields.yKey,
+    flags: result.flags,
+  });
+  const flagged = anomalies.flags;
 
   if (!fields.seriesKey) {
-    const anomalies = detectRowAnomalies({ columns, rows, valueColumn: fields.yKey, flags: result.flags });
-    const full: ChartPoint[] = rows.map((row, index) => ({
-      [fields.xKey as string]: row[xIndex] ?? null,
-      [fields.yKey as string]: toNumber(row[yIndex]),
-      __alert: { [fields.yKey as string]: anomalies.flags[index] === true },
-    }));
+    const xKey = fields.xKey;
+    const yKey = fields.yKey;
 
-    // Recharts draws SVG, so every point is a DOM node. Ten thousand of them
-    // for a plot 900px wide is ten points per pixel column: slower and no more
-    // informative. Flagged points are exempt - a finding missing from the chart
-    // would disagree with the table beside it.
-    const yKey = fields.yKey as string;
-    const data = downsamplePreservingAlerts(
-      full,
+    /*
+     * Values first, chart objects second.
+     *
+     * Recharts draws SVG, so every point is a DOM node. Ten thousand of them
+     * for a plot 900px wide is ten points per pixel column: slower and no more
+     * informative. Choosing *which* points survive needs only the numbers, so
+     * the 25,000 objects this used to build and then discard are never built -
+     * only the 900 that get drawn. Flagged points are exempt from the thinning,
+     * because a finding missing from the chart would disagree with the table
+     * beside it.
+     */
+    const values = new Float64Array(rows.length);
+    for (let index = 0; index < rows.length; index += 1) {
+      values[index] = toNumber(rows[index][yIndex]);
+    }
+
+    const kept = downsampleIndicesPreservingAlerts(
+      rows.length,
+      (index) => values[index],
+      (index) => flagged[index] === true,
       MAX_PLOT_POINTS,
-      (point) => (typeof point[yKey] === "number" ? (point[yKey] as number) : Number.NaN),
-      (point) => (point.__alert as Record<string, boolean> | undefined)?.[yKey] === true,
-    ) as ChartPoint[];
+    );
+
+    const point = (index: number): ChartPoint => ({
+      [xKey]: rows[index][xIndex] ?? null,
+      [yKey]: values[index],
+      __alert: { [yKey]: flagged[index] === true },
+    });
+
+    const data: ChartPoint[] = kept
+      ? kept.map(point)
+      : rows.map((_row, index) => point(index));
+
+    let hasAlerts = false;
+    for (let index = 0; index < flagged.length; index += 1) {
+      if (flagged[index]) {
+        hasAlerts = true;
+        break;
+      }
+    }
 
     return {
       data,
-      seriesKeys: [fields.yKey],
-      xKey: fields.xKey,
-      yKey: fields.yKey,
-      warnings: fields.warnings,
-      hasAlerts: anomalies.flags.some(Boolean),
-      alertReason: anomalies.flags.some(Boolean) ? anomalies.reason : "none",
-      alertSource: anomalies.flags.some(Boolean) ? anomalies.source : null,
+      seriesKeys: [yKey],
+      xKey,
+      yKey,
+      warnings,
+      hasAlerts,
+      alertReason: hasAlerts ? anomalies.reason : "none",
+      alertSource: hasAlerts ? anomalies.source : null,
     };
   }
 
@@ -234,53 +354,69 @@ export function buildCartesian(result: ResultSet): CartesianData {
   const seriesIndex = columns.indexOf(fields.seriesKey);
   const byX = new Map<string, ChartPoint>();
   const seriesKeys: string[] = [];
-  const seriesValues = new Map<string, number[]>();
+  // Doubles as the first-seen register and the ranking the fold below needs.
+  const seriesTotals = new Map<string, number>();
 
-  // The same outcome the single-series branch uses. This path used to ignore
-  // flag rules entirely and run its own outlier test per series, so a chart
-  // with a series field showed guesses instead of what the analyst wrote.
-  const anomalies = detectRowAnomalies({
-    columns,
-    rows,
-    valueColumn: fields.yKey,
-    flags: result.flags,
-  });
   let hasAlerts = false;
 
-  for (const [rowIndex, row] of rows.entries()) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
     const xRaw = row[xIndex] ?? null;
     const xLabel = String(xRaw);
     const seriesName = String(row[seriesIndex] ?? "unknown");
     const value = toNumber(row[yIndex]);
 
-    if (!byX.has(xLabel)) {
-      byX.set(xLabel, { [fields.xKey]: xRaw, __alert: {} });
+    let point = byX.get(xLabel);
+    if (!point) {
+      point = { [fields.xKey]: xRaw, __alert: {} };
+      byX.set(xLabel, point);
     }
-    if (anomalies.flags[rowIndex] === true) {
+    if (flagged[rowIndex] === true) {
       // A flagged row marks its own cell. Rows are summed into a cell, so one
       // flagged row among several is enough to mark it: the alert says "there
       // is something here to look at", not "every contribution matched".
       hasAlerts = true;
-      (byX.get(xLabel) as ChartPoint).__alert![seriesName] = true;
+      point.__alert![seriesName] = true;
     }
     // Repeated x/series pairs are summed: the analyst asked for a grouping the
     // SQL did not fully collapse, and dropping rows would understate volume.
-    const point = byX.get(xLabel) as ChartPoint;
     const previous = typeof point[seriesName] === "number" ? (point[seriesName] as number) : 0;
-    point[seriesName] = Number.isFinite(value) ? previous + value : previous;
+    const finite = Number.isFinite(value);
+    point[seriesName] = finite ? previous + value : previous;
 
-    if (!seriesValues.has(seriesName)) {
+    const total = seriesTotals.get(seriesName);
+    if (total === undefined) {
       seriesKeys.push(seriesName);
-      seriesValues.set(seriesName, []);
+      seriesTotals.set(seriesName, finite ? value : 0);
+    } else if (finite) {
+      seriesTotals.set(seriesName, total + value);
     }
   }
 
   const pivoted = [...byX.values()];
 
+  /*
+   * Bound the series count, not only the point count.
+   *
+   * Forty terminals on one plot is forty marks at every x position - 25,000
+   * SVG nodes for a 900px plot - and `seriesColor` clamps past the fifth
+   * colour, so thirty-six of those lines are drawn in the same green and no
+   * reader can tell them apart. Folding the tail is what the pie already does
+   * with its wedges, for the same reason.
+   */
+  let plottedSeries = seriesKeys;
+  if (seriesKeys.length > MAX_PLOT_SERIES) {
+    const fold = foldSeriesTail(pivoted, fields.xKey, seriesKeys, seriesTotals);
+    plottedSeries = fold.seriesKeys;
+    warnings.push(
+      `Summed ${fold.folded} of ${seriesKeys.length} series into "${fold.label}": the palette holds ${MAX_PLOT_SERIES}.`,
+    );
+  }
+
   // Same reasoning as the single-series branch. A pivoted point carries one
   // value per series, so "the" value for shape purposes is the first series -
   // enough to place the point, while any alert on any series keeps it.
-  const primary = seriesKeys[0];
+  const primary = plottedSeries[0];
   const data = primary
     ? (downsamplePreservingAlerts(
         pivoted,
@@ -293,10 +429,10 @@ export function buildCartesian(result: ResultSet): CartesianData {
 
   return {
     data,
-    seriesKeys,
+    seriesKeys: plottedSeries,
     xKey: fields.xKey,
     yKey: fields.yKey,
-    warnings: fields.warnings,
+    warnings,
     hasAlerts,
     alertReason: hasAlerts ? anomalies.reason : "none",
     alertSource: hasAlerts ? anomalies.source : null,
@@ -418,6 +554,43 @@ export interface TableData {
   numericColumns: boolean[];
 }
 
+/**
+ * Which columns are numeric, in one pass over the rows instead of one pass per
+ * column.
+ *
+ * `columnIsNumeric` per column re-walks the whole result once for every numeric
+ * column that survives to the end - four full scans of 25,000 rows on a card
+ * result with four numeric columns. One pass reads each row object once and
+ * stops testing a column the moment it has seen a value that is not a number,
+ * so the work shrinks as the answer is decided.
+ */
+function numericColumnMask(rows: Row[], columnCount: number): boolean[] {
+  const numeric = new Array<boolean>(columnCount).fill(true);
+  const seen = new Array<number>(columnCount).fill(0);
+  let undecided = columnCount;
+
+  for (let rowIndex = 0; rowIndex < rows.length && undecided > 0; rowIndex += 1) {
+    const row = rows[rowIndex];
+    for (let column = 0; column < columnCount; column += 1) {
+      if (!numeric[column]) continue;
+      const cell = row[column];
+      if (cell === null || cell === undefined) continue;
+      if (!Number.isFinite(toNumber(cell))) {
+        numeric[column] = false;
+        undecided -= 1;
+        continue;
+      }
+      seen[column] += 1;
+    }
+  }
+
+  // A column of nothing but NULLs is not a column of numbers.
+  for (let column = 0; column < columnCount; column += 1) {
+    if (seen[column] === 0) numeric[column] = false;
+  }
+  return numeric;
+}
+
 export function buildTable(result: ResultSet): TableData {
   const { columns, rows } = result;
   const fields = resolveFields(result);
@@ -433,7 +606,7 @@ export function buildTable(result: ResultSet): TableData {
     alertRuleNames: anomalies.ruleNames,
     alertSeverities: anomalies.severities,
     // Right-align numeric columns; a column of figures is unreadable ragged.
-    numericColumns: columns.map((_, index) => columnIsNumeric(rows, index)),
+    numericColumns: numericColumnMask(rows, columns.length),
   };
 }
 
@@ -512,6 +685,31 @@ const EMPTY_COMPARE: CompareData = {
  * two lines describe different amounts of time and the gap between them
  * meaningless.
  */
+/**
+ * Positions in the thinned array for surges detected on the full one.
+ *
+ * Surges are found before thinning, because a jump from one bucket to the next
+ * is exactly the single-bucket event a downsampler is entitled to drop, and a
+ * chart that reports fewer threshold crossings when the window gets longer is
+ * lying. The thinning is told to keep every surge bucket, so this only ever
+ * drops one in the degenerate case where surges alone exceed the plot budget.
+ */
+function remapSurges(
+  surges: { index: number; verdict: ChangeVerdict }[],
+  kept: number[] | null,
+): { index: number; verdict: ChangeVerdict }[] {
+  if (kept === null) return surges;
+  const position = new Map<number, number>();
+  for (let i = 0; i < kept.length; i += 1) position.set(kept[i], i);
+
+  const remapped: { index: number; verdict: ChangeVerdict }[] = [];
+  for (const surge of surges) {
+    const index = position.get(surge.index);
+    if (index !== undefined) remapped.push({ index, verdict: surge.verdict });
+  }
+  return remapped;
+}
+
 export function buildCompare(result: ResultSet): CompareData {
   const { columns, rows } = result;
   const fields = resolveFields(result);
@@ -541,6 +739,7 @@ export function buildCompare(result: ResultSet): CompareData {
     valueColumn: fields.yKey,
     flags: result.flags,
   });
+  const flagged = anomalies.flags;
 
   const half = Math.floor(rows.length / 2);
   const offset = rows.length - half * 2;
@@ -550,78 +749,112 @@ export function buildCompare(result: ResultSet): CompareData {
     );
   }
 
-  const previousRows = rows.slice(offset, offset + half);
-  const currentRows = rows.slice(offset + half);
+  const previousStart = offset;
+  const currentStart = offset + half;
 
-  const points: ComparePoint[] = currentRows.map((row, index) => {
-    const current = toNumber(row[yIndex]);
-    const previous = toNumber(previousRows[index]?.[yIndex]);
-    const label = (cell: Cell | undefined) =>
-      cell === null || cell === undefined ? "" : String(cell);
-    return {
-      bucket: label(row[xIndex]),
-      previousBucket: label(previousRows[index]?.[xIndex]),
-      current: Number.isFinite(current) ? current : null,
-      previous: Number.isFinite(previous) ? previous : null,
-      delta:
-        Number.isFinite(current) && Number.isFinite(previous) ? current - previous : null,
-      alert: anomalies.flags[offset + half + index] === true,
-    };
-  });
+  const label = (cell: Cell | undefined) =>
+    cell === null || cell === undefined ? "" : String(cell);
 
-  const widest = points.reduce<ComparePoint | null>((worst, point) => {
-    if (point.delta === null) return worst;
-    if (worst === null || Math.abs(point.delta) > Math.abs(worst.delta as number)) {
-      return point;
+  /*
+   * Numbers first, points second.
+   *
+   * Totals, the widest gap and the surge scan all read values, and only the
+   * buckets that survive thinning are ever drawn - so a long window of fine
+   * buckets no longer builds 12,500 point objects to throw 11,600 of them
+   * away. Totals and the widest gap are still computed over every bucket:
+   * deriving the headline from the thinned set would make the number on the
+   * card depend on how many pixels were available, and the largest divergence
+   * is exactly the kind of single bucket a downsampler is entitled to drop.
+   */
+  const current = new Array<number | null>(half);
+  const previous = new Array<number | null>(half);
+  const alerts = new Array<boolean>(half);
+  let currentTotal = 0;
+  let previousTotal = 0;
+  let widestIndex = -1;
+  let widestDelta = 0;
+  let hasAlerts = false;
+
+  for (let index = 0; index < half; index += 1) {
+    const currentValue = toNumber(rows[currentStart + index]?.[yIndex]);
+    const previousValue = toNumber(rows[previousStart + index]?.[yIndex]);
+    const currentCell = Number.isFinite(currentValue) ? currentValue : null;
+    const previousCell = Number.isFinite(previousValue) ? previousValue : null;
+
+    current[index] = currentCell;
+    previous[index] = previousCell;
+    currentTotal += currentCell ?? 0;
+    previousTotal += previousCell ?? 0;
+
+    if (currentCell !== null && previousCell !== null) {
+      const delta = currentCell - previousCell;
+      if (widestIndex === -1 || Math.abs(delta) > Math.abs(widestDelta)) {
+        widestIndex = index;
+        widestDelta = delta;
+      }
     }
-    return worst;
-  }, null);
 
-  const sum = (values: (number | null)[]) =>
-    values.reduce<number>((total, value) => total + (value ?? 0), 0);
+    const alert = flagged[currentStart + index] === true;
+    alerts[index] = alert;
+    if (alert) hasAlerts = true;
+  }
 
-  // Totals and the widest gap are computed on every bucket, then the series is
-  // thinned only for plotting. Deriving the headline from the thinned set would
-  // make the number on the card depend on how many pixels were available, and
-  // the largest divergence is exactly the kind of single bucket a downsampler
-  // is entitled to drop.
-  const currentTotal = sum(points.map((point) => point.current));
-  const previousTotal = sum(points.map((point) => point.previous));
+  // Judged over the current window only: the two windows sit adjacent in the
+  // array and are a whole window apart in time, so a step across the join is
+  // not the "last bucket against this one" comparison it would look like.
+  const surges = bucketSurges(current, compareThreshold);
+  /*
+   * Pinning every threshold crossing is pointless once there are more of them
+   * than the plot can hold - the thinner drops back to plain LTTB in that case
+   * regardless - and a noisy window of 12,500 buckets can cross on nearly every
+   * one of them. So the set is only built when it can actually be honoured.
+   */
+  const pinned =
+    surges.length < MAX_PLOT_POINTS ? new Set(surges.map((surge) => surge.index)) : null;
 
-  const plotted = downsamplePreservingAlerts(
-    points,
-    MAX_PLOT_POINTS,
+  const kept = downsampleIndicesPreservingAlerts(
+    half,
     // Shape is judged on the current window: it is the subject of the chart,
     // and thinning against the previous line would preserve last hour's spikes
     // at the expense of this hour's.
-    (point) => point.current ?? point.previous ?? 0,
-    (point) => point.alert === true,
+    (index) => current[index] ?? previous[index] ?? 0,
+    (index) => alerts[index] || pinned?.has(index) === true,
+    MAX_PLOT_POINTS,
   );
 
-  if (plotted.length < points.length) {
-    warnings.push(
-      `Plotting ${plotted.length} of ${points.length} buckets; totals cover them all.`,
-    );
+  const point = (index: number): ComparePoint => {
+    const currentCell = current[index];
+    const previousCell = previous[index];
+    return {
+      bucket: label(rows[currentStart + index]?.[xIndex]),
+      previousBucket: label(rows[previousStart + index]?.[xIndex]),
+      current: currentCell,
+      previous: previousCell,
+      delta: currentCell !== null && previousCell !== null ? currentCell - previousCell : null,
+      alert: alerts[index],
+    };
+  };
+
+  const points: ComparePoint[] = [];
+  if (kept === null) {
+    for (let index = 0; index < half; index += 1) points.push(point(index));
+  } else {
+    for (const index of kept) points.push(point(index));
+    warnings.push(`Plotting ${kept.length} of ${half} buckets; totals cover them all.`);
   }
 
   return {
-    points: [...plotted],
+    points,
     widestGap:
-      widest && widest.delta !== null
-        ? { bucket: widest.bucket, delta: widest.delta }
-        : null,
+      widestIndex === -1
+        ? null
+        : { bucket: label(rows[currentStart + widestIndex]?.[xIndex]), delta: widestDelta },
     currentTotal,
     previousTotal,
     verdict: judgeChange(previousTotal, currentTotal, compareThreshold),
-    // Judged over the current window only: the two windows sit adjacent in the
-    // array and are a whole window apart in time, so a step across the join is
-    // not the "last bucket against this one" comparison it would look like.
-    surges: bucketSurges(
-      points.map((point) => point.current),
-      compareThreshold,
-    ),
+    surges: remapSurges(surges, kept),
     warnings,
-    hasAlerts: points.some((point) => point.alert),
+    hasAlerts,
   };
 }
 
@@ -716,23 +949,57 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
   const label = (cell: Cell | undefined) =>
     cell === null || cell === undefined ? "" : String(cell);
 
-  // Insertion order is the query's ORDER BY, which is the order the analyst
-  // asked for. Sorting buckets here would silently reorder a deliberate axis.
+  /*
+   * The bucket window is decided before the grid is filled, not after.
+   *
+   * Insertion order is the query's ORDER BY, which is the order the analyst
+   * asked for, so sorting here would silently reorder a deliberate axis - the
+   * first pass only records which buckets exist and coerces each row's value
+   * once. Filling the grid for every bucket and then dropping all but the last
+   * 96 columns meant a 25,000-row result built 25,000 map entries to draw at
+   * most 40 x 96 of them; deciding the window first keeps the grid the size of
+   * the thing on screen.
+   */
+  const values = new Float64Array(rows.length);
+  // Both passes need the bucket label, and `String()` over 25,000 cells is not
+  // free enough to do twice.
+  const bucketLabels = new Array<string>(rows.length);
   const bucketOrder: string[] = [];
   const seen = new Set<string>();
-  const grid = new Map<string, Map<string, { value: number; alert: boolean }>>();
-
-  for (const [index, row] of rows.entries()) {
-    const bucket = label(row[xIndex]);
-    const category = label(row[seriesIndex]);
-    const value = toNumber(row[yIndex]);
+  for (let index = 0; index < rows.length; index += 1) {
+    const value = toNumber(rows[index][yIndex]);
+    values[index] = value;
     if (!Number.isFinite(value)) continue;
-
+    const bucket = label(rows[index][xIndex]);
+    bucketLabels[index] = bucket;
     if (!seen.has(bucket)) {
       seen.add(bucket);
       bucketOrder.push(bucket);
     }
+  }
 
+  let buckets = bucketOrder;
+  if (buckets.length > MAX_HEAT_BUCKETS) {
+    // The newest buckets, not the oldest: a fraud queue reads the right edge.
+    buckets = buckets.slice(-MAX_HEAT_BUCKETS);
+    warnings.push(
+      `Showing the most recent ${MAX_HEAT_BUCKETS} of ${bucketOrder.length} buckets.`,
+    );
+  }
+  const bucketSet = new Set(buckets);
+
+  const grid = new Map<string, Map<string, { value: number; alert: boolean }>>();
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const value = values[index];
+    if (!Number.isFinite(value)) continue;
+    const bucket = bucketLabels[index];
+    // A category whose rows all fall outside the drawn window has nothing to
+    // show; it used to occupy a row of 96 empty cells and a place in the
+    // "busiest categories" count.
+    if (!bucketSet.has(bucket)) continue;
+
+    const category = label(rows[index][seriesIndex]);
     let cells = grid.get(category);
     if (!cells) {
       cells = new Map();
@@ -752,19 +1019,11 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
     return { ...EMPTY_HEATMAP, warnings };
   }
 
-  let buckets = bucketOrder;
-  if (buckets.length > MAX_HEAT_BUCKETS) {
-    // The newest buckets, not the oldest: a fraud queue reads the right edge.
-    buckets = buckets.slice(-MAX_HEAT_BUCKETS);
-    warnings.push(
-      `Showing the most recent ${MAX_HEAT_BUCKETS} of ${bucketOrder.length} buckets.`,
-    );
-  }
-  const bucketSet = new Set(buckets);
-
   let built: HeatRow[] = [...grid.entries()].map(([category, cells]) => {
+    let total = 0;
     const rowCells = buckets.map((bucket) => {
       const cell = cells.get(bucket);
+      if (cell) total += cell.value;
       return {
         bucket,
         value: cell ? cell.value : null,
@@ -772,9 +1031,6 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
         alert: cell ? cell.alert : false,
       };
     });
-    const total = [...cells.entries()]
-      .filter(([bucket]) => bucketSet.has(bucket))
-      .reduce((sum, [, cell]) => sum + cell.value, 0);
     return { category, cells: rowCells, total };
   });
 
@@ -786,11 +1042,28 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
     );
   }
 
-  const values = built.flatMap((row) =>
-    row.cells.map((cell) => cell.value).filter((value): value is number => value !== null),
-  );
-  const min = values.length > 0 ? Math.min(...values) : 0;
-  const max = values.length > 0 ? Math.max(...values) : 0;
+  // A loop rather than Math.min(...values): the spread form is bounded here by
+  // MAX_HEAT_ROWS x MAX_HEAT_BUCKETS, but it is one raised cap away from
+  // blowing the argument limit, and a crash is a poor way to learn that.
+  let min = 0;
+  let max = 0;
+  let anyValue = false;
+  let hasAlerts = false;
+  for (const row of built) {
+    for (const cell of row.cells) {
+      if (cell.alert) hasAlerts = true;
+      if (cell.value === null) continue;
+      if (!anyValue) {
+        min = cell.value;
+        max = cell.value;
+        anyValue = true;
+      } else {
+        if (cell.value < min) min = cell.value;
+        if (cell.value > max) max = cell.value;
+      }
+    }
+  }
+
   // A flat grid is every cell equal; colouring that by (v-min)/(max-min) is a
   // divide by zero, and "all the same" is honestly drawn as one shade.
   const span = max - min;
@@ -808,7 +1081,7 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
     min,
     max,
     warnings,
-    hasAlerts: built.some((row) => row.cells.some((cell) => cell.alert)),
+    hasAlerts,
   };
 }
 
@@ -1105,7 +1378,12 @@ export interface CompareGridData {
   surgingCount: number;
   previousSpan: [string, string] | null;
   currentSpan: [string, string] | null;
-  /** Bucket labels of the current window; every panel shares this x axis. */
+  /**
+   * Bucket labels of the current window, every one of them.
+   *
+   * A panel's own `points` may be thinned to what its viewBox can draw, so this
+   * describes the window rather than indexing any panel's points.
+   */
   buckets: string[];
   warnings: string[];
   hasAlerts: boolean;
@@ -1124,6 +1402,16 @@ const EMPTY_GRID: CompareGridData = {
 
 /** Past this the panels are too small to read a shape in. */
 export const MAX_PANELS = 24;
+
+/**
+ * Points a single panel draws.
+ *
+ * The maximised panel's viewBox is 600 units wide, so 600 points is one per
+ * unit - the same "no more points than pixels" rule `MAX_PLOT_POINTS` applies
+ * to a full-width plot. A result bucketed by the minute rather than the hour
+ * would otherwise put 12,500 points into each of 24 panels.
+ */
+export const MAX_PANEL_POINTS = 600;
 
 /**
  * One `buildCompare` panel per category, ranked by how far each one moved.
@@ -1241,63 +1529,132 @@ export function buildCompareGrid(result: ResultSet): CompareGridData {
     return { ...EMPTY_GRID, threshold, warnings };
   }
 
-  const sum = (values: (number | null)[]) =>
-    values.reduce<number>((total, value) => total + (value ?? 0), 0);
+  /*
+   * Summarise every category, then materialise points for the panels that
+   * survive the cap.
+   *
+   * Totals, the peak, the verdict and the threshold crossings are all read off
+   * the accumulator arrays, so the ranking and the card's summary describe
+   * every category - while the 40-odd categories that never reach the screen
+   * no longer each build a window's worth of point objects first.
+   */
+  interface Summary {
+    category: string;
+    entry: Accumulator;
+    previousTotal: number;
+    currentTotal: number;
+    delta: number;
+    peak: number;
+    verdict: ChangeVerdict;
+    surges: { index: number; verdict: ChangeVerdict }[];
+  }
 
-  let panels: ComparePanel[] = [...byCategory.entries()].map(([category, entry]) => {
-    const points: ComparePoint[] = split.currentList.map((bucket, slot) => {
+  const summaries: Summary[] = [];
+  for (const [category, entry] of byCategory) {
+    let previousTotal = 0;
+    let currentTotal = 0;
+    let peak = 0;
+    for (let slot = 0; slot < width; slot += 1) {
+      const currentValue = entry.current[slot] ?? 0;
+      const previousValue = entry.previous[slot] ?? 0;
+      currentTotal += currentValue;
+      previousTotal += previousValue;
+      if (currentValue > peak) peak = currentValue;
+      if (previousValue > peak) peak = previousValue;
+    }
+    summaries.push({
+      category,
+      entry,
+      previousTotal,
+      currentTotal,
+      delta: currentTotal - previousTotal,
+      peak,
+      verdict: judgeChange(previousTotal, currentTotal, threshold),
+      // Judged over the current window only. Running it across the join
+      // between the two windows would compare the last hour of six hours ago
+      // against the first hour of this one - two buckets that are adjacent in
+      // the array and hours apart in time.
+      surges: bucketSurges(entry.current, threshold),
+    });
+  }
+
+  // Biggest movement first, either direction, so the panels worth reading are
+  // in the first screen and the scan can stop when they go quiet.
+  summaries.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  // Counted before the cap: the card's summary describes the data, not the
+  // subset that happened to fit.
+  const surgingCount = summaries.filter(
+    (summary) => summary.verdict.severity !== "normal" || summary.surges.length > 0,
+  ).length;
+
+  let ranked = summaries;
+  if (ranked.length > MAX_PANELS) {
+    warnings.push(`Showing the ${MAX_PANELS} biggest movers of ${ranked.length} categories.`);
+    ranked = ranked.slice(0, MAX_PANELS);
+  }
+
+  let thinned = false;
+  const panels: ComparePanel[] = ranked.map((summary) => {
+    const { entry } = summary;
+    // Same guard as `buildCompare`: a pin set larger than the budget cannot be
+    // honoured, so it is not built.
+    const pinned =
+      summary.surges.length < MAX_PANEL_POINTS
+        ? new Set(summary.surges.map((surge) => surge.index))
+        : null;
+
+    // Every threshold crossing and every flagged bucket is pinned, so thinning
+    // a long window can drop quiet stretches but never a finding.
+    const kept = downsampleIndicesPreservingAlerts(
+      width,
+      (slot) => entry.current[slot] ?? entry.previous[slot] ?? 0,
+      (slot) => entry.alert[slot] || pinned?.has(slot) === true,
+      MAX_PANEL_POINTS,
+    );
+    if (kept !== null) thinned = true;
+
+    const point = (slot: number): ComparePoint => {
       const current = entry.current[slot];
       const previous = entry.previous[slot];
       return {
-        bucket,
+        bucket: split.currentList[slot],
         previousBucket: split.previousList[slot] ?? "",
         current,
         previous,
         delta: current !== null && previous !== null ? current - previous : null,
         alert: entry.alert[slot],
       };
-    });
+    };
 
-    const previousTotal = sum(entry.previous);
-    const currentTotal = sum(entry.current);
+    const points: ComparePoint[] = [];
+    if (kept === null) {
+      for (let slot = 0; slot < width; slot += 1) points.push(point(slot));
+    } else {
+      for (const slot of kept) points.push(point(slot));
+    }
+
     return {
-      category,
+      category: summary.category,
       points,
-      previousTotal,
-      currentTotal,
-      delta: currentTotal - previousTotal,
+      previousTotal: summary.previousTotal,
+      currentTotal: summary.currentTotal,
+      delta: summary.delta,
       pctChange:
-        previousTotal === 0 ? null : (currentTotal - previousTotal) / Math.abs(previousTotal),
-      peak: points.reduce(
-        (max, point) => Math.max(max, point.current ?? 0, point.previous ?? 0),
-        0,
-      ),
+        summary.previousTotal === 0
+          ? null
+          : (summary.currentTotal - summary.previousTotal) / Math.abs(summary.previousTotal),
+      peak: summary.peak,
       alert: entry.flagged,
-      verdict: judgeChange(previousTotal, currentTotal, threshold),
-      // Judged over the current window only. Running it across the join
-      // between the two windows would compare the last hour of six hours ago
-      // against the first hour of this one - two buckets that are adjacent in
-      // the array and hours apart in time.
-      surges: bucketSurges(
-        points.map((point) => point.current),
-        threshold,
-      ),
+      verdict: summary.verdict,
+      surges: remapSurges(summary.surges, kept),
     };
   });
 
-  // Biggest movement first, either direction, so the panels worth reading are
-  // in the first screen and the scan can stop when they go quiet.
-  panels.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-
-  // Counted before the cap: the card's summary describes the data, not the
-  // subset that happened to fit.
-  const surgingCount = panels.filter(
-    (panel) => panel.verdict.severity !== "normal" || panel.surges.length > 0,
-  ).length;
-
-  if (panels.length > MAX_PANELS) {
-    warnings.push(`Showing the ${MAX_PANELS} biggest movers of ${panels.length} categories.`);
-    panels = panels.slice(0, MAX_PANELS);
+  if (thinned) {
+    warnings.push(
+      `Plotting at most ${MAX_PANEL_POINTS} of ${width} buckets per panel; totals cover them all.`,
+    );
   }
 
   return {

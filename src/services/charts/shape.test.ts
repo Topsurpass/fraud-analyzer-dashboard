@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { ChartSpec, FlagOutcome } from "@/contracts/api";
-import { MAX_PLOT_POINTS } from "./downsample";
+import type { ChartSpec, FlagOutcome, Row } from "@/contracts/api";
+import { MAX_SERIES, OTHER_LABEL } from "@/components/charts/theme";
+import { MAX_PLOT_POINTS, MAX_PLOT_SERIES, OTHER_SERIES_LABEL } from "./downsample";
 import { DEFAULT_SURGE_THRESHOLD_PCT } from "./severity";
 import {
   MAX_HEAT_BUCKETS,
   MAX_HEAT_ROWS,
   MAX_MOVER_ROWS,
   MAX_PANELS,
+  MAX_PANEL_POINTS,
   panelSegments,
   buildCartesian,
   buildCompare,
@@ -1478,5 +1480,343 @@ describe("counting what is worth investigating", () => {
     });
 
     expect(data.surgingCount).toBe(0);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Scale: 25,000 rows across a board of cards
+ *
+ * The bound these assert is not "it is fast" - a wall-clock budget on a shared
+ * machine measures load, not code. It is that thinning a result down to what a
+ * plot can draw never costs a finding. On a fraud board a smoothed-away spike
+ * is a missed signal, which is strictly worse than a slow chart.
+ * ------------------------------------------------------------------------ */
+
+const SCALE_ROWS = 25_000;
+
+/** A flat series of `count` buckets, all the same value. */
+function flatSeries(count: number, value = 100): Row[] {
+  return Array.from({ length: count }, (_, index) => [`t${index}`, value]);
+}
+
+describe("shaping at 25,000 rows", () => {
+  const line = spec({ type: "line", x_field: "bucket", y_field: "amount" });
+
+  it("keeps a single-point spike through the whole line path", () => {
+    const rows = flatSeries(SCALE_ROWS);
+    rows[13_337] = ["t13337", 999_999];
+
+    const data = buildCartesian({ columns: ["bucket", "amount"], rows, chart: line });
+
+    expect(data.data.length).toBeLessThanOrEqual(MAX_PLOT_POINTS);
+    expect(data.data.some((point) => point.amount === 999_999)).toBe(true);
+    expect(data.data.some((point) => point.bucket === "t13337")).toBe(true);
+  });
+
+  it("keeps a trough as readily as a spike", () => {
+    // A terminal going dark is as much a finding as one lighting up.
+    const rows = flatSeries(SCALE_ROWS);
+    rows[900] = ["t900", 0];
+
+    const data = buildCartesian({ columns: ["bucket", "amount"], rows, chart: line });
+
+    expect(data.data.some((point) => point.bucket === "t900")).toBe(true);
+  });
+
+  it("keeps a flagged row that carries no shape at all", () => {
+    /*
+     * The hardest case for a shape-preserving downsampler: the flagged row is
+     * identical to its 24,999 neighbours, so LTTB has no reason on earth to
+     * keep it - and dropping it would leave the chart disagreeing with the
+     * table beside it about what was flagged.
+     */
+    const rows = flatSeries(SCALE_ROWS);
+
+    const data = buildCartesian({
+      columns: ["bucket", "amount"],
+      rows,
+      chart: line,
+      flags: caught("Large transfer", [7_777]),
+    });
+
+    expect(data.data.length).toBeLessThanOrEqual(MAX_PLOT_POINTS);
+    const flagged = data.data.find((point) => point.bucket === "t7777");
+    expect(flagged).toBeDefined();
+    expect(flagged?.__alert).toEqual({ amount: true });
+    expect(data.hasAlerts).toBe(true);
+  });
+
+  it("keeps the first and last bucket, so the axis never moves", () => {
+    const rows = flatSeries(SCALE_ROWS);
+    const data = buildCartesian({ columns: ["bucket", "amount"], rows, chart: line });
+
+    expect(data.data[0].bucket).toBe("t0");
+    expect(data.data.at(-1)?.bucket).toBe(`t${SCALE_ROWS - 1}`);
+  });
+
+  it("keeps a spike through the period comparison as well", () => {
+    const rows = flatSeries(4_000);
+    rows[3_500] = ["t3500", 10_000];
+
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows,
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.points.length).toBeLessThanOrEqual(MAX_PLOT_POINTS);
+    expect(data.points.some((point) => point.current === 10_000)).toBe(true);
+  });
+
+  it("reports surge indices as positions in the points it hands back", () => {
+    /*
+     * Surges are found on every bucket and the plot is thinned afterwards, so
+     * without a remap `surges[3].index` pointed into an array the caller never
+     * received - and `CompareGridView` reads exactly that to place its rings.
+     */
+    const rows = flatSeries(4_000);
+    rows[3_500] = ["t3500", 10_000];
+
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows,
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.surges.length).toBeGreaterThan(0);
+    for (const surge of data.surges) {
+      expect(data.points[surge.index]).toBeDefined();
+    }
+    expect(data.surges.some((surge) => data.points[surge.index]?.current === 10_000)).toBe(
+      true,
+    );
+  });
+
+  it("totals every bucket even though it plots a fraction of them", () => {
+    // The headline must not depend on how many pixels were available.
+    const rows = flatSeries(4_000, 5);
+    const data = buildCompare({
+      columns: ["bucket", "amount"],
+      rows,
+      chart: spec({ type: "compare", x_field: "bucket", y_field: "amount" }),
+    });
+
+    expect(data.currentTotal).toBe(2_000 * 5);
+    expect(data.previousTotal).toBe(2_000 * 5);
+    expect(data.points.length).toBeLessThan(2_000);
+    expect(data.warnings.join(" ")).toContain("totals cover them all");
+  });
+});
+
+describe("buildCartesian series cap", () => {
+  const seriesSpec = spec({
+    type: "line",
+    x_field: "bucket",
+    y_field: "amount",
+    series_field: "terminal",
+  });
+
+  /** `count` series across `buckets`, each series worth its own index + 1. */
+  function seriesRows(count: number, buckets = 4, names?: string[]): Row[] {
+    const rows: Row[] = [];
+    for (let bucket = 0; bucket < buckets; bucket += 1) {
+      for (let series = 0; series < count; series += 1) {
+        rows.push([`b${bucket}`, names?.[series] ?? `T${series}`, series + 1]);
+      }
+    }
+    return rows;
+  }
+
+  it("keeps the plot's series cap in step with the palette it exists for", () => {
+    // Two constants, one reason: the ramp holds five distinguishable colours.
+    expect(MAX_PLOT_SERIES).toBe(MAX_SERIES);
+    expect(OTHER_SERIES_LABEL).toBe(OTHER_LABEL);
+  });
+
+  it("leaves a chart inside the palette alone", () => {
+    const data = buildCartesian({
+      columns: ["bucket", "terminal", "amount"],
+      rows: seriesRows(MAX_PLOT_SERIES),
+      chart: seriesSpec,
+    });
+
+    expect(data.seriesKeys).toEqual(["T0", "T1", "T2", "T3", "T4"]);
+    expect(data.warnings.join(" ")).not.toContain("palette");
+  });
+
+  it("folds the quiet tail into one bucket rather than cycling colours", () => {
+    /*
+     * `seriesColor` clamps past the fifth colour, so forty terminals used to
+     * draw thirty-six lines in the same green - and forty marks at every x
+     * position, which is 25,000 SVG nodes on a 900-pixel plot.
+     */
+    const data = buildCartesian({
+      columns: ["bucket", "terminal", "amount"],
+      rows: seriesRows(8),
+      chart: seriesSpec,
+    });
+
+    // The four biggest keep their names, in the order the query returned them.
+    expect(data.seriesKeys).toEqual(["T4", "T5", "T6", "T7", "Other"]);
+    // 1 + 2 + 3 + 4: every folded series is summed, not dropped.
+    expect(data.data[0].Other).toBe(10);
+    expect(data.data[0].T0).toBeUndefined();
+    expect(data.warnings.join(" ")).toContain("Summed 4 of 8 series");
+  });
+
+  it("does not swallow a series genuinely called Other", () => {
+    const data = buildCartesian({
+      columns: ["bucket", "terminal", "amount"],
+      rows: seriesRows(6, 2, ["A", "B", "C", "D", "E", "Other"]),
+      chart: seriesSpec,
+    });
+
+    // "Other" is worth 6 here and E only 5, so the real one survives by name.
+    expect(data.seriesKeys).toContain("Other");
+    expect(data.data[0].Other).toBe(6);
+  });
+
+  it("renames the fold bucket when a real series already has the name", () => {
+    // "Other" is the quietest series here, so it is one of the folded ones.
+    const names = ["A", "B", "C", "D", "E", "Other"];
+    const rows: Row[] = [];
+    for (let bucket = 0; bucket < 2; bucket += 1) {
+      for (let series = 0; series < names.length; series += 1) {
+        rows.push([`b${bucket}`, names[series], names.length - series]);
+      }
+    }
+
+    const data = buildCartesian({
+      columns: ["bucket", "terminal", "amount"],
+      rows,
+      chart: seriesSpec,
+    });
+
+    expect(data.seriesKeys).toEqual(["A", "B", "C", "D", "Other (2)"]);
+    // E is worth 2 and the real "Other" 1.
+    expect(data.data[0]["Other (2)"]).toBe(3);
+    expect(data.data[0].Other).toBeUndefined();
+  });
+
+  it("carries a folded series' flag into the bucket it was folded into", () => {
+    // Losing the mark would make the chart disagree with the table beside it.
+    const data = buildCartesian({
+      columns: ["bucket", "terminal", "amount"],
+      rows: seriesRows(8, 2),
+      chart: seriesSpec,
+      // Row 0 is bucket b0, terminal T0 - the quietest series, so it folds.
+      flags: caught("Large transfer", [0]),
+    });
+
+    expect(data.data[0].__alert).toEqual({ Other: true });
+    expect(data.hasAlerts).toBe(true);
+  });
+});
+
+describe("bounds at scale", () => {
+  it("bounds the points in a compare-grid panel however fine the buckets are", () => {
+    const rows: Row[] = [];
+    for (let bucket = 0; bucket < MAX_PANEL_POINTS * 3; bucket += 1) {
+      rows.push([`b${bucket}`, "T1", 10]);
+      rows.push([`b${bucket}`, "T2", 20]);
+    }
+
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows,
+      chart: spec({
+        type: "compare_grid",
+        x_field: "bucket",
+        y_field: "amount",
+        series_field: "terminal",
+      }),
+    });
+
+    for (const panel of data.panels) {
+      expect(panel.points.length).toBeLessThanOrEqual(MAX_PANEL_POINTS);
+    }
+    expect(data.warnings.join(" ")).toContain("per panel");
+  });
+
+  it("keeps a flagged bucket in a thinned panel, and points its surges at it", () => {
+    const rows: Row[] = [];
+    for (let bucket = 0; bucket < MAX_PANEL_POINTS * 3; bucket += 1) {
+      rows.push([`b${bucket}`, "T1", 10]);
+    }
+    // Deep inside the current window, and identical to its neighbours except
+    // for the jump - the one bucket a shape-preserving thinner might drop.
+    const spikeRow = MAX_PANEL_POINTS * 2 + 500;
+    rows[spikeRow] = [`b${spikeRow}`, "T1", 9_000];
+
+    const data = buildCompareGrid({
+      columns: ["bucket", "terminal", "amount"],
+      rows,
+      chart: spec({
+        type: "compare_grid",
+        x_field: "bucket",
+        y_field: "amount",
+        series_field: "terminal",
+      }),
+      flags: caught("Large transfer", [spikeRow]),
+    });
+
+    const panel = data.panels[0];
+    expect(panel.points.some((point) => point.current === 9_000)).toBe(true);
+    expect(panel.points.some((point) => point.alert)).toBe(true);
+    for (const surge of panel.surges) {
+      expect(panel.points[surge.index]).toBeDefined();
+    }
+    expect(panel.surges.some((surge) => panel.points[surge.index]?.current === 9_000)).toBe(
+      true,
+    );
+  });
+
+  it("drops a heatmap category whose rows all fall outside the drawn window", () => {
+    /*
+     * It used to occupy a row of ninety-six empty cells, and a place in the
+     * "busiest categories" count, on the strength of activity the grid does not
+     * show.
+     */
+    const rows: Row[] = [];
+    for (let bucket = 0; bucket < MAX_HEAT_BUCKETS + 4; bucket += 1) {
+      rows.push([`b${bucket}`, "T1", 5]);
+    }
+    rows.push(["b0", "Ghost", 9]);
+
+    const data = buildHeatmap({
+      columns: ["bucket", "terminal", "amount"],
+      rows,
+      chart: spec({
+        type: "heatmap",
+        x_field: "bucket",
+        y_field: "amount",
+        series_field: "terminal",
+      }),
+    });
+
+    expect(data.rows.map((row) => row.category)).toEqual(["T1"]);
+  });
+
+  it("calls a column of nothing but NULLs non-numeric", () => {
+    const data = buildTable({
+      columns: ["a", "b"],
+      rows: [
+        [null, 1],
+        [null, 2],
+      ],
+      chart: spec({ type: "table" }),
+    });
+
+    expect(data.numericColumns).toEqual([false, true]);
+  });
+
+  it("stops calling a column numeric the moment a value is not", () => {
+    const data = buildTable({
+      columns: ["a"],
+      rows: [[1], [2], ["not a number"]],
+      chart: spec({ type: "table" }),
+    });
+
+    expect(data.numericColumns).toEqual([false]);
   });
 });

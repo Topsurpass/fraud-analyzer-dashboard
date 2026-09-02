@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_FLAGS } from "@/contracts/api";
-import { detectRowAnomalies } from "./index";
+import { detectRowAnomalies, maskFromFlagOutcome } from "./index";
 
 /**
  * Nothing is flagged until a rule says so.
@@ -81,5 +81,41 @@ describe("with no rules", () => {
   it("handles an empty result set", () => {
     const result = detectRowAnomalies({ columns: ["amount"], rows: [] });
     expect(result.flags).toEqual([]);
+  });
+});
+
+describe("the unflagged rows' label arrays", () => {
+  /*
+   * At 25,000 rows across a board of ten cards, building a distinct empty array
+   * per row was the single largest cost in shaping - roughly 13ms a card for
+   * arrays whose whole content is "nothing matched". They share one frozen
+   * array now, which is only safe as long as nobody writes through it.
+   */
+  it("shares one frozen list, so nothing can mutate it into every row", () => {
+    const result = detectRowAnomalies({
+      columns: ["amount"],
+      rows: [[1], [2], [3]],
+    });
+
+    expect(result.ruleNames[0]).toEqual([]);
+    expect(Object.isFrozen(result.ruleNames[0])).toBe(true);
+    expect(() => result.ruleNames[0].push("sneaked in")).toThrow();
+  });
+
+  it("keeps one flagged row's rules out of its unflagged neighbours", () => {
+    const result = maskFromFlagOutcome(
+      {
+        flagged_count: 1,
+        rows: [{ index: 1, rule_ids: ["r1"] }],
+        rules: [{ id: "r1", name: "Large transfer", severity: "high", matched: 1 }],
+        warnings: [],
+        dismissed_count: 0,
+      },
+      4,
+    );
+
+    expect(result.ruleNames).toEqual([[], ["Large transfer"], [], []]);
+    expect(result.severities).toEqual([null, "high", null, null]);
+    expect(result.flags).toEqual([false, true, false, false]);
   });
 });

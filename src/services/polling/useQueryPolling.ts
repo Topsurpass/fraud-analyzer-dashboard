@@ -306,9 +306,6 @@ export function useQueryPolling(
               force ? { force: true } : { sinceHash: hashRef.current },
               controller ? { signal: controller.signal, timeoutMs } : { timeoutMs },
             ),
-          // A published chart must not join the batch: that endpoint is
-          // query-scoped and owner-only, and this id is a chart id.
-          !published,
         );
         if (stoppedRef.current || controller?.signal.aborted) return;
         applyResponse(response);

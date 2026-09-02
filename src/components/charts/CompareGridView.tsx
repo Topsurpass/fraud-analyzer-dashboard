@@ -82,18 +82,54 @@ function PanelLines({
   width: number;
   height: number;
 }) {
-  const previous = panelSegments(
-    panel.points.map((point) => point.previous),
-    width,
-    height,
-    panel.peak,
-  );
-  const current = panelSegments(
-    panel.points.map((point) => point.current),
-    width,
-    height,
-    panel.peak,
-  );
+  /*
+   * All of it is pure geometry over `panel`, and the maximised panel
+   * re-renders on every pointer move to move one crosshair. Without this, a
+   * mouse crossing the plot rebuilt two polyline strings of several hundred
+   * coordinates, plus a full-length array of mostly-null dots, per frame.
+   */
+  const { previous, current, alerts, surges } = useMemo(() => {
+    const count = panel.points.length;
+    const marks: { key: string; cx: number; cy: number }[] = [];
+    const rings: { key: string; cx: number; cy: number }[] = [];
+
+    for (const { index } of panel.surges) {
+      const value = panel.points[index]?.current;
+      if (value === null || value === undefined) continue;
+      rings.push({
+        key: `s${index}`,
+        cx: xFor(index, count, width),
+        cy: yFor(value, panel.peak, height),
+      });
+    }
+
+    for (let index = 0; index < count; index += 1) {
+      const point = panel.points[index];
+      if (!point.alert || point.current === null) continue;
+      marks.push({
+        key: `a${index}`,
+        cx: xFor(index, count, width),
+        cy: yFor(point.current, panel.peak, height),
+      });
+    }
+
+    return {
+      previous: panelSegments(
+        panel.points.map((point) => point.previous),
+        width,
+        height,
+        panel.peak,
+      ),
+      current: panelSegments(
+        panel.points.map((point) => point.current),
+        width,
+        height,
+        panel.peak,
+      ),
+      alerts: marks,
+      surges: rings,
+    };
+  }, [panel, width, height]);
 
   return (
     <>
@@ -124,35 +160,29 @@ function PanelLines({
        * hollow, so it stays separable from the filled alert dot that means a
        * flag rule matched. Two different findings must not share a mark.
        */}
-      {panel.surges.map(({ index }) => {
-        const value = panel.points[index]?.current;
-        if (value === null || value === undefined) return null;
-        return (
-          <circle
-            key={`s${index}`}
-            cx={xFor(index, panel.points.length, width)}
-            cy={yFor(value, panel.peak, height)}
-            r={2.5}
-            fill="none"
-            stroke={CHANGE_COLOR}
-            strokeWidth={1.5}
-            vectorEffect="non-scaling-stroke"
-          />
-        );
-      })}
+      {surges.map(({ key, cx, cy }) => (
+        <circle
+          key={key}
+          cx={cx}
+          cy={cy}
+          r={2.5}
+          fill="none"
+          stroke={CHANGE_COLOR}
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
 
-      {panel.points.map((point, index) =>
-        point.alert && point.current !== null ? (
-          <circle
-            key={`a${index}`}
-            cx={xFor(index, panel.points.length, width)}
-            cy={yFor(point.current, panel.peak, height)}
-            r={2}
-            fill={ALERT_COLOR}
-            vectorEffect="non-scaling-stroke"
-          />
-        ) : null,
-      )}
+      {alerts.map(({ key, cx, cy }) => (
+        <circle
+          key={key}
+          cx={cx}
+          cy={cy}
+          r={2}
+          fill={ALERT_COLOR}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
     </>
   );
 }

@@ -22,6 +22,7 @@ import { ChartTooltip, type TooltipEntry } from "./ChartTooltip";
 import { SeriesLegend } from "./SeriesLegend";
 import {
   ALERT_COLOR,
+  ANIMATION_MARK_BUDGET,
   AXIS_TICK,
   CHART_MARGIN,
   CURSOR_STROKE,
@@ -113,6 +114,8 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
 
   const change = describeChange(data.verdict);
   const gap = data.widestGap;
+  // Two lines, so the mark count is twice the bucket count.
+  const animate = !reducedMotion && data.points.length * 2 <= ANIMATION_MARK_BUDGET;
 
   const legend = [
     { id: "current", label: "Current", color: CURRENT_COLOR, alert: data.hasAlerts },
@@ -205,7 +208,7 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
               // A gap in the previous window is a gap, not a line drawn across
               // it: connecting nulls invents history that was never queried.
               connectNulls={false}
-              isAnimationActive={!reducedMotion}
+              isAnimationActive={animate}
               animationDuration={DATA_TWEEN_MS}
               opacity={active === "current" ? 0.3 : 1}
             />
@@ -218,7 +221,7 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
               dot={<CurrentDot />}
               activeDot={{ r: 3, fill: CURRENT_COLOR, stroke: "var(--surface-raised)" }}
               connectNulls={false}
-              isAnimationActive={!reducedMotion}
+              isAnimationActive={animate}
               animationDuration={DATA_TWEEN_MS}
               opacity={active === "previous" ? 0.3 : 1}
             />

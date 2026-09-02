@@ -58,6 +58,10 @@ export function TableView({ data, title }: TableViewProps) {
     [data.alerts],
   );
 
+  // Walks every row's rule list with an `includes` per name, and the answer
+  // only moves when the flags do - not on every poll-driven re-render.
+  const rules = useMemo(() => ruleSummary(data), [data]);
+
   const virtualise = data.rows.length > VIRTUALISE_ABOVE;
   const rowWindow = useVirtualRows(
     scrollRef,
@@ -184,7 +188,7 @@ export function TableView({ data, title }: TableViewProps) {
         <p className="border-t border-line px-3 py-1.5 text-[10px] text-muted">
           <span className="text-alert">{alertCount}</span> flagged{" "}
           {alertCount === 1 ? "row" : "rows"}
-          {` by ${ruleSummary(data)}`}
+          {` by ${rules}`}
         </p>
       ) : null}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import type { ChartType, SavedQueryRead } from "@/contracts/api";
+import { useDeferredValue, useMemo, useState } from "react";
+import type { ChartType, RunResponse, SavedQueryRead } from "@/contracts/api";
 import {
   buildCartesian,
   buildCompare,
@@ -100,10 +100,41 @@ export function ChartCard({
   const now = useNow();
 
   const snapshot = poll.snapshot;
-  const spec = snapshot
+
+  /*
+   * The last payload whose data actually differed.
+   *
+   * A forced refresh - the retry button, a chart-type change, anything that
+   * calls `poll.refresh()` - comes back as a fresh object carrying the same
+   * `data_hash` and therefore the same rows. Keying the shaping below on the
+   * object identity re-shaped 25,000 rows on every one of those clicks, for
+   * every card on the board; keying it on the hash means the work happens when
+   * the data moved and not otherwise.
+   *
+   * Adjusting state during render is React's documented way to derive from a
+   * changing prop without an extra pass, and it is the pattern the poll loop
+   * itself uses to reset when the query id changes.
+   */
+  const [shaped, setShaped] = useState<RunResponse | null>(snapshot);
+  if (snapshot?.data_hash !== shaped?.data_hash) setShaped(snapshot);
+
+  /*
+   * Hand the shaping to React at transition priority.
+   *
+   * Shaping is the expensive part of a card and a board carries eight to twelve
+   * of them. React yields to the browser between components while it renders a
+   * transition, so the board now paints card by card instead of locking the tab
+   * for the length of every card's pass back to back. Each card keeps showing
+   * its previous data, or its skeleton, until its own turn comes.
+   *
+   * `act()` flushes transitions, so this stays synchronous under test.
+   */
+  const source = useDeferredValue(shaped);
+
+  const spec = source
     ? (chartId
-        ? snapshot.charts.find((candidate) => candidate.id === chartId)
-        : snapshot.charts[0])
+        ? source.charts.find((candidate) => candidate.id === chartId)
+        : source.charts[0])
     : undefined;
   // Before the first payload lands there is no spec to read, and a table is
   // the honest skeleton: it is what a query renders as until configured.
@@ -122,14 +153,14 @@ export function ChartCard({
     : query.charts[0];
 
   const view = useMemo(() => {
-    if (!snapshot) return null;
+    if (!source) return null;
     // One payload carries every chart on the query, so picking one here is
     // what lets several cards share a single execution and a single poll.
     if (!spec) return null;
 
     const result = {
-      columns: snapshot.columns,
-      rows: snapshot.rows,
+      columns: source.columns,
+      rows: source.rows,
       chart: spec,
     };
 
@@ -154,7 +185,7 @@ export function ChartCard({
       default:
         return { kind: "line" as const, data: buildCartesian(result) };
     }
-  }, [snapshot, spec]);
+  }, [source, spec]);
 
   const warnings = view
     ? "warnings" in view.data
