@@ -13,7 +13,14 @@ const useConnections = vi.hoisted(() => vi.fn());
 const useDashboards = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/connections/ConnectionsContext", () => ({ useConnections }));
-vi.mock("@/services/dashboards", () => ({ useDashboards }));
+vi.mock("@/services/dashboards", async () => ({
+  useDashboards,
+  // The real label, not a stub: what the rail prints for a board is the thing
+  // under test, and a stubbed one would assert only that a string reaches JSX.
+  ownerLabel: (await vi.importActual<typeof import("@/services/dashboards/owner")>(
+    "@/services/dashboards/owner",
+  )).ownerLabel,
+}));
 
 const signedInAs = vi.hoisted(() => ({ role: "admin" as "admin" | "analyst" }));
 
@@ -60,7 +67,16 @@ beforeEach(() => {
     reload: vi.fn(),
   });
   useDashboards.mockReturnValue({
-    dashboards: [{ id: "d1", name: "Card testing", chart_ids: ["q1", "q2"] }],
+    dashboards: [
+      {
+        id: "d1",
+        name: "Card testing",
+        chart_ids: ["q1", "q2"],
+        owner_id: "u1",
+        owner_name: "Ada Lovelace",
+        owner_email: "ada@example.com",
+      },
+    ],
     initial: false,
     loading: false,
     error: null,
@@ -208,5 +224,71 @@ describe("what each role sees in the rail", () => {
     await userEvent.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Account" })).toHaveAttribute("href", "/account");
+  });
+});
+
+describe("Rail, whose board is this", () => {
+  it("names the owner of a board that is not yours", () => {
+    // An admin's rail holds every board on the instance. "User1 dashboard"
+    // only identifies anyone while there are two accounts.
+    useDashboards.mockReturnValue({
+      dashboards: [
+        {
+          id: "d2",
+          name: "Chargebacks",
+          chart_ids: [],
+          owner_id: "u2",
+          owner_name: "Kemi Adeyemi",
+          owner_email: "kemi@example.com",
+        },
+      ],
+      initial: false,
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+
+    expect(screen.getByText("Chargebacks")).toBeInTheDocument();
+    expect(screen.getByText("Kemi Adeyemi")).toBeInTheDocument();
+  });
+
+  it("does not caption your own boards with your own name", () => {
+    // Most of what an analyst sees. Labelling every row "you" is noise.
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+
+    // Scoped to the link: the account chip at the foot of the rail carries the
+    // signed-in name legitimately, and a page-wide query would match that.
+    const link = screen.getByRole("link", { name: /Card testing/ });
+    expect(link).toHaveTextContent("Card testing");
+    expect(link).not.toHaveTextContent("Ada Lovelace");
+  });
+
+  it("keeps the owner out of the collapsed strip", () => {
+    // 56px fits a count and nothing else; the hover title still carries it.
+    useDashboards.mockReturnValue({
+      dashboards: [
+        {
+          id: "d2",
+          name: "Chargebacks",
+          chart_ids: [],
+          owner_id: "u2",
+          owner_name: "Kemi Adeyemi",
+          owner_email: "kemi@example.com",
+        },
+      ],
+      initial: false,
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+
+    render(<Rail collapsed onToggleCollapse={vi.fn()} />);
+
+    expect(screen.queryByText("Kemi Adeyemi")).not.toBeInTheDocument();
+    expect(
+      screen.getByTitle("Chargebacks - Kemi Adeyemi (0 cards)"),
+    ).toBeInTheDocument();
   });
 });

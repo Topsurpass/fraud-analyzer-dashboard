@@ -121,6 +121,8 @@ const board = (over: Partial<DashboardRead> = {}): DashboardRead => {
     // never claims to place a chart it cannot describe.
     charts: over.charts ?? base.chart_ids.map((id) => chart(id)),
     owner_id: "me",
+    owner_name: null,
+    owner_email: null,
     created_at: "2026-08-23T09:00:00",
     updated_at: "2026-08-23T09:00:00",
     ...base,
@@ -235,6 +237,8 @@ describe("DashboardPage", () => {
       board({
         chart_ids: ["q1", "c2", "q2"],
         owner_id: null,
+        owner_name: null,
+        owner_email: null,
         charts: [chart("q1"), chart("c2", "q1"), chart("q2")],
       }),
     );
@@ -437,5 +441,32 @@ describe("published charts on a board", () => {
 
     await screen.findByLabelText("Declines by hour");
     expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+  });
+});
+
+describe("whose board is open", () => {
+  it("names the owner in the crumb when the board is not yours", async () => {
+    /*
+     * An admin arriving by link has no highlighted rail entry to tell them
+     * whose board this is, and Rename and Delete on this page act on that
+     * person's work.
+     */
+    getDashboard.mockResolvedValue(
+      board({ owner_id: "u2", owner_name: "Kemi Adeyemi", owner_email: "kemi@example.com" }),
+    );
+    getPublishedCharts.mockResolvedValue([]);
+
+    await open();
+
+    expect(await screen.findByText("Chargebacks (Kemi Adeyemi)")).toBeInTheDocument();
+  });
+
+  it("leaves your own board's crumb bare", async () => {
+    getDashboard.mockResolvedValue(board({ owner_id: "me" }));
+    getPublishedCharts.mockResolvedValue([]);
+
+    await open();
+
+    expect(await screen.findByText("Chargebacks")).toBeInTheDocument();
   });
 });

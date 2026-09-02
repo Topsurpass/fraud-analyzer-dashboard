@@ -550,6 +550,10 @@ export interface DashboardRead {
 	charts: QueryChart[];
 	/** Who built this board. Null for boards that predate accounts. */
 	owner_id: string | null;
+	/** The owner's name and address, so a list can say whose each board is.
+	 *  An admin sees every board, and a uuid answers that for nobody. */
+	owner_name: string | null;
+	owner_email: string | null;
 	created_at: string;
 	updated_at: string;
 }

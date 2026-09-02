@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { QueryChart, SavedQueryRead } from "@/contracts/api";
 import { ApiError, getDashboard, listQueriesByIds } from "@/services/api-client";
-import { findDashboard, useDashboards } from "@/services/dashboards";
+import { findDashboard, ownerLabel, useDashboards } from "@/services/dashboards";
 import { useResource } from "@/lib/useResource";
 import { useExpandedCards } from "@/lib/useExpandedCards";
 import { PageBody } from "@/components/PageBody";
@@ -129,6 +129,9 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     dashboard && user && dashboard.owner_id !== null && dashboard.owner_id === user.id,
   );
 
+  // Null on your own boards, so the crumb only names an owner when it is not you.
+  const boardOwner = dashboard ? ownerLabel(dashboard, user?.id ?? null) : null;
+
   const shared = useMemo(
     // A chart the viewer already placed themselves is theirs to edit and
     // remove, so their own placement wins and the shared copy is dropped.
@@ -172,7 +175,20 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
 
   return (
     <PageBody
-      crumbs={[{ label: "Dashboards" }, { label: dashboard?.name ?? "…" }]}
+      crumbs={[
+        { label: "Dashboards" },
+        {
+          /*
+           * Whose board this is belongs in the crumb, not only in the rail: an
+           * admin opening someone else's board from a link has no rail entry
+           * highlighted to tell them, and every action on this page (rename,
+           * delete) acts on that person's work.
+           */
+          label: boardOwner
+            ? `${dashboard?.name ?? "…"} (${boardOwner})`
+            : (dashboard?.name ?? "…"),
+        },
+      ]}
       actions={
         dashboard ? (
           <div className="flex items-center gap-2">

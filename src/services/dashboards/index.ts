@@ -1,4 +1,5 @@
 export * from "./arrange";
+export { ownerLabel } from "./owner";
 export {
   DashboardsProvider,
   findDashboard,

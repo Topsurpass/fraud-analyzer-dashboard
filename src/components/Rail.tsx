@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useDashboards } from "@/services/dashboards";
+import { ownerLabel, useDashboards } from "@/services/dashboards";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { useEngineHealth, type EngineStatus } from "@/lib/useEngineHealth";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
@@ -37,7 +37,7 @@ export function Rail({
   const { connections, initial, error } = useConnections();
   const { dashboards, initial: dashboardsLoading } = useDashboards();
   const flagged = useFlagged();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   /*
    * An analyst queries these databases but never adds one, so the "+ New" affordance
    * is absent rather than disabled. A disabled control in a nav rail is a
@@ -136,6 +136,12 @@ export function Rail({
               {dashboards.map((dashboard) => {
                 const href = `/dashboards/${dashboard.id}`;
                 const count = dashboard.chart_ids.length;
+                /*
+                 * An admin's rail holds every board on the instance, and board
+                 * names do not identify their owner. Own boards stay bare -
+                 * that is most of an analyst's list, and "you" is not news.
+                 */
+                const owner = ownerLabel(dashboard, user?.id ?? null);
                 return (
                   <li key={dashboard.id}>
                     <RailLink
@@ -143,13 +149,29 @@ export function Rail({
                       active={pathname === href}
                       onNavigate={onNavigate}
                       collapsed={collapsed}
-                      title={`${dashboard.name} (${count} ${count === 1 ? "card" : "cards"})`}
+                      title={
+                        owner
+                          ? `${dashboard.name} - ${owner} (${count} ${count === 1 ? "card" : "cards"})`
+                          : `${dashboard.name} (${count} ${count === 1 ? "card" : "cards"})`
+                      }
                     >
                       {collapsed ? (
                         <span className="tnum text-[10px]">{count}</span>
                       ) : (
                         <>
-                          <span className="truncate">{dashboard.name}</span>
+                          {/*
+                           * Name over owner rather than side by side: at 256px
+                           * one line holding both truncates both, and the name
+                           * is what you scan for once you know the owner.
+                           */}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{dashboard.name}</span>
+                            {owner ? (
+                              <span className="block truncate text-[10px] leading-tight text-muted/70">
+                                {owner}
+                              </span>
+                            ) : null}
+                          </span>
                           <span className="tnum ml-auto shrink-0 text-[10px] text-muted/70">
                             {count}
                           </span>
