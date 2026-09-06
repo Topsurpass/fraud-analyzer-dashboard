@@ -62,6 +62,11 @@ ENV NODE_ENV=production \
 # code. The process writes nothing to disk - all state is in the engine.
 COPY --from=builder /app/.next/standalone ./
 # `output: "standalone"` traces what the server imports and copies only that.
+# In next.config.ts that setting is conditional - off when VERCEL is set,
+# because Vercel traces files itself and standalone moves the traces out from
+# under it - so a reader who greps the config and finds a ternary rather than a
+# plain string is looking at the right thing. This COPY is what fails, loudly,
+# if standalone ever stops being produced for the image build.
 # These two are outside that trace because Next assumes a CDN serves them, so
 # they are copied in by hand. Without them the app returns correct HTML with no
 # CSS and no fonts, which is the confusing failure this comment exists to

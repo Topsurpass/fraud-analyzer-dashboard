@@ -14,8 +14,32 @@ const nextConfig: NextConfig = {
    * output - Next assumes a CDN serves them - so the Dockerfile copies both in
    * by hand. If a deploy ever comes up with working HTML and no CSS, that copy
    * is the first place to look.
+   *
+   * ## Why this is conditional
+   *
+   * Vercel does its own file tracing, and its packaging step reads the
+   * `.nft.json` trace files from `.next/`. Standalone mode moves them under
+   * `.next/standalone/`, so that step opens a path that is no longer there and
+   * the deployment fails after a build that looked fine:
+   *
+   *     ENOENT: no such file or directory,
+   *     open '/vercel/path0/.next/next-server.js.nft.json'
+   *
+   * It fails only there, because the file does exist locally - standalone
+   * produces it, just somewhere else. Standalone is a self-hosting option; on a
+   * platform that traces for you it is not merely unnecessary but actively
+   * wrong.
+   *
+   * `VERCEL` is set to "1" by Vercel's build environment, so neither side needs
+   * configuring. The default direction is deliberate: production is Docker, so
+   * the Docker path is the one that must not be forgettable. An opt-in flag
+   * that went missing would produce an image that dies at
+   * `COPY .next/standalone`; this way the only environment that deviates is the
+   * one that identifies itself.
+   *
+   * `src/next-config.test.ts` holds both branches to their behaviour.
    */
-  output: "standalone",
+  output: process.env.VERCEL ? undefined : "standalone",
 
   /**
    * Do not name the framework and its version in a header on every response.
