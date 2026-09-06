@@ -158,6 +158,24 @@ describe("catch-all proxy: request shape sent upstream", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(init.body).toBeUndefined();
   });
+
+  it("asks the engine for an uncompressed body", async () => {
+    // Regression. `fetch` advertises `gzip, deflate` by default and decodes
+    // the answer transparently, so the engine was compressing a payload that
+    // Node immediately decompressed and this handler then wrote to the browser
+    // uncompressed anyway. Measured at 209,790 bytes: compressed by the
+    // engine, decompressed by Node, and 209,790 bytes went out regardless,
+    // to a client that had asked for gzip.
+    //
+    // Compression belongs on the internet-facing hop, which the reverse proxy
+    // owns. This header is what stops the two pointless passes on the hop
+    // between containers.
+    fetchMock.mockResolvedValue(engineJson([]));
+    await GET(makeRequest("queries/q1/poll", { token: "tok-1" }), context("queries/q1/poll"));
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(new Headers(init.headers).get("accept-encoding")).toBe("identity");
+  });
 });
 
 describe("catch-all proxy: response passthrough", () => {

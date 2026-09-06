@@ -58,6 +58,28 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
 
+  // Ask the engine NOT to compress, which is the opposite of what it looks
+  // like this line should say.
+  //
+  // `fetch` advertises `gzip, deflate` by default and transparently decodes
+  // whatever comes back, so a compressed body cannot be passed through: it is
+  // already decoded by the time this handler can see it, and the response
+  // written below leaves here uncompressed either way. Measured on a
+  // 209,790-byte payload with the browser sending `Accept-Encoding: gzip`, the
+  // engine compressed it, Node decompressed it, and 209,790 bytes went to the
+  // browser anyway. Both passes were pure waste.
+  //
+  // The hop that should compress is the one facing the internet, and the
+  // reverse proxy owns it (`encode zstd gzip` in the engine repo's
+  // deploy/Caddyfile). This hop is container-to-container on one host, where
+  // bytes are nearly free and the engine's CPU is the resource the whole
+  // polling path contends for - a 25,000-row result costs it 19 ms per
+  // response to compress for a link that never needed it.
+  //
+  // Set only here. The auth handlers carry a few hundred bytes each, where
+  // this would be noise rather than a saving.
+  headers.set("accept-encoding", "identity");
+
   const upstream = await fetch(url, {
     method: request.method,
     headers,

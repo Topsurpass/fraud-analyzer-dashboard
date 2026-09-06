@@ -1,0 +1,38 @@
+# Patterns match the whole context path, so a bare name only matches at the top
+# level. Anything that can appear in a subdirectory is written as **/<name>.
+
+# Never let a local secret into an image layer. `.env*` covers .env.local and
+# .env.development.local, both of which name a private engine address.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+
+# Installed fresh by `npm ci` in the deps stage. Copying the host's tree in
+# would be slow, and on a different platform it would be wrong: native modules
+# are built for the machine that installed them.
+**/node_modules
+
+# Build output. A stale .next from the host would be copied over the top of the
+# one this build produces, which is how an image ships last week's bundle.
+.next
+out
+build
+**/*.tsbuildinfo
+
+# Test and lint detritus. The image does not run any of it.
+coverage
+bench
+**/.DS_Store
+
+# Local dev harness data written by scripts/dev-seed.mjs.
+.dev
+
+# Never read from inside the image. Excluded by extension rather than by name
+# so adding a document does not bust the npm install layer.
+.git
+.github
+.githooks
+Dockerfile
+.dockerignore
+**/*.md
