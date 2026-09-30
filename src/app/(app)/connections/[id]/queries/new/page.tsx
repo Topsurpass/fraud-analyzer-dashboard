@@ -1,12 +1,13 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
   createQuery,
   putFlagRules,
   putQueryCharts,
+  updateQuery,
 } from "@/services/api-client";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { PageBody } from "@/components/PageBody";
@@ -21,13 +22,24 @@ export default function NewQueryPage({ params }: { params: Promise<{ id: string 
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  /*
+   * Set once the POST has succeeded. A later step (the rules, the charts) can
+   * still fail, and pressing Save again must finish that step against the query
+   * that exists rather than create a second one with the same name.
+   */
+  const createdId = useRef<string | null>(null);
 
   const submit = async (values: QueryEditorValues) => {
     setBusy(true);
     setError(null);
     try {
       const { flag_rules: rules, charts, ...query } = values;
-      const created = await createQuery(id, query);
+      const created = createdId.current
+        ? // The analyst may have edited the SQL after the failure, so the retry
+          // writes the form as it is now.
+          await updateQuery(createdId.current, query)
+        : await createQuery(id, query);
+      createdId.current = created.id;
       // Two calls because rules hang off a query id that does not exist until
       // the POST returns. Saving them second means a rule failure cannot lose
       // the query the analyst just wrote.

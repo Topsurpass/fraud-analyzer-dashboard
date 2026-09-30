@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/services/api-client";
+import { ListsProvider } from "@/lib/ListsContext";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import NewQueryPage from "./page";
 
@@ -14,6 +15,7 @@ import NewQueryPage from "./page";
  */
 
 const createQuery = vi.hoisted(() => vi.fn());
+const updateQuery = vi.hoisted(() => vi.fn());
 const putFlagRules = vi.hoisted(() => vi.fn());
 const putQueryCharts = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
@@ -25,9 +27,11 @@ vi.mock("@/services/api-client", async () => {
   return {
     ...actual,
     createQuery,
+    updateQuery,
     putFlagRules,
     putQueryCharts,
     listConnections: vi.fn().mockResolvedValue([]),
+    listLists: vi.fn().mockResolvedValue([]),
     previewQuery: vi.fn(),
   };
 });
@@ -43,9 +47,11 @@ async function open() {
   await act(async () => {
     render(
       <ConnectionsProvider>
-        <Suspense fallback={null}>
-          <NewQueryPage params={Promise.resolve({ id: "c1" })} />
-        </Suspense>
+        <ListsProvider>
+          <Suspense fallback={null}>
+            <NewQueryPage params={Promise.resolve({ id: "c1" })} />
+          </Suspense>
+        </ListsProvider>
       </ConnectionsProvider>,
     );
   });
@@ -60,6 +66,7 @@ async function fillAndSave() {
 beforeEach(() => {
   vi.clearAllMocks();
   createQuery.mockResolvedValue({ id: "q1" });
+  updateQuery.mockResolvedValue({ id: "q1" });
   putFlagRules.mockResolvedValue({ query_id: "q1", rules: [] });
   putQueryCharts.mockResolvedValue({ query_id: "q1", charts: [] });
 });
@@ -118,5 +125,65 @@ describe("saving a new query", () => {
     await open();
     await fillAndSave();
     await waitFor(() => expect(order).toEqual(["query", "charts"]));
+  });
+
+  describe("when the rules are refused after the query was created", () => {
+    // A rule naming a list deleted in another tab is the reachable case: the
+    // query POST succeeds and the rules PUT answers 404 LIST_NOT_FOUND.
+    const gone = () =>
+      new ApiError({
+        kind: "http",
+        status: 404,
+        errorCode: "LIST_NOT_FOUND",
+        message: "No list with id 'abc'.",
+        url: "/queries/q1/flag-rules",
+      });
+
+    async function addListRule() {
+      await userEvent.click(screen.getByRole("button", { name: /add rule/i }));
+      await userEvent.type(screen.getByLabelText("Column"), "terminal");
+      await userEvent.selectOptions(screen.getByLabelText("Comparison"), "in_list");
+    }
+
+    it("says what to do rather than printing the engine's id", async () => {
+      putFlagRules.mockRejectedValue(gone());
+      await open();
+      await addListRule();
+      await fillAndSave();
+      expect(await screen.findByText(/no longer exists\. Pick another list\./)).toBeInTheDocument();
+      expect(screen.queryByText(/No list with id/)).not.toBeInTheDocument();
+    });
+
+    it("retries against the same query and never creates a second one", async () => {
+      putFlagRules.mockRejectedValueOnce(gone());
+      await open();
+      await addListRule();
+      await fillAndSave();
+      await screen.findByText(/no longer exists/);
+      expect(createQuery).toHaveBeenCalledTimes(1);
+
+      await userEvent.click(screen.getByRole("button", { name: /save query/i }));
+      await waitFor(() => expect(push).toHaveBeenCalledWith("/connections/c1"));
+
+      expect(createQuery).toHaveBeenCalledTimes(1);
+      expect(updateQuery).toHaveBeenCalledTimes(1);
+      expect(updateQuery.mock.calls[0][0]).toBe("q1");
+      expect(putFlagRules).toHaveBeenCalledTimes(2);
+      expect(putFlagRules.mock.calls[1][0]).toBe("q1");
+    });
+
+    it("writes edits made after the failure, since the query already exists", async () => {
+      putFlagRules.mockRejectedValueOnce(gone());
+      await open();
+      await addListRule();
+      await fillAndSave();
+      await screen.findByText(/no longer exists/);
+
+      await userEvent.type(screen.getByLabelText("Name"), " v2");
+      await userEvent.click(screen.getByRole("button", { name: /save query/i }));
+      await waitFor(() => expect(updateQuery).toHaveBeenCalled());
+      expect(updateQuery.mock.calls[0][1].name).toBe("Declines v2");
+      expect(createQuery).toHaveBeenCalledTimes(1);
+    });
   });
 });

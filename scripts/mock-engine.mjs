@@ -26,7 +26,9 @@ const user = {
   id: "u1",
   email: "ada@fraudguard.io",
   full_name: "Ada Lovelace",
-  role: "admin",
+  // MOCK_ROLE=analyst signs in as an analyst, so the 403 a non-owner gets on
+  // someone else's list can be looked at.
+  role: process.env.MOCK_ROLE === "analyst" ? "analyst" : "admin",
   is_active: true,
   must_change_password: false,
   last_login_at: iso(3_600_000),
@@ -195,6 +197,9 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   table_hint: null,
   row_limit: 1000,
   poll_interval_ms: 5000,
+  // Three queries are the signed-in user's; the rest belong to somebody else,
+  // so an analyst sees the difference between rules they can and cannot name.
+  owner_id: ["q_table", "q_flagged", "q_mix"].includes(id) ? "u1" : "u2",
   charts: charts.filter((c) => c.query_id === id),
   created_at: iso(86_400_000),
   updated_at: iso(86_400_000),
@@ -313,6 +318,135 @@ const users = [
   { ...user, id: "u3", email: "alan@fraudguard.io", full_name: "Alan Turing", role: "analyst", is_active: false },
 ];
 
+/* ----------------------------------------------------------------- lists
+ * In memory, like everything here. Mirrors the engine's rules closely enough
+ * that the pages behave the same against it: names are unique ignoring case,
+ * items are de-duplicated on a trimmed, case-folded (or numeric) key, and a
+ * list that a saved flag rule references cannot be deleted.
+ */
+const itemLists = [
+  {
+    id: "l1",
+    name: "Blocked terminals",
+    description: "Terminals pulled after the August chargeback wave.",
+    items: ["T-1041", "T-1042", "T-2207"],
+    created_by: "u1",
+    created_at: iso(86_400_000 * 6),
+    updated_at: iso(86_400_000 * 2),
+  },
+  {
+    id: "l2",
+    name: "High-risk countries",
+    description: null,
+    items: ["KP", "IR", "SY"],
+    created_by: "u2",
+    created_at: iso(86_400_000 * 4),
+    updated_at: iso(86_400_000 * 4),
+  },
+];
+let nextListId = 3;
+
+/** Flag rules saved through PUT, by query id. Enough to know what uses a list. */
+const savedRules = new Map();
+
+/*
+ * The engine keys items with Python's Decimal: decimal literals only (no hex,
+ * no "Infinity"), compared by value. Same rule as `itemKey` in
+ * src/components/lists/items.ts, so duplicates_dropped agrees with the form.
+ */
+const DECIMAL = /^([+-]?)(\d+(?:_\d+)*)?(?:\.(\d+(?:_\d+)*)?)?(?:[eE]([+-]?\d+))?$/;
+function listKey(item) {
+  const text = item.trim();
+  const m = DECIMAL.exec(text);
+  if (m && (m[2] || m[3])) {
+    const whole = (m[2] ?? "").replaceAll("_", "");
+    const fraction = (m[3] ?? "").replaceAll("_", "");
+    const digits = (whole + fraction).replace(/^0+/, "");
+    if (digits === "") return "n:0";
+    const trimmed = digits.replace(/0+$/, "");
+    const power = Number(m[4] ?? "0") - fraction.length + (digits.length - trimmed.length);
+    return `n:${m[1] === "-" ? "-" : ""}${trimmed}e${power}`;
+  }
+  return `s:${text.toUpperCase().toLowerCase()}`;
+}
+
+const MAX_LIST_ITEMS = Number(process.env.MOCK_MAX_LIST_ITEMS ?? 20_000);
+
+const mayChange = (list) => user.role === "admin" || list.created_by === user.id;
+
+/**
+ * Rules referencing a list, split like the engine: the ones on queries the
+ * caller can see are named, the rest are only counted. An admin sees all.
+ */
+function rulesUsing(listId) {
+  const rules = [];
+  let hidden = 0;
+  for (const [queryId, saved] of savedRules) {
+    const query = queries.find((q) => q.id === queryId);
+    const visible = user.role === "admin" || query?.owner_id === user.id;
+    for (const rule of saved) {
+      if (!rule.conditions.some((c) => c.list_id === listId)) continue;
+      if (visible) {
+        rules.push({ rule_name: rule.name, query_id: queryId, query_name: query?.name ?? queryId });
+      } else {
+        hidden += 1;
+      }
+    }
+  }
+  return { rules, hidden };
+}
+
+const listSummary = (list) => ({
+  id: list.id,
+  name: list.name,
+  description: list.description,
+  item_count: list.items.length,
+  rule_count: (({ rules, hidden }) => rules.length + hidden)(rulesUsing(list.id)),
+  created_by: list.created_by,
+  created_at: list.created_at,
+  updated_at: list.updated_at,
+});
+
+const listRead = (list) => ({ ...listSummary(list), items: list.items });
+
+/** Returns an error response for a bad write body, or the cleaned fields. */
+function cleanListBody(raw, ignoreId) {
+  let body;
+  try {
+    body = JSON.parse(raw || "{}");
+  } catch {
+    return { error: [422, "REQUEST_VALIDATION_ERROR", "Body is not JSON."] };
+  }
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return { error: [422, "REQUEST_VALIDATION_ERROR", "name: field required"] };
+  if (!Array.isArray(body.items)) return { error: [422, "REQUEST_VALIDATION_ERROR", "items: field required"] };
+  if (itemLists.some((l) => l.id !== ignoreId && l.name.toLowerCase() === name.toLowerCase())) {
+    return { error: [409, "LIST_NAME_TAKEN", "A list with that name already exists."] };
+  }
+  if (body.items.length > MAX_LIST_ITEMS) {
+    return {
+      error: [
+        422,
+        "REQUEST_VALIDATION_ERROR",
+        `A list can hold at most ${MAX_LIST_ITEMS} items; this one has ${body.items.length}.`,
+      ],
+    };
+  }
+  const seen = new Set();
+  const items = [];
+  for (const item of body.items.map((i) => String(i).trim()).filter(Boolean)) {
+    if (!seen.has(listKey(item))) {
+      seen.add(listKey(item));
+      items.push(item);
+    }
+  }
+  const received = body.items.length;
+  return {
+    fields: { name, description: body.description?.trim() || null, items },
+    counts: { received, kept: items.length, duplicates_dropped: received - items.length },
+  };
+}
+
 function send(res, status, body) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(body === undefined ? "" : JSON.stringify(body));
@@ -371,7 +505,96 @@ createServer((req, res) => {
       return found ? send(res, 200, found) : send(res, 404, { message: "not found" });
     }
     m = path.match(/^\/queries\/([^/]+)\/flag-rules$/);
-    if (m) return send(res, 200, { query_id: m[1], rules: [] });
+    if (m && req.method === "PUT") {
+      const put = JSON.parse(body || "{}").rules ?? [];
+      const missing = put
+        .flatMap((r) => r.conditions)
+        .find((c) => c.list_id && !itemLists.some((l) => l.id === c.list_id));
+      if (missing) {
+        return send(res, 404, {
+          error_code: "LIST_NOT_FOUND",
+          message: `No list with id '${missing.list_id}'.`,
+          detail: null,
+        });
+      }
+      const stamp = new Date().toISOString();
+      const rules = put.map((rule, position) => ({
+        id: `fr_${m[1]}_${position}`,
+        query_id: m[1],
+        name: rule.name,
+        severity: rule.severity,
+        enabled: rule.enabled,
+        position,
+        conditions: rule.conditions.map((c, i) => {
+          const list = c.list_id ? itemLists.find((l) => l.id === c.list_id) : null;
+          return {
+            id: `fc_${m[1]}_${position}_${i}`,
+            position: i,
+            column_name: c.column_name,
+            operator: c.operator,
+            value: list ? null : (c.value ?? null),
+            value2: list ? null : (c.value2 ?? null),
+            list_id: list ? list.id : null,
+            list_name: list ? list.name : null,
+          };
+        }),
+        created_at: stamp,
+        updated_at: stamp,
+      }));
+      savedRules.set(m[1], rules);
+      return send(res, 200, { query_id: m[1], rules });
+    }
+    if (m) return send(res, 200, { query_id: m[1], rules: savedRules.get(m[1]) ?? [] });
+    if (path === "/lists") {
+      if (req.method === "POST") {
+        const cleaned = cleanListBody(body, null);
+        if (cleaned.error) return send(res, cleaned.error[0], { error_code: cleaned.error[1], message: cleaned.error[2], detail: null });
+        const stamp = new Date().toISOString();
+        const list = { id: `l${nextListId++}`, ...cleaned.fields, created_by: user.id, created_at: stamp, updated_at: stamp };
+        itemLists.push(list);
+        return send(res, 201, { ...listRead(list), ...cleaned.counts });
+      }
+      return send(res, 200, itemLists.map(listSummary));
+    }
+    m = path.match(/^\/lists\/([^/]+)$/);
+    if (m) {
+      const list = itemLists.find((l) => l.id === m[1]);
+      if (!list) return send(res, 404, { error_code: "LIST_NOT_FOUND", message: "No such list.", detail: null });
+      const forbidden = () =>
+        send(res, 403, {
+          error_code: "FORBIDDEN",
+          message: "Only the person who created this list, or an admin, can change it.",
+          detail: { list_id: list.id },
+        });
+      if (req.method === "PUT") {
+        if (!mayChange(list)) return forbidden();
+        const cleaned = cleanListBody(body, list.id);
+        if (cleaned.error) return send(res, cleaned.error[0], { error_code: cleaned.error[1], message: cleaned.error[2], detail: null });
+        Object.assign(list, cleaned.fields, { updated_at: new Date().toISOString() });
+        return send(res, 200, { ...listRead(list), ...cleaned.counts });
+      }
+      if (req.method === "DELETE") {
+        if (!mayChange(list)) return forbidden();
+        const { rules, hidden } = rulesUsing(list.id);
+        if (rules.length + hidden > 0) {
+          // Same wording as the engine, hidden count included.
+          const names = [...new Set(rules.map((r) => r.rule_name))].sort().join(", ");
+          let message = `List '${list.name}' is used by`;
+          if (rules.length > 0) message += `: ${names}`;
+          if (hidden > 0) {
+            message += `${rules.length > 0 ? " and " : ": "}${hidden} rule${hidden === 1 ? "" : "s"} on queries you cannot see`;
+          }
+          return send(res, 409, {
+            error_code: "LIST_IN_USE",
+            message: `${message}. Remove it from those rules first.`,
+            detail: { list_id: list.id, rules, hidden_rule_count: hidden },
+          });
+        }
+        itemLists.splice(itemLists.indexOf(list), 1);
+        return send(res, 204);
+      }
+      return send(res, 200, listRead(list));
+    }
     m = path.match(/^\/queries\/([^/]+)\/logs$/);
     if (m) return send(res, 200, []);
     if (path === "/users") return send(res, 200, users);

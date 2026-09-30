@@ -69,11 +69,10 @@ export function Field({
         {label}
       </label>
       {children}
-      {error ? (
-        <p className="text-[11.5px] text-change">{error}</p>
-      ) : hint ? (
-        <p className="text-[11.5px] leading-relaxed text-muted">{hint}</p>
-      ) : null}
+      {error ? <p className="text-[11.5px] text-change">{error}</p> : null}
+      {/* Kept beside the error: the hint is the rule the error is about, and
+          removing it at the moment of failure takes the answer away. */}
+      {hint ? <p className="text-[11.5px] leading-relaxed text-muted">{hint}</p> : null}
     </div>
   );
 }

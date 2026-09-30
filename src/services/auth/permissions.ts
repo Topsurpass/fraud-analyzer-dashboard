@@ -39,6 +39,10 @@ export type Capability =
 	| "queries.run"
 	| "flagRules.write"
 	| "dashboards.write"
+	/* Lists: any signed-in user creates and reads them. Editing or deleting one
+	   is creator-or-admin on the engine, which answers 403 to anyone else, so
+	   the role table cannot express it; see the note on ownership above. */
+	| "lists.write"
 	/* Administration. */
 	| "users.manage"
 	| "auditLog.view";
@@ -55,6 +59,7 @@ export const CAPABILITIES: readonly Capability[] = [
 	"queries.run",
 	"flagRules.write",
 	"dashboards.write",
+	"lists.write",
 	"users.manage",
 	"auditLog.view",
 ];
@@ -65,6 +70,7 @@ const ANALYST: readonly Capability[] = [
 	"queries.run",
 	"flagRules.write",
 	"dashboards.write",
+	"lists.write",
 ];
 
 const ADMIN: readonly Capability[] = CAPABILITIES;

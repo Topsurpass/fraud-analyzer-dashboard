@@ -72,6 +72,18 @@ export function Rail({
               {collapsed ? null : <span className="truncate">Overview</span>}
             </RailLink>
           </li>
+          <li>
+            <RailLink
+              href="/lists"
+              active={pathname.startsWith("/lists")}
+              onNavigate={onNavigate}
+              collapsed={collapsed}
+              title="Lists"
+            >
+              <NavGlyph kind="lists" />
+              {collapsed ? null : <span className="truncate">Lists</span>}
+            </RailLink>
+          </li>
         </ul>
         <Section
           title="Connections"
@@ -454,7 +466,7 @@ function Section({
  * Glyphs for the nav, so the collapsed rail keeps distinguishable rows instead
  * of identical dots. 16px, 1.5 stroke, currentColor.
  */
-function NavGlyph({ kind }: { kind: "overview" | "people" | "log" }) {
+function NavGlyph({ kind }: { kind: "overview" | "lists" | "people" | "log" }) {
   return (
     <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className="shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
       {kind === "overview" ? (
@@ -463,6 +475,11 @@ function NavGlyph({ kind }: { kind: "overview" | "people" | "log" }) {
           <rect x={9} y={2} width={5} height={3.5} rx={1.4} />
           <rect x={9} y={7.5} width={5} height={6.5} rx={1.4} />
           <rect x={2} y={10} width={5} height={4} rx={1.4} />
+        </>
+      ) : kind === "lists" ? (
+        <>
+          <path d="M6 4h7.5M6 8h7.5M6 12h7.5" />
+          <path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
         </>
       ) : kind === "people" ? (
         <>

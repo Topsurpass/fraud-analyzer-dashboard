@@ -17,6 +17,7 @@
 import {
 	BINARY_OPERATORS,
 	FLAG_SEVERITIES,
+	LIST_OPERATORS,
 	NULLARY_OPERATORS,
 	OPERATOR_LABELS,
 	type FlagCondition,
@@ -24,8 +25,10 @@ import {
 	type FlagRule,
 	type FlagSeverity,
 } from "@/contracts/api";
-import { useState } from "react";
+import Link from "next/link";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button, Field, Input, Panel, Select } from "@/components/ui";
+import { useLists } from "@/lib/ListsContext";
 
 /** Offered in this order: the comparisons people reach for first come first. */
 const OPERATORS = Object.keys(OPERATOR_LABELS) as FlagOperator[];
@@ -36,6 +39,11 @@ export function takesNoValue(operator: FlagOperator): boolean {
 
 export function takesTwoValues(operator: FlagOperator): boolean {
 	return BINARY_OPERATORS.includes(operator);
+}
+
+/** "Is in list" and "is not in list": the value is a named list, not typed. */
+export function takesList(operator: FlagOperator): boolean {
+	return LIST_OPERATORS.includes(operator);
 }
 
 /**
@@ -97,6 +105,10 @@ export function validateRules(rules: FlagRule[]): Map<string, string> {
 				return;
 			}
 			if (takesNoValue(condition.operator)) return;
+			if (takesList(condition.operator)) {
+				if (!condition.list_id) problems.set(key, "Pick a list.");
+				return;
+			}
 			if (!condition.value?.trim()) {
 				problems.set(key, "This comparison needs a value.");
 				return;
@@ -128,10 +140,36 @@ export function FlagRuleEditor({
 	disabled = false,
 }: FlagRuleEditorProps) {
 	const problems = validateRules(rules);
+	const lists = useLists();
 	// Clearing every rule at once is worth a second press. Removing one rule is
 	// obvious to undo by retyping it; removing eight is not, and the button sits
 	// next to "Add rule" where a misclick is cheap to make.
 	const [confirmingClear, setConfirmingClear] = useState(false);
+
+	/*
+	 * A list made in another tab, or by someone else since sign-in, is not in
+	 * the shell's copy. Before calling a referenced list "removed", ask the
+	 * engine once. A layout effect, so the reload has started (and the option
+	 * reads "Loading…") before the first paint rather than flashing "removed".
+	 */
+	const askedForLists = useRef(false);
+	const someListMissing = rules.some((rule) =>
+		rule.conditions.some(
+			(condition) =>
+				takesList(condition.operator) &&
+				condition.list_id &&
+				!lists.lists.some((list) => list.id === condition.list_id),
+		),
+	);
+	const { reload: reloadLists } = lists;
+	useLayoutEffect(() => {
+		if (askedForLists.current || lists.initial || lists.error || !someListMissing) return;
+		askedForLists.current = true;
+		reloadLists();
+	}, [lists.initial, lists.error, someListMissing, reloadLists]);
+
+	// Set once "Manage lists" is followed, which is when a refresh has a point.
+	const [managedLists, setManagedLists] = useState(false);
 
 	const patchRule = (index: number, patch: Partial<FlagRule>) => {
 		onChange(rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
@@ -157,6 +195,17 @@ export function FlagRuleEditor({
 		// Clear values the new operator does not read, so a switch to "is empty"
 		// and back cannot leave a stale bound behind that nothing displayed.
 		const patch: Partial<FlagCondition> = { operator };
+		if (takesList(operator)) {
+			// A list operator reads only the list. Typed values would be
+			// discarded by the engine, and leaving them in state would bring
+			// them back if the analyst switched away again.
+			patch.value = "";
+			patch.value2 = "";
+		} else {
+			// The reverse: a list the analyst can no longer see must not ride
+			// along on a comparison that ignores it.
+			patch.list_id = null;
+		}
 		if (takesNoValue(operator)) {
 			patch.value = "";
 			patch.value2 = "";
@@ -291,6 +340,10 @@ export function FlagRuleEditor({
 							<div className="space-y-2 p-2">
 								{rule.conditions.map((condition, conditionIndex) => {
 									const problem = problems.get(`cond:${ruleIndex}:${conditionIndex}`);
+									// Read out with the control it is about, so a screen reader hears
+									// "Pick a list." on the picker and not just a paragraph below.
+									const problemId = `cond-problem-${ruleIndex}-${conditionIndex}`;
+									const describedBy = problem ? problemId : undefined;
 									return (
 										<div key={conditionIndex} className="space-y-1">
 											<div className="flex flex-wrap items-center gap-2">
@@ -303,6 +356,7 @@ export function FlagRuleEditor({
 												{columns.length > 0 ? (
 													<Select
 														aria-label="Column"
+														aria-describedby={describedBy}
 														value={condition.column_name}
 														disabled={disabled}
 														onChange={(event) =>
@@ -332,6 +386,7 @@ export function FlagRuleEditor({
 												) : (
 													<Input
 														aria-label="Column"
+														aria-describedby={describedBy}
 														value={condition.column_name}
 														disabled={disabled}
 														onChange={(event) =>
@@ -363,9 +418,47 @@ export function FlagRuleEditor({
 													))}
 												</Select>
 
-												{takesNoValue(condition.operator) ? null : (
+												{takesList(condition.operator) ? (
+													<>
+														<Select
+															aria-label="List"
+															aria-describedby={describedBy}
+															value={condition.list_id ?? ""}
+															disabled={disabled}
+															onChange={(event) =>
+																patchCondition(ruleIndex, conditionIndex, {
+																	list_id: event.target.value || null,
+																})
+															}
+														>
+															<option value="">Pick a list…</option>
+															{/* A rule can name a list this session has not loaded
+															    (still loading, or gone). Keeping it as an option
+															    means editing the rule does not silently rewrite
+															    it to "no list". */}
+															{!condition.list_id ||
+															lists.lists.some((list) => list.id === condition.list_id) ? null : (
+																<option value={condition.list_id}>
+																	{lists.error
+																		? "Not loaded"
+																		: lists.initial || lists.loading
+																			? "Loading…"
+																			: "Unknown list (removed)"}
+																</option>
+															)}
+															{lists.lists.map((list) => (
+																<option key={list.id} value={list.id}>
+																	{list.name} ({list.item_count})
+																</option>
+															))}
+														</Select>
+													</>
+												) : null}
+
+												{takesNoValue(condition.operator) || takesList(condition.operator) ? null : (
 													<Input
 														aria-label="Value"
+														aria-describedby={describedBy}
 														value={condition.value ?? ""}
 														disabled={disabled}
 														onChange={(event) =>
@@ -421,11 +514,49 @@ export function FlagRuleEditor({
 											</div>
 
 											{problem ? (
-												<p className="text-[12.5px] text-change">{problem}</p>
+												<p id={problemId} className="text-[12.5px] text-change">
+													{problem}
+												</p>
 											) : null}
 										</div>
 									);
 								})}
+
+								{rule.conditions.some((condition) => takesList(condition.operator)) ? (
+									<div className="flex flex-wrap items-center gap-2">
+										{/* A new tab, because this editor holds unsaved SQL, rules and
+										    charts that leaving the page would throw away. Once per
+										    rule, not once per list condition. */}
+										<Link
+											href="/lists"
+											target="_blank"
+											rel="noopener"
+											title="Opens in a new tab so this rule is not lost"
+											onClick={() => setManagedLists(true)}
+											className="text-[12.5px] font-medium text-accent hover:underline"
+										>
+											Manage lists (new tab)
+										</Link>
+										{/* Only useful once the other tab may have changed something. */}
+										{managedLists && !lists.error ? (
+											<Button type="button" tone="ghost" onClick={lists.reload}>
+												Refresh lists
+											</Button>
+										) : null}
+										{lists.error ? (
+											<span role="alert" className="text-[12.5px] text-change">
+												Could not load lists: {lists.error.displayMessage}{" "}
+												<button
+													type="button"
+													onClick={lists.reload}
+													className="font-medium underline"
+												>
+													Retry
+												</button>
+											</span>
+										) : null}
+									</div>
+								) : null}
 
 								<Button
 									type="button"

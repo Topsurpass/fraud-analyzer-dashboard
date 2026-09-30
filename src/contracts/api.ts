@@ -267,6 +267,8 @@ export type FlagOperator =
 	| "starts_with"
 	| "in"
 	| "not_in"
+	| "in_list"
+	| "not_in_list"
 	| "is_null"
 	| "is_not_null"
 	| "between";
@@ -275,6 +277,12 @@ export type FlagOperator =
 export const NULLARY_OPERATORS: readonly FlagOperator[] = ["is_null", "is_not_null"];
 /** Operators that need both `value` and `value2`. */
 export const BINARY_OPERATORS: readonly FlagOperator[] = ["between"];
+
+/**
+ * Operators that compare against a named list instead of a typed value. They
+ * read `list_id` and never `value` or `value2`.
+ */
+export const LIST_OPERATORS: readonly FlagOperator[] = ["in_list", "not_in_list"];
 
 /** Labels for the operator dropdown, in the order they should be offered. */
 export const OPERATOR_LABELS: Record<FlagOperator, string> = {
@@ -290,6 +298,8 @@ export const OPERATOR_LABELS: Record<FlagOperator, string> = {
 	starts_with: "starts with",
 	in: "is one of",
 	not_in: "is not one of",
+	in_list: "is in list",
+	not_in_list: "is not in list",
 	is_null: "is empty",
 	is_not_null: "is not empty",
 };
@@ -299,11 +309,15 @@ export interface FlagCondition {
 	operator: FlagOperator;
 	value?: string | null;
 	value2?: string | null;
+	/** Set for the list operators only; the engine clears it for every other. */
+	list_id?: string | null;
 }
 
 export interface FlagConditionRead extends FlagCondition {
 	id: string;
 	position: number;
+	/** The list's current name, or null when the condition names no list. */
+	list_name?: string | null;
 }
 
 export interface FlagRule {
@@ -332,6 +346,61 @@ export interface FlagRuleSetRead {
 
 export interface FlagRuleSetUpdate {
 	rules: FlagRule[];
+}
+
+/* -------------------------------------------------------------------------
+ * Lists
+ *
+ * A named, described set of items that any signed-in user may read and use in
+ * a flag rule ("column is in list X"). Only the creator or an admin edits or
+ * deletes one; the engine answers 403 FORBIDDEN to anyone else.
+ * ---------------------------------------------------------------------- */
+
+export interface ItemListSummary {
+	id: string;
+	name: string;
+	description: string | null;
+	item_count: number;
+	/** How many flag rules reference this list. A list in use cannot be deleted. */
+	rule_count: number;
+	created_by: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ItemListRead extends ItemListSummary {
+	items: string[];
+}
+
+export interface ItemListWrite {
+	name: string;
+	description?: string | null;
+	items: string[];
+}
+
+/** Create and update also report what the engine did with the pasted items. */
+export interface ItemListSaved extends ItemListRead {
+	received: number;
+	kept: number;
+	duplicates_dropped: number;
+}
+
+/**
+ * The 409 `LIST_IN_USE` detail: `{ list_id, rules, hidden_rule_count }`.
+ * `rules` names only rules on queries the caller can see; the rest are counted
+ * in `hidden_rule_count`, so `rules` can be empty while the list is in use.
+ */
+export interface ListInUseDetail {
+	list_id: string;
+	rules: ListUsage[];
+	hidden_rule_count: number;
+}
+
+/** One rule that blocks deleting a list, from the 409 `LIST_IN_USE` detail. */
+export interface ListUsage {
+	rule_name: string;
+	query_id: string;
+	query_name: string;
 }
 
 /** One flagged row. `index` is a position in the result's `rows`. */

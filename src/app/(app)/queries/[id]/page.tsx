@@ -170,6 +170,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
               operator: condition.operator,
               value: condition.value ?? "",
               value2: condition.value2 ?? "",
+              list_id: condition.list_id ?? null,
             })),
           }))}
           submitLabel="Save changes"

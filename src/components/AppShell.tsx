@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { ListsProvider } from "@/lib/ListsContext";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import { DashboardsProvider } from "@/services/dashboards";
 import { FlaggedProvider } from "@/services/flagged/FlaggedContext";
@@ -57,6 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ConnectionsProvider>
       <DashboardsProvider>
         <FlaggedProvider>
+        <ListsProvider>
       <div className="flex h-dvh min-h-0 w-full">
         <aside
           className="hidden shrink-0 border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
@@ -89,6 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NavContext.Provider value={openNav}>{children}</NavContext.Provider>
         </div>
       </div>
+        </ListsProvider>
         </FlaggedProvider>
       </DashboardsProvider>
     </ConnectionsProvider>

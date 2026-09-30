@@ -15,6 +15,7 @@ import { TableView } from "./charts/TableView";
 import { buildTable } from "@/services/charts/shape";
 import { SchemaBrowser } from "./SchemaBrowser";
 import { FlagRuleEditor } from "./FlagRuleEditor";
+import { queryErrorMessage } from "./lists/items";
 import {
   ChartSetEditor,
   emptyChart,
@@ -317,7 +318,7 @@ export function QueryEditor({
 
         {error ? (
           <p className="border border-change/40 bg-change/5 px-3 py-2 text-[13px] text-change">
-            {error.displayMessage}
+            {queryErrorMessage(error)}
           </p>
         ) : null}
 
@@ -385,7 +386,7 @@ function PreviewPanel({
     >
       {error ? (
         <div className="p-3">
-          <p className="text-[13px] text-change">{error.displayMessage}</p>
+          <p className="text-[13px] text-change">{queryErrorMessage(error)}</p>
           {error.errorCode ? (
             <p className="tnum mt-1 text-[11.5px] tracking-wide text-muted uppercase">
               {error.errorCode}

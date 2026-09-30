@@ -121,6 +121,7 @@ const CAPABILITY_SENTENCES: Record<(typeof ROLE_CAPABILITIES)["admin"][number], 
 	"queries.run": "Run queries and poll them live",
 	"flagRules.write": "Write flag rules and work the flagged queue",
 	"dashboards.write": "Build dashboards out of saved queries",
+	"lists.write": "Create named lists for flag rules to check against",
 	"users.manage": "Open, deactivate and re-role accounts",
 	"auditLog.view": "Read the audit log",
 };
