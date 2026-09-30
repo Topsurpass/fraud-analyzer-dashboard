@@ -3,6 +3,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import type { ChartType, RunResponse, SavedQueryRead } from "@/contracts/api";
 import {
+  buildBiaxial,
   buildCartesian,
   buildCompare,
   buildHeatmap,
@@ -20,6 +21,7 @@ import { formatDuration, formatHash, formatInteger, formatRelative } from "@/ser
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
+import { BiaxialBarChartView } from "./charts/BiaxialBarChartView";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { FlagStrip } from "./charts/FlagStrip";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
@@ -198,6 +200,11 @@ export function ChartCard({
         return { kind: "table" as const, data: buildTable(result) };
       case "bar":
         return { kind: "bar" as const, data: buildCartesian(result) };
+      // Same shaping as a bar: a stack is a bar whose series share a column.
+      case "stacked_bar":
+        return { kind: "stacked_bar" as const, data: buildCartesian(result) };
+      case "biaxial_bar":
+        return { kind: "biaxial_bar" as const, data: buildBiaxial(result) };
       case "compare":
         return { kind: "compare" as const, data: buildCompare(result) };
       case "compare_grid":
@@ -309,6 +316,8 @@ export function ChartCard({
           <CompareGridView data={view.data} title={cardTitle} chartId={spec?.id} />
         ) : view.kind === "movers" ? (
           <MoversView data={view.data} title={cardTitle} />
+        ) : view.kind === "biaxial_bar" ? (
+          <BiaxialBarChartView data={view.data} title={cardTitle} />
         ) : view.kind === "heatmap" ? (
           <HeatmapView data={view.data} title={cardTitle} />
         ) : view.kind === "pie" ? (

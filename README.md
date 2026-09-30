@@ -174,8 +174,9 @@ contract at the boundary. Routes hold glue only.
 
 ### Charts built for a fraud queue
 
-Five of the nine chart types answer "what is the shape of this". Four answer the
-questions an analyst actually opens the app with.
+Seven of the eleven chart types answer "what is the shape of this" (line, bar,
+stacked bar, two-axis bar, pie, number, table). Four answer the questions an
+analyst actually opens the app with.
 
 **`compare` - the same measure over two consecutive windows.** Configure a time
 bucket (`x_field`) and a measure (`y_field`), and write a query returning *twice*
@@ -384,6 +385,51 @@ pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
 
 The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
 and filtered rows, and flag marks stay with their row through a sort.
+
+### Stacked and two-axis bars
+
+Two bar variants, both drawn by the same tooltip, legend and flagging as a plain
+bar chart.
+
+**`stacked_bar` - the total and what it is made of.** Same fields as a bar
+chart: `x_field` (category), `y_field` (value), and an optional `series_field`
+that splits each bar into stacked segments. With no series it is an ordinary bar.
+Rows arrive in long form (one row per x and series), are pivoted exactly as a
+multi-series bar is, and only the top segment of each stack is rounded. The
+tooltip adds a total. Stacks are positive-only: a zero or negative segment takes
+no height.
+
+**`biaxial_bar` - a count beside a rate.** Two different measures over one
+category axis, each on its own y axis, so a count in the thousands and a
+percentage under one are both readable. A chart spec carries one `y_field`, so
+the mapping is:
+
+| Field | Meaning on this chart |
+| --- | --- |
+| `x_field` | category axis |
+| `y_field` | **left-axis** measure (first bar colour) |
+| `series_field` | **right-axis** measure column (second bar colour) |
+
+The query is in wide form, one row per x with a column per measure:
+
+```sql
+SELECT strftime('%H:00', occurred_at) AS bucket,
+       COUNT(*)                        AS txns,
+       ROUND(100.0 * SUM(status = 'declined') / COUNT(*), 1) AS decline_rate_pct
+FROM transactions GROUP BY 1
+```
+
+Each axis takes its bar's colour and the legend says "left axis" / "right axis"
+in words, so nothing depends on telling two hues apart. A row that a flag rule
+catches flags both of its bars. If the right-axis column is missing, or is the
+same column as the left, the card says so instead of drawing one axis.
+
+The editor relabels the fields for this type ("Left-axis measure", "Right-axis
+measure"); on the wire they are still `y_field` and `series_field`, which is what
+keeps the contract unchanged. **The engine must list both types**: add
+`stacked_bar` and `biaxial_bar` to `app/policy/chart_types.py` (a new member is
+stored as a string, so no migration) and deploy it before choosing either in the
+dashboard, or the engine refuses the chart type.
 
 ### How a chart shows what was flagged
 

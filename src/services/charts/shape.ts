@@ -496,6 +496,118 @@ export function buildCartesian(result: ResultSet): CartesianData {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Two measures on two axes
+// ---------------------------------------------------------------------------
+
+export interface BiaxialData {
+  /** One point per x. The two measures live under their own column names. */
+  data: ChartPoint[];
+  xKey: string;
+  /** Plotted against the left axis. */
+  leftKey: string;
+  /** Plotted against the right axis. */
+  rightKey: string;
+  warnings: string[];
+  hasAlerts: boolean;
+}
+
+const EMPTY_BIAXIAL: BiaxialData = {
+  data: [],
+  xKey: "",
+  leftKey: "",
+  rightKey: "",
+  warnings: [],
+  hasAlerts: false,
+};
+
+/**
+ * Two different measures over one category axis, each against its own y axis.
+ *
+ * The use is a count beside a rate: approved volume in the thousands next to a
+ * decline percentage under one, which on a shared axis would flatten the rate
+ * into the floor. Each measure gets the scale that suits it.
+ *
+ * A chart spec names one `y_field`, so the second measure rides in
+ * `series_field`, read here as "the column for the right-hand axis". That keeps
+ * the wire contract unchanged and suits the natural shape of the query: one row
+ * per x with a column per measure (wide form), not the long form a real series
+ * split needs. `y_field` is the left axis.
+ *
+ * A row flags both of its bars: the rule matched the row, not one column of it.
+ */
+export function buildBiaxial(result: ResultSet): BiaxialData {
+  const { columns, rows } = result;
+  const fields = resolveFields(result);
+  const warnings = [...fields.warnings];
+
+  if (!fields.xKey || !fields.yKey) return { ...EMPTY_BIAXIAL, warnings };
+  if (!fields.seriesKey) {
+    return {
+      ...EMPTY_BIAXIAL,
+      warnings: [
+        ...warnings,
+        "A two-axis chart needs a second measure: set the right-axis column (series field).",
+      ],
+    };
+  }
+  if (fields.seriesKey === fields.yKey) {
+    return {
+      ...EMPTY_BIAXIAL,
+      warnings: [
+        ...warnings,
+        `Both axes point at "${fields.yKey}". Pick a different column for the right axis.`,
+      ],
+    };
+  }
+
+  const xIndex = columns.indexOf(fields.xKey);
+  const leftIndex = columns.indexOf(fields.yKey);
+  const rightIndex = columns.indexOf(fields.seriesKey);
+  const { xKey, yKey: leftKey, seriesKey: rightKey } = fields;
+
+  const anomalies = detectRowAnomalies({
+    columns,
+    rows,
+    valueColumn: leftKey,
+    flags: result.flags,
+  });
+  const flagged = anomalies.flags;
+
+  const points: ChartPoint[] = rows.map((row, index) => {
+    const left = toNumber(row[leftIndex]);
+    const right = toNumber(row[rightIndex]);
+    const isFlagged = flagged[index] === true;
+    const point: ChartPoint = {
+      [xKey]: row[xIndex] ?? null,
+      // NaN becomes null: Recharts draws a gap for a missing value, where NaN
+      // draws a bar of unknown height.
+      [leftKey]: Number.isFinite(left) ? left : null,
+      [rightKey]: Number.isFinite(right) ? right : null,
+      __alert: { [leftKey]: isFlagged, [rightKey]: isFlagged },
+    };
+    if (isFlagged) {
+      const mark = mergeFlagMark(
+        undefined,
+        anomalies.ruleNames[index] ?? [],
+        anomalies.severities[index] ?? null,
+      );
+      point.__flag = { [leftKey]: mark, [rightKey]: mark };
+    }
+    return point;
+  });
+
+  const hasAlerts = flagged.some(Boolean);
+  const data = downsamplePreservingAlerts(
+    points,
+    MAX_PLOT_POINTS,
+    (point) => (typeof point[leftKey] === "number" ? (point[leftKey] as number) : Number.NaN),
+    (point) => Object.values((point.__alert ?? {}) as Record<string, boolean>).some(Boolean),
+  ) as ChartPoint[];
+
+  return { data, xKey, leftKey, rightKey, warnings, hasAlerts };
+}
+
 export interface PieSlice {
   name: string;
   value: number;

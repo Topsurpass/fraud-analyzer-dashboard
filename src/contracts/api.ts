@@ -18,7 +18,9 @@ export type ChartType =
 	| "compare"
 	| "movers"
 	| "compare_grid"
-	| "heatmap";
+	| "heatmap"
+	| "stacked_bar"
+	| "biaxial_bar";
 
 export const DB_TYPES: readonly DbType[] = ["postgres", "mysql", "sqlite"];
 
@@ -70,6 +72,8 @@ export const CHART_TYPES: readonly ChartType[] = [
 	"movers",
 	"compare_grid",
 	"heatmap",
+	"stacked_bar",
+	"biaxial_bar",
 ];
 
 /** Default ports the engine expects, used to prefill the connection form. */

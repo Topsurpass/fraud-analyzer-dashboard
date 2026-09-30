@@ -109,6 +109,24 @@ const runs = {
     columns: ["outcome", "count"],
     rows: [["approved", 41820], ["review", 3290], ["declined", 5610], ["blocked", 842], ["refunded", 611], ["disputed", 204]],
   },
+  // Long form: one row per hour and outcome, for the stacked bar.
+  stack: {
+    columns: ["hour", "outcome", "count"],
+    rows: labels.slice(-12).flatMap((l, i) => [
+      [l, "approved", Math.round(1500 + Math.sin(i / 2) * 300)],
+      [l, "review", Math.round(120 + i * 6)],
+      [l, "declined", Math.round(200 + Math.cos(i / 3) * 60 + (i > 8 ? 160 : 0))],
+    ]),
+  },
+  // Wide form: a count and a rate per hour, the case two axes exist for.
+  biaxial: {
+    columns: ["hour", "approved", "decline_rate_pct"],
+    rows: labels.slice(-12).map((l, i) => [
+      l,
+      Math.round(1500 + Math.sin(i / 2) * 300),
+      Math.round((6 + Math.cos(i / 3) * 2 + (i > 8 ? 5 : 0)) * 10) / 10,
+    ]),
+  },
   kpi: { columns: ["flagged_today"], rows: [[318]] },
   volumeKpi: { columns: ["volume_usd"], rows: [[4829113]] },
   table: {
@@ -134,6 +152,8 @@ const chartDefs = [
   ["ch_heat", "q_heat", "Flags by country and time", "heatmap", "hour", "flags", "country", "heat"],
   ["ch_movers", "q_heat", "Biggest movers by country", "movers", "hour", "flags", "country", "heat"],
   ["ch_compare", "q_heat", "This window vs last", "compare", "hour", "flags", null, "heat"],
+  ["ch_stack", "q_stack", "Outcomes by hour (stacked)", "stacked_bar", "hour", "count", "outcome", "stack"],
+  ["ch_biaxial", "q_biaxial", "Volume vs decline rate", "biaxial_bar", "hour", "approved", "decline_rate_pct", "biaxial"],
   ["ch_grid", "q_heat", "Every country, side by side", "compare_grid", "hour", "flags", "country", "heat"],
 ];
 
@@ -145,6 +165,8 @@ const queryDefs = [
   ["q_mix", "c2", "Decision mix"],
   ["q_table", "c1", "Risk review queue"],
   ["q_heat", "c2", "Flags by country"],
+  ["q_stack", "c1", "Outcomes by hour"],
+  ["q_biaxial", "c1", "Volume and decline rate"],
 ];
 
 const charts = chartDefs.map(([id, query_id, name, chart_type, x, y, s], i) => ({
@@ -195,7 +217,11 @@ function runFor(queryId) {
         ? hit((_r, i) => i >= 18, (i) => (i >= 21 ? ["r1", "r2"] : ["r2"]))
         : queryId === "q_mix"
           ? hit((r) => r[0] === "blocked" || r[0] === "disputed")
-          : queryId === "q_heat"
+          : queryId === "q_stack"
+            ? hit((r, i) => r[1] === "declined" && i >= 27)
+            : queryId === "q_biaxial"
+              ? hit((_r, i) => i >= 9)
+              : queryId === "q_heat"
             ? hit((r) => r[1] === "NG" && r[0] >= "12")
             : [];
   const RULES = {
@@ -206,6 +232,8 @@ function runFor(queryId) {
     ],
     q_mix: [{ id: "r1", name: "Blocked by issuer", severity: "high" }],
     q_heat: [{ id: "r1", name: "Hot country window", severity: "medium" }],
+    q_stack: [{ id: "r1", name: "Decline surge", severity: "high" }],
+    q_biaxial: [{ id: "r1", name: "Decline rate over 10%", severity: "high" }],
   };
   return {
     query_id: queryId,

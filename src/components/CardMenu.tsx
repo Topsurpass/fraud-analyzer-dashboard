@@ -41,6 +41,8 @@ const CHART_LABELS: Record<ChartType, string> = {
   movers: "Movers by category",
   compare_grid: "Compare periods, per category",
   heatmap: "Heatmap",
+  stacked_bar: "Stacked bar",
+  biaxial_bar: "Bar, two axes",
 };
 
 export interface CardMenuProps {

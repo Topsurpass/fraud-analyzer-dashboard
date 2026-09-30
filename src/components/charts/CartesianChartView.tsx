@@ -8,6 +8,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Rectangle,
   ReferenceArea,
   ResponsiveContainer,
   Tooltip,
@@ -16,7 +17,7 @@ import {
   type TooltipProps,
 } from "recharts";
 import type { CartesianData, ChartPoint, FlagMark } from "@/services/charts/shape";
-import { formatAxisValue } from "@/services/format";
+import { formatAxisValue, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { ChartEmpty } from "./ChartEmpty";
 import { useAlertHatch } from "./AlertHatch";
@@ -34,14 +35,14 @@ import {
 } from "./theme";
 
 /**
- * Line and bar rendering. One component because the two differ only in the mark:
+ * Line, bar and stacked-bar rendering. One component because they differ only in the mark:
  * the axes, crosshair, tooltip, legend behaviour, alert handling and animation
  * policy are identical, and keeping them together is what stops them drifting.
  */
 
 export interface CartesianChartViewProps {
   data: CartesianData;
-  kind: "line" | "bar";
+  kind: "line" | "bar" | "stacked_bar";
   /** Query name, used for the accessible description of the plot. */
   title: string;
 }
@@ -94,7 +95,7 @@ function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) 
 }
 
 /** Bands drawn past this are noise; the per-point markers still show. */
-const MAX_FLAG_BANDS = 60;
+export const MAX_FLAG_BANDS = 60;
 
 /** A flagged x position: the raw axis value plus what flagged it. */
 export interface FlaggedBucket {
@@ -104,7 +105,7 @@ export interface FlaggedBucket {
 }
 
 /** Every x position with a flagged point, with the rules behind it. */
-export function flaggedBuckets(data: CartesianData): FlaggedBucket[] {
+export function flaggedBuckets(data: Pick<CartesianData, "data" | "xKey">): FlaggedBucket[] {
   const found: FlaggedBucket[] = [];
   for (const point of data.data) {
     const mask = point.__alert;
@@ -164,7 +165,7 @@ export function BandMarker({ viewBox }: { viewBox?: { x: number; y: number; widt
 }
 
 /** Axis label for a flagged column: alert colour and weight, like the band. */
-function FlagTick({
+export function FlagTick({
   x,
   y,
   payload,
@@ -193,7 +194,53 @@ function FlagTick({
   );
 }
 
+/**
+ * Whether series `index` is the topmost segment of this point's stack: no later
+ * series has a positive value here. Only the top segment of a stack is rounded,
+ * so the stack reads as one column rather than a pile of pills. Stacks are
+ * positive-only: a zero or negative later value takes no height above this one.
+ */
+export function isTopOfStack(
+  point: ChartPoint | undefined,
+  seriesKeys: readonly string[],
+  index: number,
+): boolean {
+  if (!point) return true;
+  for (let later = index + 1; later < seriesKeys.length; later += 1) {
+    const value = point[seriesKeys[later]];
+    if (typeof value === "number" && value > 0) return false;
+  }
+  return true;
+}
+
+/** One segment of a stacked column: a hairline of surface colour between
+ *  neighbours, and a rounded top only when nothing sits above it. */
+interface StackShapeProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fill?: string;
+  payload?: ChartPoint;
+}
+
+function StackSegment({ topmost, x, y, width, height, fill }: StackShapeProps & { topmost: boolean }) {
+  return (
+    <Rectangle
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      fill={fill}
+      radius={topmost ? [6, 6, 0, 0] : 0}
+      stroke="var(--surface)"
+      strokeWidth={1}
+    />
+  );
+}
+
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
+  const stacked = kind === "stacked_bar";
   const reducedMotion = useReducedMotion();
   // Gradient ids are scoped per chart: several cards share one document.
   const gradientScope = useId().replace(/[^a-zA-Z0-9]/g, "");
@@ -266,7 +313,24 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
         };
       });
 
-    return <ChartTooltip label={String(label ?? "")} entries={entries} />;
+    // A stack is read by its total as much as its parts.
+    const total = stacked ? entries.reduce((sum, entry) => sum + entry.value, 0) : null;
+    return (
+      <ChartTooltip
+        label={String(label ?? "")}
+        entries={entries}
+        footer={
+          total === null ? undefined : (
+            <span className="flex items-center justify-between gap-3 text-[12.5px] text-secondary">
+              Total
+              <span className="tnum font-semibold text-ink">
+                {formatMetric(total, { compact: false })}
+              </span>
+            </span>
+          )
+        }
+      />
+    );
   };
 
   /*
@@ -373,7 +437,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
       <div
         className="min-h-0 flex-1"
         role="img"
-        aria-label={`${title}: ${kind} chart, ${data.data.length} points across ${data.seriesKeys.length} series`}
+        aria-label={`${title}: ${stacked ? "stacked bar" : kind} chart, ${data.data.length} points across ${data.seriesKeys.length} series`}
       >
         <ResponsiveContainer width="100%" height="100%">
           {kind === "line" ? (
@@ -408,7 +472,12 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
               ))}
             </AreaChart>
           ) : (
-            <BarChart data={data.data} margin={CHART_MARGIN} barCategoryGap="22%" barGap={3}>
+            <BarChart
+              data={data.data}
+              margin={CHART_MARGIN}
+              barCategoryGap="22%"
+              barGap={stacked ? 0 : 3}
+            >
               {hatch.defs}
               {gradients}
               {axes}
@@ -417,12 +486,28 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                 <Bar
                   key={key}
                   dataKey={key}
-                  fill={`url(#${gradientId(index)})`}
+                  // A stack is flat colour: the vertical fade of a lone bar
+                  // would make every segment fade into the one above it.
+                  fill={stacked ? seriesColor(index) : `url(#${gradientId(index)})`}
                   fillOpacity={opacityFor(key)}
                   isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
                   maxBarSize={44}
-                  radius={[6, 6, 0, 0]}
+                  stackId={stacked ? "stack" : undefined}
+                  radius={stacked ? 0 : [6, 6, 0, 0]}
+                  shape={
+                    stacked
+                      ? (raw: unknown) => {
+                          const props = raw as StackShapeProps;
+                          return (
+                            <StackSegment
+                              {...props}
+                              topmost={isTopOfStack(props.payload, data.seriesKeys, index)}
+                            />
+                          );
+                        }
+                      : undefined
+                  }
                 >
                   {/*
                    * A flagged bar keeps its series colour and takes the hatch
@@ -440,7 +525,13 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                         return (
                           <Cell
                             key={pointIndex}
-                            fill={flagged ? hatch.fill(seriesColor(index), true) : `url(#${gradientId(index)})`}
+                            fill={
+                              flagged
+                                ? hatch.fill(seriesColor(index), true)
+                                : stacked
+                                  ? seriesColor(index)
+                                  : `url(#${gradientId(index)})`
+                            }
                             stroke={flagged ? ALERT_COLOR : undefined}
                             strokeWidth={flagged ? 1 : 0}
                           />

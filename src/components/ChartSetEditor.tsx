@@ -31,6 +31,8 @@ const NEEDS_X: ChartType[] = [
   "movers",
   "compare_grid",
   "heatmap",
+  "stacked_bar",
+  "biaxial_bar",
 ];
 const NEEDS_Y: ChartType[] = [
   "line",
@@ -41,6 +43,8 @@ const NEEDS_Y: ChartType[] = [
   "movers",
   "compare_grid",
   "heatmap",
+  "stacked_bar",
+  "biaxial_bar",
 ];
 
 /**
@@ -48,7 +52,7 @@ const NEEDS_Y: ChartType[] = [
  * A heatmap with no category is a single row, which is a line chart drawn
  * badly - so the editor asks for one instead of rendering a stripe.
  */
-const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers", "compare_grid"];
+const REQUIRES_SERIES: ChartType[] = ["heatmap", "movers", "compare_grid", "biaxial_bar"];
 
 /**
  * Charts that judge a movement against a threshold.
@@ -73,7 +77,9 @@ export function needsY(type: ChartType): boolean {
 }
 
 export function needsSeries(type: ChartType): boolean {
-  return type === "line" || type === "bar" || REQUIRES_SERIES.includes(type);
+  return (
+    type === "line" || type === "bar" || type === "stacked_bar" || REQUIRES_SERIES.includes(type)
+  );
 }
 
 /** Whether leaving the series field empty makes the chart undrawable. */
@@ -93,6 +99,7 @@ export function xFieldLabel(type: ChartType): string {
 
 export function yFieldLabel(type: ChartType): string {
   if (type === "pie") return "Value field";
+  if (type === "biaxial_bar") return "Left-axis measure";
   if (
     type === "compare" ||
     type === "heatmap" ||
@@ -106,6 +113,10 @@ export function yFieldLabel(type: ChartType): string {
 
 export function seriesFieldLabel(type: ChartType): string {
   if (type === "heatmap") return "Category field (rows)";
+  // Stacking is a split of each bar; a two-axis chart reads this column as its
+  // second measure (see buildBiaxial), so the label says what it actually is.
+  if (type === "stacked_bar") return "Stack by (series)";
+  if (type === "biaxial_bar") return "Right-axis measure";
   if (type === "movers" || type === "compare_grid") return "Compare per (category)";
   return "Series field";
 }

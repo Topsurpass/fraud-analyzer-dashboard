@@ -18,6 +18,9 @@ export function ChartSkeleton({ type }: { type: ChartType }) {
       );
 
     case "bar":
+    case "stacked_bar":
+    case "biaxial_bar":
+      // Columns already, so the skeleton does not resolve from a line into bars.
       return <BarSkeleton />;
 
     case "compare":

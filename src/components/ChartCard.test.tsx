@@ -309,6 +309,45 @@ describe("ChartCard", () => {
     expect(input.flags.rows).toEqual([{ index: 1, rule_ids: ["r1"] }]);
   });
 
+  // One render per test: the poll layer caches by query id, so a second render
+  // in the same test would be answered from the first one's payload.
+  const twoMeasures = (type: "stacked_bar" | "biaxial_bar"): PollResponse => ({
+    ...changed("aaa", 20),
+    columns: ["hour", "a", "b"],
+    rows: [["09", 5, 2], ["10", 6, 3]],
+    row_count: 2,
+    charts: [
+      {
+        id: "chart-1",
+        name: "Two measures",
+        type,
+        x_field: "hour",
+        y_field: "a",
+        series_field: type === "biaxial_bar" ? "b" : null,
+        warnings: [],
+      },
+    ],
+  });
+
+  async function drawn(type: "stacked_bar" | "biaxial_bar") {
+    vi.useFakeTimers();
+    pollQuery.mockResolvedValue(twoMeasures(type));
+    render(<ChartCard query={query} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+      await Promise.resolve();
+    });
+    return screen.getByRole("img");
+  }
+
+  it("draws a two-axis bar from the biaxial_bar chart type", async () => {
+    expect(await drawn("biaxial_bar")).toHaveAccessibleName(/bar chart with two axes/);
+  });
+
+  it("draws a stacked bar from the stacked_bar chart type", async () => {
+    expect(await drawn("stacked_bar")).toHaveAccessibleName(/stacked bar chart/);
+  });
+
   it("never fails silently: a first-poll failure shows the reason and a retry", async () => {
     pollQuery.mockRejectedValue(
       new ApiError({ kind: "timeout", message: "Timed out", url: "/x" }),

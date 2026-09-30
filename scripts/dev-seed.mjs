@@ -397,6 +397,55 @@ function demoQueries() {
       `.trim(),
     },
     {
+      name: "Outcomes by hour",
+      description: "Approved, declined and other outcomes stacked per hour: the total and what it is made of.",
+      poll_interval_ms: 8000,
+      row_limit: 2000,
+      charts: [
+        {
+          name: "Outcomes by hour (stacked)",
+          chart_type: "stacked_bar",
+          x_field: "bucket",
+          y_field: "txns",
+          series_field: "status",
+        },
+      ],
+      sql_text: `
+        SELECT strftime('%H:00', occurred_at) AS bucket,
+               status,
+               COUNT(*)                        AS txns
+        FROM transactions
+        WHERE occurred_at >= datetime('now', '-12 hours')
+        GROUP BY strftime('%Y-%m-%d %H', occurred_at), status
+        ORDER BY MIN(occurred_at), status
+      `.trim(),
+    },
+    {
+      name: "Volume and decline rate",
+      description: "A count and a percentage on their own axes: one scale would flatten the rate.",
+      poll_interval_ms: 8000,
+      row_limit: 2000,
+      charts: [
+        {
+          // y_field is the left axis, series_field the right one.
+          name: "Volume vs decline rate",
+          chart_type: "biaxial_bar",
+          x_field: "bucket",
+          y_field: "txns",
+          series_field: "decline_rate_pct",
+        },
+      ],
+      sql_text: `
+        SELECT strftime('%H:00', occurred_at) AS bucket,
+               COUNT(*)                        AS txns,
+               ROUND(100.0 * SUM(status = 'declined') / COUNT(*), 1) AS decline_rate_pct
+        FROM transactions
+        WHERE occurred_at >= datetime('now', '-12 hours')
+        GROUP BY strftime('%Y-%m-%d %H', occurred_at)
+        ORDER BY MIN(occurred_at)
+      `.trim(),
+    },
+    {
       name: "Country activity grid",
       description: "Where and when, as one grid rather than one line chart per country.",
       poll_interval_ms: 8000,
