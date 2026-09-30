@@ -386,6 +386,14 @@ pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
 The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
 and filtered rows, and flag marks stay with their row through a sort.
 
+### Writing your own queries
+
+`docs/query-cookbook.md` says which chart fits which question, what each one needs
+the query to return, and the traps (single-CTE queries rejected, numeric text,
+anchoring time windows on the data). Its examples are real and runnable:
+`scripts/seed-chart-examples.mjs` creates one query per chart type, with flag
+rules and a dashboard, on the `fundgate_transactions` table.
+
 ### Stacked and two-axis bars
 
 Two bar variants, both drawn by the same tooltip, legend and flagging as a plain
