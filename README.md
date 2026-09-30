@@ -390,9 +390,12 @@ and filtered rows, and flag marks stay with their row through a sort.
 
 `docs/query-cookbook.md` says which chart fits which question, what each one needs
 the query to return, and the traps (single-CTE queries rejected, numeric text,
-anchoring time windows on the data). Its examples are real and runnable:
-`scripts/seed-chart-examples.mjs` creates one query per chart type, with flag
-rules and a dashboard, on the `fundgate_transactions` table.
+anchoring time windows on the data), with a section per chart: when to use it,
+which column goes to which axis, and a query sample. Its examples are real and
+runnable: `scripts/seed-chart-examples.mjs` creates one query per chart type, with
+flag rules and a dashboard, on the `fundgate_transactions` table. The SQL in the
+guide is generated from `scripts/lib/chart-examples.mjs` (`node
+scripts/sync-query-docs.mjs` after changing it), and a test fails if the two drift.
 
 ### Stacked and two-axis bars
 
