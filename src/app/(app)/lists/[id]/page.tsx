@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ItemListSaved, ItemListWrite } from "@/contracts/api";
@@ -14,44 +14,8 @@ import { ListForm } from "@/components/lists/ListForm";
 import {
   listErrorMessage,
   mayEditList,
-  takeCreatedReport,
   usageFromError,
-  type CreatedReport,
 } from "@/components/lists/items";
-
-/**
- * The report from creating this list, left by the new-list page. Read once
- * after mount (storage does not exist on the server) and cleared, so a reload
- * shows nothing.
- */
-const subscribeNever = () => () => {};
-
-function CreatedNotice({ id }: { id: string }) {
-  /*
-   * `useSyncExternalStore` because storage is an external store that is absent
-   * on the server: the server snapshot is null, the client takes the report on
-   * its first read and keeps it for this mount. An effect that set state would
-   * render twice for the same information.
-   */
-  const taken = useRef<{ id: string; report: CreatedReport | null } | null>(null);
-  const report = useSyncExternalStore(
-    subscribeNever,
-    () => {
-      if (taken.current?.id !== id) taken.current = { id, report: takeCreatedReport(id) };
-      return taken.current.report;
-    },
-    () => null,
-  );
-  if (!report) return null;
-  const dropped = report.received - report.kept;
-  const { kept } = report;
-  return (
-    <p role="status" className="border border-line bg-surface px-3 py-2 text-[12.5px] text-secondary">
-      Created. {kept} {kept === 1 ? "item" : "items"} kept
-      {dropped > 0 ? `, ${dropped} ${dropped === 1 ? "duplicate" : "duplicates"} dropped` : ""}.
-    </p>
-  );
-}
 
 /**
  * Edit a list, see what it did on save, or delete it when no rule uses it.
@@ -231,8 +195,6 @@ function ListScreen({ id }: { id: string }) {
         <div className="skeleton-sweep h-96 max-w-2xl border border-line bg-surface" />
       ) : (
         <div className="max-w-2xl space-y-3">
-          {saved ? null : <CreatedNotice id={id} />}
-
           {list.error ? (
             <p role="alert" className="border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
               Could not refresh this list: {list.error.displayMessage}{" "}

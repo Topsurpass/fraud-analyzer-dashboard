@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ItemListWrite } from "@/contracts/api";
 import { Button, Field, Input, Textarea } from "@/components/ui";
+import { ImportItems } from "./ImportItems";
 import {
   MAX_DESCRIPTION_LENGTH,
   MAX_ITEM_LENGTH,
@@ -14,10 +15,12 @@ import {
 /**
  * Name, description and items for one list.
  *
- * Items are pasted rather than added one at a time: the reason a list exists
- * is that a watchlist has hundreds of entries. The count under the box updates
- * as you type and says how many duplicates the engine will drop, so a
- * spreadsheet paste with repeats is not a surprise after saving.
+ * Items are pasted or imported rather than added one at a time: the reason a
+ * list exists is that a watchlist has hundreds of entries. A column can be
+ * brought in from an Excel or CSV file (see `ImportItems`), which fills the same
+ * box so it can be reviewed and edited before saving. The count under the box
+ * updates as you type and says how many duplicates the engine will drop, so a
+ * paste with repeats is not a surprise after saving.
  */
 export interface ListFormValues {
   name: string;
@@ -33,6 +36,7 @@ export function ListForm({
   busy,
   readOnly = false,
   autoFocus = false,
+  layout = "page",
   version,
   error,
   onSubmit,
@@ -47,6 +51,12 @@ export function ListForm({
   /** Focus the name on mount. Only the new-list page wants that: on an edit page the form remounts after every save and would pull focus from wherever it was. */
   autoFocus?: boolean;
   /**
+   * `modal` shortens the items box and pins the buttons to the bottom of the
+   * dialog, so an import preview and the Create button are in view without
+   * scrolling a tall form.
+   */
+  layout?: "page" | "modal";
+  /**
    * Changes when the fields should be replaced from `initial` (after a save,
    * so the box shows what the engine kept). Replacing in place, rather than
    * remounting the form, keeps whatever had keyboard focus.
@@ -60,6 +70,7 @@ export function ListForm({
   const [description, setDescription] = useState(initial.description);
   const [itemsText, setItemsText] = useState(initial.itemsText);
   const [touched, setTouched] = useState(false);
+  const [imported, setImported] = useState<string | null>(null);
   const [seenVersion, setSeenVersion] = useState(version);
   if (version !== seenVersion) {
     setSeenVersion(version);
@@ -67,6 +78,7 @@ export function ListForm({
     setDescription(initial.description);
     setItemsText(initial.itemsText);
     setTouched(false);
+    setImported(null);
   }
 
   const items = useMemo(() => parseItems(itemsText), [itemsText]);
@@ -88,11 +100,24 @@ export function ListForm({
         ? `${tally.tooLong} ${tally.tooLong === 1 ? "item is" : "items are"} over ${MAX_ITEM_LENGTH} characters.`
         : null;
 
+  const addImported = (values: string[], options: { replace: boolean; fileName: string }) => {
+    // Re-split what is in the box before appending. A hand-typed "a, b" is two
+    // items only while it stays on one line; joining new lines onto it would
+    // turn it into a single item "a, b".
+    const existing = options.replace ? [] : parseItems(itemsText);
+    setItemsText([...existing, ...values].join("\n"));
+    setImported(
+      `${options.replace ? "Replaced with" : "Added"} ${values.length.toLocaleString()} ${
+        values.length === 1 ? "value" : "values"
+      } from ${options.fileName}.`,
+    );
+  };
+
   const invalid = Boolean(nameProblem || descriptionProblem || itemsProblem);
 
   return (
     <form
-      className="space-y-3 p-3"
+      className="space-y-4 p-6"
       onSubmit={(event) => {
         event.preventDefault();
         setTouched(true);
@@ -117,6 +142,8 @@ export function ListForm({
           placeholder="Blocked terminals"
           disabled={readOnly}
           autoFocus={autoFocus && !readOnly}
+          // The modal moves focus to this once it is open.
+          data-autofocus={autoFocus && !readOnly ? "" : undefined}
         />
       </Field>
 
@@ -142,19 +169,25 @@ export function ListForm({
         error={touched ? itemsProblem : null}
         hint="One per line. On a single line, commas separate items; once you use new lines, commas stay part of the item. Case and spacing are ignored, and 2.0 matches 2."
       >
-        <Textarea
-          id="list-items"
-          value={itemsText}
-          onChange={(event) => setItemsText(event.target.value)}
-          rows={12}
-          placeholder={"T-1041\nT-1042\nT-2207"}
-          spellCheck={false}
-          disabled={readOnly}
-          className="font-mono text-[12.5px]"
-        />
+        {/* Import sits above the box it fills, so what it adds lands right
+            below it and the preview is never pushed out of sight. */}
+        <div className="space-y-3">
+          {readOnly ? null : <ImportItems onAdd={addImported} disabled={busy} />}
+          <Textarea
+            id="list-items"
+            value={itemsText}
+            onChange={(event) => setItemsText(event.target.value)}
+            rows={layout === "modal" ? 6 : 12}
+            placeholder={"T-1041\nT-1042\nT-2207"}
+            spellCheck={false}
+            disabled={readOnly}
+            className="font-mono text-[12.5px]"
+          />
+        </div>
       </Field>
 
       <p className="tnum text-[12.5px] text-muted" aria-live="polite">
+        {imported ? <span className="mr-2 font-medium text-live">{imported}</span> : null}
         {tally.kept} {tally.kept === 1 ? "item" : "items"}
         {tally.duplicates > 0
           ? `, ${tally.duplicates} ${tally.duplicates === 1 ? "duplicate" : "duplicates"} will be dropped`
@@ -170,7 +203,13 @@ export function ListForm({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      <div
+        className={
+          layout === "modal"
+            ? "sticky bottom-0 -mx-6 -mb-6 flex items-center gap-2 border-t border-line bg-surface px-6 py-4"
+            : "flex items-center gap-2"
+        }
+      >
         {readOnly ? null : (
           /* Not `disabled`: a focused button that becomes disabled drops
              keyboard focus to the page, and this one is pressed then held

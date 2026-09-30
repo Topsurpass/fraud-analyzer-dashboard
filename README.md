@@ -431,6 +431,37 @@ keeps the contract unchanged. **The engine must list both types**: add
 stored as a string, so no migration) and deploy it before choosing either in the
 dashboard, or the engine refuses the chart type.
 
+### Creating lists, and importing them from a spreadsheet
+
+**Creating a list is a dialog**, not a page. `New list` opens it over the lists
+table; saving closes it, refreshes the table, marks the new row for a few
+seconds and says what was kept ("Created "Blocked terminals" with 7 items. 1
+duplicate was dropped."). A failed save keeps it open with the reason, and while
+a save is in flight Escape, the backdrop and the close button do nothing so the
+answer cannot be lost behind a closed dialog. `/lists/new` still works as a link:
+it redirects to `/lists?new`, which opens the dialog on arrival. The dialog is
+the reusable `components/Modal.tsx` (the native `<dialog>` element: real focus
+trap, inert page behind, Escape, focus returns to the opener).
+
+**Items can come from a file.** `Import from Excel or CSV` in the list form
+accepts `.xlsx`, `.csv`, `.tsv` and `.txt`, by choosing or dropping a file:
+
+1. pick the sheet (when a workbook has several) and the column,
+2. say whether the first row is headings (guessed for multi-column sheets, never
+   for a single column, where the first line is as likely to be an item),
+3. see the count, the duplicates that will be dropped and the first few values,
+4. `Add N items` appends them to the box, or replaces it if ticked.
+
+The file is read **in the browser and never uploaded**; only the confirmed
+column of text is saved, as ordinary items. Limits: 10 MB per file and 200,000
+rows per sheet (the engine's own item cap, 20,000 by default, is what stops a
+save). Old `.xls` workbooks, password-protected or corrupt files and unsupported
+types are refused with a sentence saying what to do instead. Parsing lives in
+`components/lists/spreadsheet.ts`: `read-excel-file` for `.xlsx` and
+`papaparse` for CSV, both loaded only when a file is chosen. SheetJS's `xlsx` is
+deliberately not used: its npm package is an unmaintained 0.18.5 with published
+prototype-pollution and ReDoS advisories.
+
 ### How a chart shows what was flagged
 
 The engine returns, with every run, which rows the query's flag rules caught.

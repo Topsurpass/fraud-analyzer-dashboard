@@ -459,67 +459,6 @@ describe("the engine refusing a write", () => {
 	});
 });
 
-describe("after a list is created", () => {
-	const stash = (value: unknown, id = "l1") =>
-		window.sessionStorage.setItem(`fae:list-created:${id}`, JSON.stringify(value));
-
-	it("says how many pasted items were kept and dropped", async () => {
-		stash({ received: 5, kept: 3 });
-		await open();
-		expect(await screen.findByRole("status")).toHaveTextContent(
-			"Created. 3 items kept, 2 duplicates dropped.",
-		);
-	});
-
-	it("says nothing about duplicates when none were dropped", async () => {
-		stash({ received: 2, kept: 2 });
-		await open();
-		expect(await screen.findByRole("status")).toHaveTextContent("Created. 2 items kept.");
-	});
-
-	it("reads the report once, so a reload shows no notice", async () => {
-		stash({ received: 2, kept: 2 });
-		const first = await open();
-		await screen.findByRole("status");
-		first.unmount();
-		expect(window.sessionStorage.getItem("fae:list-created:l1")).toBeNull();
-
-		await open();
-		await screen.findByDisplayValue("Blocked terminals");
-		expect(screen.queryByRole("status")).not.toBeInTheDocument();
-	});
-
-	it("cannot be forged through the URL", async () => {
-		window.history.pushState({}, "", "/lists/l1?received=9&kept=9");
-		await open();
-		await screen.findByDisplayValue("Blocked terminals");
-		expect(screen.queryByRole("status")).not.toBeInTheDocument();
-		window.history.pushState({}, "", "/");
-	});
-
-	it("is for the list it was made for, not another", async () => {
-		stash({ received: 2, kept: 2 }, "other");
-		await open();
-		await screen.findByDisplayValue("Blocked terminals");
-		expect(screen.queryByRole("status")).not.toBeInTheDocument();
-	});
-
-	it("ignores a malformed report", async () => {
-		for (const bad of [{ received: "a", kept: 9 }, { received: 1, kept: 5 }, { received: 3, kept: 0 }, "junk"]) {
-			window.sessionStorage.clear();
-			stash(bad);
-			const view = await open();
-			await screen.findByDisplayValue("Blocked terminals");
-			expect(screen.queryByRole("status")).not.toBeInTheDocument();
-			view.unmount();
-		}
-		window.sessionStorage.setItem("fae:list-created:l1", "{not json");
-		await open();
-		await screen.findByDisplayValue("Blocked terminals");
-		expect(screen.queryByRole("status")).not.toBeInTheDocument();
-	});
-});
-
 describe("a refetch that fails after a good save", () => {
 	it("keeps the form and reports the refresh failure inline", async () => {
 		updateList.mockResolvedValue({
