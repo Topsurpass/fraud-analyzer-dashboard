@@ -108,7 +108,9 @@ const HeatmapRow = memo(function HeatmapRow({
             }}
             onMouseEnter={() => onHover(row.category, cell)}
             onMouseLeave={() => onHover(row.category, null)}
-            title={`${row.category} · ${cell.bucket} · ${cellLabel(cell)}`}
+            title={`${row.category} · ${cell.bucket} · ${cellLabel(cell)}${
+              cell.alert && cell.rules.length > 0 ? ` · flagged by ${cell.rules.join(", ")}` : ""
+            }`}
           >
             {/*
              * The value as text, not only as a colour and a `title`.
@@ -118,7 +120,9 @@ const HeatmapRow = memo(function HeatmapRow({
              */}
             <span className="sr-only">
               {cellLabel(cell)}
-              {cell.alert ? ", flagged" : ""}
+              {cell.alert
+                ? `, flagged${cell.rules.length > 0 ? ` by ${cell.rules.join(", ")}` : ""}`
+                : ""}
             </span>
           </div>
         </td>
@@ -141,7 +145,9 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
 
   const readout = hover
     ? `${hover.row} · ${hover.cell.bucket} · ${cellLabel(hover.cell)}${
-        hover.cell.alert ? " · flagged" : ""
+        hover.cell.alert
+          ? ` · flagged${hover.cell.rules.length > 0 ? ` by ${hover.cell.rules.join(", ")}` : ""}`
+          : ""
       }`
     : null;
 

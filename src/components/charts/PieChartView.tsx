@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type TooltipProps } from "recharts";
-import type { PieData, PieSlice } from "@/services/charts/shape";
+import { mergeFlagMark, type FlagMark, type PieData, type PieSlice } from "@/services/charts/shape";
 import { formatInteger, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useAlertHatch } from "./AlertHatch";
@@ -42,6 +42,12 @@ function foldSlices(slices: PieSlice[]): FoldedSlice[] {
     folded: 1,
   }));
   const tail = sorted.slice(MAX_SERIES - 1);
+  // The folded wedge stands for every category in the tail, so it is flagged by
+  // every rule that flagged any of them.
+  let foldedMark: FlagMark | undefined;
+  for (const slice of tail) {
+    if (slice.alert) foldedMark = mergeFlagMark(foldedMark, slice.rules, slice.severity);
+  }
 
   return [
     ...head,
@@ -49,6 +55,8 @@ function foldSlices(slices: PieSlice[]): FoldedSlice[] {
       name: OTHER_LABEL,
       value: tail.reduce((sum, slice) => sum + slice.value, 0),
       alert: tail.some((slice) => slice.alert),
+      rules: foldedMark?.rules ?? [],
+      severity: foldedMark?.severity ?? null,
       color: OTHER_COLOR,
       folded: tail.length,
     },
@@ -83,7 +91,13 @@ export function PieChartView({ data, title }: PieChartViewProps) {
       <ChartTooltip
         label={slice.name}
         entries={[
-          { name: "count", value: slice.value, color: slice.color, alert: slice.alert },
+          {
+            name: "count",
+            value: slice.value,
+            color: slice.color,
+            alert: slice.alert,
+            flag: slice.alert ? { rules: slice.rules, severity: slice.severity } : undefined,
+          },
         ]}
         footer={
           <span className="tnum text-[13px] text-muted">

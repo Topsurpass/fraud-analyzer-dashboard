@@ -8,13 +8,14 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
   type TooltipProps,
 } from "recharts";
-import type { CartesianData, ChartPoint } from "@/services/charts/shape";
+import type { CartesianData, ChartPoint, FlagMark } from "@/services/charts/shape";
 import { formatAxisValue } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { ChartEmpty } from "./ChartEmpty";
@@ -92,6 +93,96 @@ function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) 
   return null;
 }
 
+/** Bands drawn past this are noise; the per-point markers still show. */
+const MAX_FLAG_BANDS = 60;
+
+/** A flagged x position: the raw axis value plus what flagged it. */
+export interface FlaggedBucket {
+  x: ChartPoint[string];
+  label: string;
+  mark: FlagMark;
+}
+
+/** Every x position with a flagged point, with the rules behind it. */
+export function flaggedBuckets(data: CartesianData): FlaggedBucket[] {
+  const found: FlaggedBucket[] = [];
+  for (const point of data.data) {
+    const mask = point.__alert;
+    if (!mask) continue;
+    let rules: string[] = [];
+    let severity: FlagMark["severity"] = null;
+    let any = false;
+    for (const key of Object.keys(mask)) {
+      if (mask[key] !== true) continue;
+      any = true;
+      const mark = point.__flag?.[key];
+      if (mark) {
+        rules = [...new Set([...rules, ...mark.rules])];
+        if (severity === null || rank(mark.severity) > rank(severity)) severity = mark.severity;
+      }
+    }
+    if (any) found.push({ x: point[data.xKey], label: String(point[data.xKey] ?? ""), mark: { rules, severity } });
+  }
+  return found;
+}
+
+function rank(severity: FlagMark["severity"]): number {
+  return severity === "high" ? 3 : severity === "medium" ? 2 : severity === "low" ? 1 : 0;
+}
+
+/**
+ * The marker at the top of a flagged column: a filled disc with an exclamation
+ * mark. A shape and a glyph, so it reads without the colour.
+ */
+function BandMarker({ viewBox }: { viewBox?: { x: number; y: number; width: number } }) {
+  if (!viewBox) return null;
+  const cx = viewBox.x + viewBox.width / 2;
+  // Sized to the column, so neighbouring flagged columns never merge into one
+  // blob. Too narrow for the "!" to read, it is a plain disc: still a mark.
+  const radius = Math.max(2.5, Math.min(8, viewBox.width / 2 - 1));
+  const cy = viewBox.y + radius + 1;
+  return (
+    <g aria-hidden="true">
+      <circle cx={cx} cy={cy} r={radius} fill={ALERT_COLOR} />
+      {radius >= 6 ? (
+        <text x={cx} y={cy + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">
+          !
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+/** Axis label for a flagged column: alert colour and weight, like the band. */
+function FlagTick({
+  x,
+  y,
+  payload,
+  flagged,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: unknown };
+  flagged: ReadonlySet<string>;
+}) {
+  if (x === undefined || y === undefined || !payload) return null;
+  const isFlagged = flagged.has(String(payload.value));
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={14}
+      textAnchor="middle"
+      fontSize={AXIS_TICK.fontSize}
+      fontFamily={AXIS_TICK.fontFamily}
+      fontWeight={isFlagged ? 700 : 400}
+      fill={isFlagged ? ALERT_COLOR : AXIS_TICK.fill}
+    >
+      {String(payload.value)}
+    </text>
+  );
+}
+
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
   const reducedMotion = useReducedMotion();
   // Gradient ids are scoped per chart: several cards share one document.
@@ -119,6 +210,11 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
     }
     return keys;
   }, [data.data]);
+
+  // Which columns carry a flagged point, and which rules flagged them. Drives
+  // the bands, the axis labels and the tooltip.
+  const buckets = useMemo(() => flaggedBuckets(data), [data]);
+  const flaggedLabels = useMemo(() => new Set(buckets.map((bucket) => bucket.label)), [buckets]);
 
   // A series key is already unique here - the pivot dedupes them - so it is
   // both the identity and the label. The two are separate in the legend's
@@ -150,11 +246,13 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
       .map((item, index) => {
         const key = String(item.dataKey ?? item.name ?? "");
         const point = item.payload as ChartPoint | undefined;
+        const mark = point?.__flag?.[key];
         return {
           name: key,
           value: item.value as number,
           color: item.color ?? seriesColor(index),
           alert: point?.__alert?.[key] === true,
+          flag: mark ? { rules: mark.rules, severity: mark.severity } : undefined,
         };
       });
 
@@ -173,7 +271,13 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
     <XAxis
       key="x"
       dataKey={data.xKey}
-      tick={AXIS_TICK}
+      tick={
+        flaggedLabels.size > 0 ? (
+          <FlagTick flagged={flaggedLabels} />
+        ) : (
+          AXIS_TICK
+        )
+      }
       tickLine={false}
       axisLine={false}
       tickMargin={8}
@@ -229,6 +333,25 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
     </defs>
   );
 
+  // A faint column behind each flagged x position, with a marker on top. Drawn
+  // first so the series sit over it. Past MAX_FLAG_BANDS the columns would
+  // merge into a wash, so only the per-point marks remain.
+  const bands =
+    buckets.length <= MAX_FLAG_BANDS
+      ? buckets.map((bucket, index) => (
+          <ReferenceArea
+            key={`flag-${index}`}
+            x1={bucket.x as string | number}
+            x2={bucket.x as string | number}
+            fill={ALERT_COLOR}
+            fillOpacity={0.09}
+            strokeOpacity={0}
+            ifOverflow="visible"
+            label={<BandMarker />}
+          />
+        ))
+      : [];
+
   const opacityFor = (key: string) =>
     activeSeries === null || activeSeries === key ? 1 : 0.22;
 
@@ -244,6 +367,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
             <AreaChart data={data.data} margin={CHART_MARGIN}>
               {gradients}
               {axes}
+              {bands}
               {data.seriesKeys.map((key, index) => (
                 <Area
                   key={key}
@@ -275,6 +399,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
               {hatch.defs}
               {gradients}
               {axes}
+              {bands}
               {data.seriesKeys.map((key, index) => (
                 <Bar
                   key={key}

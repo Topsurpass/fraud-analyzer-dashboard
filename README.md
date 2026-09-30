@@ -385,6 +385,27 @@ pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
 The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
 and filtered rows, and flag marks stay with their row through a sort.
 
+### How a chart shows what was flagged
+
+The engine returns, with every run, which rows the query's flag rules caught.
+`ChartCard` hands that outcome to the chart builders, and the rule names and
+severity travel with each flagged mark (`FlagMark` in `services/charts/shape.ts`),
+through pivots, the "Other" fold and merged pie slices. Every chart type then
+says *where* and *why*:
+
+- **Line and bar:** a shaded column behind each flagged x position with a `!`
+  marker on top, the axis label in bold alert colour, hatched bars, and a
+  tooltip that names the rules and the worst severity. Past 60 flagged columns
+  the bands stop (they would merge into a wash) and the per-point marks remain.
+- **Donut:** hatched wedge, a flag glyph in the legend, rules in the tooltip.
+- **Heatmap, movers, compare grid:** outlined cells or a marked row; the heatmap
+  readout and each cell's text say "flagged by <rule>".
+- **Every card:** a strip under the title with one chip per matching rule, its
+  row count and its severity in words (`charts/FlagStrip.tsx`). Rules that
+  matched nothing are not shown.
+
+Colour is never the only signal: each mark is also a shape, a glyph or a word.
+
 ### Looking at it without an engine
 
 `scripts/mock-engine.mjs` is a fixture server that speaks enough of the engine's

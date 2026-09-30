@@ -21,6 +21,7 @@ import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
 import { CartesianChartView } from "./charts/CartesianChartView";
+import { FlagStrip } from "./charts/FlagStrip";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
 import { NumberCardView } from "./charts/NumberCardView";
 import { PieChartView } from "./charts/PieChartView";
@@ -182,6 +183,10 @@ export function ChartCard({
       columns: source.columns,
       rows: source.rows,
       chart: spec,
+      // The engine's verdict on which rows the query's flag rules caught. Left
+      // out, every builder sees "no rules" and no chart can mark, or name, a
+      // single flagged point.
+      flags: source.flags,
     };
 
     switch (spec.type) {
@@ -287,6 +292,9 @@ export function ChartCard({
           </div>
         </div>
       </header>
+
+      {/* The rules behind the marks below. A table lists its own in its footer. */}
+      {chartType !== "table" ? <FlagStrip flags={source?.flags} /> : null}
 
       <div className="min-h-0 flex-1">
         {poll.phase === "error" && !snapshot ? (

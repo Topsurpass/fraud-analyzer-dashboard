@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { FlagSeverity } from "@/contracts/api";
 import { formatMetric } from "@/services/format";
 
 /**
@@ -16,6 +17,8 @@ export interface TooltipEntry {
   value: number;
   color: string;
   alert: boolean;
+  /** Which rules flagged this reading. Named in the tooltip so the chart explains itself. */
+  flag?: { rules: string[]; severity: FlagSeverity | null };
 }
 
 export interface ChartTooltipProps {
@@ -27,6 +30,7 @@ export interface ChartTooltipProps {
 
 export function ChartTooltip({ label, entries, footer }: ChartTooltipProps) {
   if (entries.length === 0) return null;
+  const summary = flagSummary(entries);
 
   return (
     <div className="min-w-[10.5rem] rounded-[var(--radius)] border border-line bg-surface/95 px-3 py-2.5 shadow-lg backdrop-blur-md">
@@ -51,13 +55,58 @@ export function ChartTooltip({ label, entries, footer }: ChartTooltipProps) {
           </li>
         ))}
       </ul>
-      {/* Colour is never the only signal: an alerted reading says so in words. */}
+      {/* Colour is never the only signal: a flagged reading says so in words,
+          and names the rule that caught it. */}
       {entries.some((entry) => entry.alert) ? (
-        <div className="mt-2 border-t border-line pt-2 text-[11px] font-semibold tracking-wide text-alert">
-          Anomalous
+        <div className="mt-2 space-y-1 border-t border-line pt-2">
+          <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-alert">
+            <FlagGlyph />
+            Flagged
+            {/* The worst severity across the rules, once. Severity belongs to
+                the mark, not to each rule, so a per-rule badge would label a
+                mild rule with its neighbour's severity. */}
+            {summary.severity ? (
+              <span className="ml-auto rounded-md bg-alert/10 px-1.5 py-px text-[11px] capitalize">
+                {summary.severity}
+              </span>
+            ) : null}
+          </div>
+          {summary.rules.map((rule) => (
+            <div key={rule} className="truncate text-[12px] text-secondary">
+              {rule}
+            </div>
+          ))}
         </div>
       ) : null}
-      {footer ? <div className="mt-2 border-t border-line pt-2">{footer}</div> : null}
+      {footer ?<div className="mt-2 border-t border-line pt-2">{footer}</div> : null}
     </div>
+  );
+}
+
+/** Distinct rule names across the entries and the worst severity among them. */
+function flagSummary(entries: TooltipEntry[]): { rules: string[]; severity: FlagSeverity | null } {
+  const rank = { low: 1, medium: 2, high: 3 } as const;
+  const rules = new Set<string>();
+  let severity: FlagSeverity | null = null;
+  for (const entry of entries) {
+    if (!entry.flag) continue;
+    for (const rule of entry.flag.rules) rules.add(rule);
+    const next = entry.flag.severity;
+    if (next !== null && (severity === null || rank[next] > rank[severity])) severity = next;
+  }
+  return { rules: [...rules], severity };
+}
+
+function FlagGlyph() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path
+        d="M3 11V1.5M3 2h6.2l-1.4 2.4L9.2 6.8H3"
+        stroke="currentColor"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

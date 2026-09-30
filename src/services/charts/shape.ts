@@ -160,8 +160,39 @@ export function resolveFields(result: ResultSet): ResolvedFields {
  * colour, and is stripped before anything is rendered as a value.
  */
 export interface ChartPoint {
-  [key: string]: Cell | Record<string, boolean> | undefined;
+  [key: string]: Cell | Record<string, boolean> | Record<string, FlagMark> | undefined;
   __alert?: Record<string, boolean>;
+  /** Per series: which rules flagged this point, and how badly. */
+  __flag?: Record<string, FlagMark>;
+}
+
+/**
+ * Why a mark is flagged: the rules that matched the row(s) behind it and the
+ * worst severity among them. A boolean says "look here"; this says what to look
+ * for, which is what makes the chart readable without opening the table.
+ */
+export interface FlagMark {
+  rules: string[];
+  severity: FlagSeverity | null;
+}
+
+const SEVERITY_RANK: Record<FlagSeverity, number> = { low: 1, medium: 2, high: 3 };
+
+/** Fold another row's rules into a mark: union of names, worst severity. */
+export function mergeFlagMark(
+  into: FlagMark | undefined,
+  rules: readonly string[],
+  severity: FlagSeverity | null,
+): FlagMark {
+  if (!into) return { rules: [...new Set(rules)], severity };
+  const names = new Set(into.rules);
+  for (const rule of rules) names.add(rule);
+  const worst =
+    severity !== null &&
+    (into.severity === null || SEVERITY_RANK[severity] > SEVERITY_RANK[into.severity])
+      ? severity
+      : into.severity;
+  return { rules: [...names], severity: worst };
 }
 
 export interface CartesianData {
@@ -242,11 +273,16 @@ function foldSeriesTail(
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index];
     const mask = (point.__alert ?? {}) as Record<string, boolean>;
+    const marks = point.__flag;
 
     let sum = 0;
     let present = false;
     let alert = false;
+    let foldedMark: FlagMark | undefined;
     for (const name of tail) {
+      if (marks?.[name]) {
+        foldedMark = mergeFlagMark(foldedMark, marks[name].rules, marks[name].severity);
+      }
       const value = point[name];
       if (typeof value === "number") {
         sum += value;
@@ -256,17 +292,21 @@ function foldSeriesTail(
     }
 
     const nextMask: Record<string, boolean> = {};
+    const nextMarks: Record<string, FlagMark> = {};
     const next: ChartPoint = { [xKey]: point[xKey] as Cell };
     for (const name of keptOrder) {
       const value = point[name];
       if (value !== undefined) next[name] = value;
       if (mask[name] === true) nextMask[name] = true;
+      if (marks?.[name]) nextMarks[name] = marks[name];
     }
     // A bucket with no rows in any folded series stays absent rather than
     // becoming a zero: the two mean different things on a line chart.
     if (present) next[label] = sum;
     if (alert) nextMask[label] = true;
+    if (foldedMark) nextMarks[label] = foldedMark;
     next.__alert = nextMask;
+    if (Object.keys(nextMarks).length > 0) next.__flag = nextMarks;
 
     points[index] = next;
   }
@@ -324,6 +364,17 @@ export function buildCartesian(result: ResultSet): CartesianData {
       [xKey]: rows[index][xIndex] ?? null,
       [yKey]: values[index],
       __alert: { [yKey]: flagged[index] === true },
+      ...(flagged[index] === true
+        ? {
+            __flag: {
+              [yKey]: mergeFlagMark(
+                undefined,
+                anomalies.ruleNames[index] ?? [],
+                anomalies.severities[index] ?? null,
+              ),
+            },
+          }
+        : {}),
     });
 
     const data: ChartPoint[] = kept
@@ -377,6 +428,12 @@ export function buildCartesian(result: ResultSet): CartesianData {
       // is something here to look at", not "every contribution matched".
       hasAlerts = true;
       point.__alert![seriesName] = true;
+      const marks = (point.__flag ??= {});
+      marks[seriesName] = mergeFlagMark(
+        marks[seriesName],
+        anomalies.ruleNames[rowIndex] ?? [],
+        anomalies.severities[rowIndex] ?? null,
+      );
     }
     // Repeated x/series pairs are summed: the analyst asked for a grouping the
     // SQL did not fully collapse, and dropping rows would understate volume.
@@ -443,6 +500,9 @@ export interface PieSlice {
   name: string;
   value: number;
   alert: boolean;
+  /** Rules that flagged any row behind this slice, and the worst severity. */
+  rules: string[];
+  severity: FlagSeverity | null;
 }
 
 export interface PieData {
@@ -474,7 +534,7 @@ export function buildPie(result: ResultSet): PieData {
   //
   // A merged slice is flagged if any of the rows behind it was, because the
   // wedge stands for all of them.
-  const merged = new Map<string, { name: string; value: number; alert: boolean }>();
+  const merged = new Map<string, PieSlice>();
   for (const [index, row] of rows.entries()) {
     const name =
       row[nameIndex] === null || row[nameIndex] === undefined
@@ -484,11 +544,23 @@ export function buildPie(result: ResultSet): PieData {
     const alert = anomalies.flags[index] === true;
 
     const existing = merged.get(name);
+    const names = alert ? (anomalies.ruleNames[index] ?? []) : [];
+    const severity = alert ? (anomalies.severities[index] ?? null) : null;
+
     if (existing) {
       existing.value += value;
       existing.alert = existing.alert || alert;
+      if (alert) {
+        const mark = mergeFlagMark(
+          { rules: existing.rules, severity: existing.severity },
+          names,
+          severity,
+        );
+        existing.rules = mark.rules;
+        existing.severity = mark.severity;
+      }
     } else {
-      merged.set(name, { name, value, alert });
+      merged.set(name, { name, value, alert, rules: [...new Set(names)], severity });
     }
   }
 
@@ -864,6 +936,8 @@ export function buildCompare(result: ResultSet): CompareData {
 
 export interface HeatCell {
   bucket: string;
+  /** Rules that flagged any row behind this cell. Empty unless `alert`. */
+  rules: string[];
   /** null means the query returned no row for this category/bucket pair. */
   value: number | null;
   /** 0..1 against the grid's own range. What the colour is drawn from. */
@@ -988,7 +1062,10 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
   }
   const bucketSet = new Set(buckets);
 
-  const grid = new Map<string, Map<string, { value: number; alert: boolean }>>();
+  const grid = new Map<
+    string,
+    Map<string, { value: number; alert: boolean; rules: string[] }>
+  >();
 
   for (let index = 0; index < rows.length; index += 1) {
     const value = values[index];
@@ -1007,11 +1084,13 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
     }
     const existing = cells.get(bucket);
     const alert = anomalies.flags[index] === true;
+    const names = alert ? (anomalies.ruleNames[index] ?? []) : [];
     if (existing) {
       existing.value += value;
       existing.alert = existing.alert || alert;
+      if (alert) existing.rules = mergeFlagMark({ rules: existing.rules, severity: null }, names, null).rules;
     } else {
-      cells.set(bucket, { value, alert });
+      cells.set(bucket, { value, alert, rules: [...new Set(names)] });
     }
   }
 
@@ -1029,6 +1108,7 @@ export function buildHeatmap(result: ResultSet): HeatmapData {
         value: cell ? cell.value : null,
         intensity: 0,
         alert: cell ? cell.alert : false,
+        rules: cell ? cell.rules : [],
       };
     });
     return { category, cells: rowCells, total };

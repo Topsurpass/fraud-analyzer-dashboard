@@ -8,6 +8,7 @@ import { ChartCard } from "./ChartCard";
 
 const pollQuery = vi.hoisted(() => vi.fn());
 const shapeCalls = vi.hoisted(() => vi.fn());
+const cartesianInputs = vi.hoisted(() => vi.fn());
 
 /*
  * The real shaping, counted. Shaping is the expensive half of a card at
@@ -24,6 +25,11 @@ vi.mock("@/services/charts/shape", async () => {
     buildNumber: (...args: Parameters<typeof actual.buildNumber>) => {
       shapeCalls();
       return actual.buildNumber(...args);
+    },
+    // Records what the card hands the chart builder, for the flags test.
+    buildCartesian: (...args: Parameters<typeof actual.buildCartesian>) => {
+      cartesianInputs(args[0]);
+      return actual.buildCartesian(...args);
     },
   };
 });
@@ -111,6 +117,7 @@ async function settle() {
 beforeEach(() => {
   pollQuery.mockReset();
   shapeCalls.mockReset();
+  cartesianInputs.mockReset();
 });
 
 afterEach(() => {
@@ -251,6 +258,55 @@ describe("ChartCard", () => {
       await vi.advanceTimersByTimeAsync(20);
     });
     expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("hands the flag outcome to the chart and names the matched rules on the card", async () => {
+    /*
+     * The card shaped its rows without the run's `flags`, so no chart could
+     * mark or name a single flagged point whatever the rules were. The table is
+     * the easiest place to see it: a flagged row says which rule caught it.
+     */
+    vi.useFakeTimers();
+    pollQuery.mockResolvedValue({
+      ...changed("aaa", 20),
+      columns: ["id", "amount"],
+      rows: [[1, 10], [2, 900]],
+      row_count: 2,
+      charts: [
+        {
+          id: "chart-1",
+          name: "Transfers",
+          type: "bar",
+          x_field: "id",
+          y_field: "amount",
+          series_field: null,
+          warnings: [],
+        },
+      ],
+      flags: {
+        flagged_count: 1,
+        rows: [{ index: 1, rule_ids: ["r1"] }],
+        rules: [{ id: "r1", name: "Big transfer", severity: "high", matched: 1 }],
+        warnings: [],
+        dismissed_count: 0,
+      },
+    } as PollResponse);
+
+    render(<ChartCard query={query} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+      await Promise.resolve();
+    });
+
+    // The rule is named on the card, with its count and severity in words.
+    const strip = screen.getByRole("list", { name: "Flag rules that matched" });
+    expect(strip).toHaveTextContent("Big transfer");
+    expect(strip).toHaveTextContent("high severity");
+    // And the chart builder itself was given the flags, which is what lets it
+    // mark the column and name the rule on the point.
+    const input = cartesianInputs.mock.calls[0][0];
+    expect(input.flags.rules[0].name).toBe("Big transfer");
+    expect(input.flags.rows).toEqual([{ index: 1, rule_ids: ["r1"] }]);
   });
 
   it("never fails silently: a first-poll failure shows the reason and a retry", async () => {

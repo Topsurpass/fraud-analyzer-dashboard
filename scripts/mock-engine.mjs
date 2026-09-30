@@ -183,12 +183,30 @@ const FLAG_ROWS = tx.filter((r) => r[4] > 80).map((_, i) => i);
 function runFor(queryId) {
   const defs = chartDefs.filter((c) => c[1] === queryId);
   const data = runs[defs[0][7]];
+  // Which rows each query's rules flag, so every chart type has marks to show.
+  const hit = (predicate, ruleIds = () => ["r1"]) =>
+    data.rows
+      .map((row, index) => (predicate(row, index) ? { index, rule_ids: ruleIds(index), fingerprint: `f${queryId}${index}` } : null))
+      .filter(Boolean);
   const flagRows =
     queryId === "q_table"
-      ? data.rows
-          .map((r, index) => (r[4] > 80 ? { index, rule_ids: ["r1"], fingerprint: `f${index}` } : null))
-          .filter(Boolean)
-      : [];
+      ? hit((r) => r[4] > 80)
+      : queryId === "q_flagged"
+        ? hit((_r, i) => i >= 18, (i) => (i >= 21 ? ["r1", "r2"] : ["r2"]))
+        : queryId === "q_mix"
+          ? hit((r) => r[0] === "blocked" || r[0] === "disputed")
+          : queryId === "q_heat"
+            ? hit((r) => r[1] === "NG" && r[0] >= "12")
+            : [];
+  const RULES = {
+    q_table: [{ id: "r1", name: "Risk over 80", severity: "high" }],
+    q_flagged: [
+      { id: "r1", name: "Velocity spike", severity: "high" },
+      { id: "r2", name: "Night-time surge", severity: "medium" },
+    ],
+    q_mix: [{ id: "r1", name: "Blocked by issuer", severity: "high" }],
+    q_heat: [{ id: "r1", name: "Hot country window", severity: "medium" }],
+  };
   return {
     query_id: queryId,
     executed_at: iso(2000),
@@ -211,7 +229,10 @@ function runFor(queryId) {
     flags: {
       flagged_count: flagRows.length,
       rows: flagRows,
-      rules: flagRows.length ? [{ id: "r1", name: "Risk over 80", severity: "high", matched: flagRows.length }] : [],
+      rules: (RULES[queryId] ?? []).map((rule) => ({
+        ...rule,
+        matched: flagRows.filter((row) => row.rule_ids.includes(rule.id)).length,
+      })),
       warnings: [],
       dismissed_count: 0,
     },

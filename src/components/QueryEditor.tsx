@@ -361,6 +361,10 @@ function PreviewPanel({
         series_field: null,
         warnings: [],
       },
+      // The preview evaluates the unsaved rules; without them here the rows a
+      // rule just caught would not be marked, which is the feedback a rule
+      // author is waiting for.
+      flags: preview.flags,
     });
   }, [preview]);
 
