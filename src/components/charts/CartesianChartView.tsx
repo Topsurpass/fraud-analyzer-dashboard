@@ -134,8 +134,18 @@ function rank(severity: FlagMark["severity"]): number {
  * The marker at the top of a flagged column: a filled disc with an exclamation
  * mark. A shape and a glyph, so it reads without the colour.
  */
-function BandMarker({ viewBox }: { viewBox?: { x: number; y: number; width: number } }) {
-  if (!viewBox) return null;
+export function BandMarker({ viewBox }: { viewBox?: { x: number; y: number; width: number } }) {
+  // Recharts passes a NaN position while the axis is still being measured, and
+  // whenever the column's x value cannot be placed on it. Drawing from NaN
+  // throws an attribute warning per circle, so there is simply nothing to draw.
+  if (
+    !viewBox ||
+    !Number.isFinite(viewBox.x) ||
+    !Number.isFinite(viewBox.y) ||
+    !Number.isFinite(viewBox.width)
+  ) {
+    return null;
+  }
   const cx = viewBox.x + viewBox.width / 2;
   // Sized to the column, so neighbouring flagged columns never merge into one
   // blob. Too narrow for the "!" to read, it is a plain disc: still a mark.
@@ -338,18 +348,21 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
   // merge into a wash, so only the per-point marks remain.
   const bands =
     buckets.length <= MAX_FLAG_BANDS
-      ? buckets.map((bucket, index) => (
-          <ReferenceArea
-            key={`flag-${index}`}
-            x1={bucket.x as string | number}
-            x2={bucket.x as string | number}
-            fill={ALERT_COLOR}
-            fillOpacity={0.09}
-            strokeOpacity={0}
-            ifOverflow="visible"
-            label={<BandMarker />}
-          />
-        ))
+      ? buckets
+          // A null or empty x has no place on the axis to shade.
+          .filter((bucket) => bucket.x !== null && bucket.x !== undefined && bucket.x !== "")
+          .map((bucket, index) => (
+            <ReferenceArea
+              key={`flag-${index}`}
+              x1={bucket.x as string | number}
+              x2={bucket.x as string | number}
+              fill={ALERT_COLOR}
+              fillOpacity={0.09}
+              strokeOpacity={0}
+              ifOverflow="visible"
+              label={<BandMarker />}
+            />
+          ))
       : [];
 
   const opacityFor = (key: string) =>
