@@ -433,15 +433,28 @@ dashboard, or the engine refuses the chart type.
 
 ### Creating lists, and importing them from a spreadsheet
 
-**Creating a list is a dialog**, not a page. `New list` opens it over the lists
-table; saving closes it, refreshes the table, marks the new row for a few
-seconds and says what was kept ("Created "Blocked terminals" with 7 items. 1
-duplicate was dropped."). A failed save keeps it open with the reason, and while
-a save is in flight Escape, the backdrop and the close button do nothing so the
-answer cannot be lost behind a closed dialog. `/lists/new` still works as a link:
-it redirects to `/lists?new`, which opens the dialog on arrival. The dialog is
-the reusable `components/Modal.tsx` (the native `<dialog>` element: real focus
-trap, inert page behind, Escape, focus returns to the opener).
+**Creating, editing and deleting a list are dialogs**, not pages. `New list`
+opens one over the lists table, and clicking a list's name (or `Edit` / `View`)
+opens that list in one. Saving closes it, refreshes the table, marks the row for
+a few seconds and says what happened in a banner ("Created "Blocked terminals"
+with 7 items. 1 duplicate was dropped.", "Saved ...", "Deleted ..."). A failed
+save keeps the dialog open with the reason, and while a save is in flight Escape,
+the backdrop and the close button do nothing so the answer cannot be lost behind
+a closed dialog.
+
+The edit dialog carries everything the old page did: a read-only view for a list
+somebody else made, and a delete section that asks twice, is disabled while rules
+use the list (naming them, linking to their queries, and counting ones on queries
+you cannot see), and offers `Check again`. Deleting closes the dialog once the
+engine agrees; a refusal keeps it open.
+
+`/lists/new` and `/lists/<id>` still work as links: they redirect to `/lists?new`
+and `/lists?open=<id>`, which open the right dialog on arrival (closing it
+removes the flag so a reload does not reopen it). The name in the table is a real
+link to `/lists?open=<id>`, so it can be copied or opened in a new tab; only a
+plain click is taken over. The dialog is the reusable `components/Modal.tsx`
+(the native `<dialog>` element: real focus trap, inert page behind, Escape,
+focus returns to the opener).
 
 **Items can come from a file.** `Import from Excel or CSV` in the list form
 accepts `.xlsx`, `.csv`, `.tsv` and `.txt`, by choosing or dropping a file:

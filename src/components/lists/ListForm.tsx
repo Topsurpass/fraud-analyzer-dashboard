@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { ItemListWrite } from "@/contracts/api";
 import { Button, Field, Input, Textarea } from "@/components/ui";
 import { ImportItems } from "./ImportItems";
@@ -37,7 +37,7 @@ export function ListForm({
   readOnly = false,
   autoFocus = false,
   layout = "page",
-  version,
+  extra,
   error,
   onSubmit,
   onCancel,
@@ -56,13 +56,13 @@ export function ListForm({
    * scrolling a tall form.
    */
   layout?: "page" | "modal";
-  /**
-   * Changes when the fields should be replaced from `initial` (after a save,
-   * so the box shows what the engine kept). Replacing in place, rather than
-   * remounting the form, keeps whatever had keyboard focus.
-   */
-  version?: string;
   error: string | null;
+  /**
+   * Content placed between the fields and the buttons, inside the form. The
+   * edit dialog puts its delete section here, so the Save bar stays last and
+   * pinned. Anything interactive in it must be `type="button"`.
+   */
+  extra?: ReactNode;
   onSubmit: (body: ItemListWrite) => void;
   onCancel: () => void;
 }) {
@@ -71,15 +71,6 @@ export function ListForm({
   const [itemsText, setItemsText] = useState(initial.itemsText);
   const [touched, setTouched] = useState(false);
   const [imported, setImported] = useState<string | null>(null);
-  const [seenVersion, setSeenVersion] = useState(version);
-  if (version !== seenVersion) {
-    setSeenVersion(version);
-    setName(initial.name);
-    setDescription(initial.description);
-    setItemsText(initial.itemsText);
-    setTouched(false);
-    setImported(null);
-  }
 
   const items = useMemo(() => parseItems(itemsText), [itemsText]);
   const tally = useMemo(() => tallyItems(items), [items]);
@@ -202,6 +193,8 @@ export function ListForm({
           {error}
         </p>
       ) : null}
+
+      {extra}
 
       <div
         className={

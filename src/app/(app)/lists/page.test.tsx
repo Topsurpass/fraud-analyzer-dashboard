@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemListSummary, UserRead } from "@/contracts/api";
+import type { ItemListRead, ItemListSummary, UserRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
 import { can } from "@/services/auth/permissions";
 import ListsPage from "./page";
@@ -17,13 +17,16 @@ const listsState = vi.hoisted(() => ({
 }));
 const reload = vi.hoisted(() => vi.fn());
 const createList = vi.hoisted(() => vi.fn());
+const getList = vi.hoisted(() => vi.fn());
+const updateList = vi.hoisted(() => vi.fn());
+const deleteList = vi.hoisted(() => vi.fn());
 const replace = vi.hoisted(() => vi.fn());
 const search = vi.hoisted(() => ({ current: "" }));
 
 vi.mock("@/services/api-client", async () => {
   const actual =
     await vi.importActual<typeof import("@/services/api-client")>("@/services/api-client");
-  return { ...actual, createList };
+  return { ...actual, createList, getList, updateList, deleteList };
 });
 
 vi.mock("@/lib/ListsContext", () => ({ useLists: () => listsState.current }));
@@ -93,6 +96,9 @@ beforeEach(() => {
 	reload.mockReset();
 	replace.mockReset();
 	search.current = "";
+	getList.mockReset().mockImplementation(async (id: string) => detail(id));
+	updateList.mockReset();
+	deleteList.mockReset().mockResolvedValue(undefined);
 	createList.mockReset().mockResolvedValue({
 		id: "l9",
 		name: "Fresh list",
@@ -108,6 +114,12 @@ beforeEach(() => {
 		reload,
 	};
 });
+
+/** What GET /lists/<id> returns for the rows in `listsState`. */
+function detail(id: string): ItemListRead {
+	const row = listsState.current.lists.find((list) => list.id === id) as ItemListSummary;
+	return { ...row, items: ["T-1", "T-2"] };
+}
 
 function rowFor(name: string): HTMLElement {
 	const row = screen.getByText(name).closest('[role="row"]');
@@ -127,19 +139,23 @@ describe("the lists index", () => {
 
 	it("links each name to its own page", () => {
 		render(<ListsPage />);
-		expect(screen.getByRole("link", { name: "Watchlist" })).toHaveAttribute("href", "/lists/l2");
+		// A real link, so it can be copied or opened in a new tab.
+		expect(screen.getByRole("link", { name: "Watchlist" })).toHaveAttribute(
+			"href",
+			"/lists?open=l2",
+		);
 	});
 
 	it("offers Edit on your own list and View on somebody else's", () => {
 		render(<ListsPage />);
-		expect(within(rowFor("Blocked terminals")).getByRole("link", { name: "Edit" })).toBeInTheDocument();
-		expect(within(rowFor("Watchlist")).getByRole("link", { name: "View" })).toBeInTheDocument();
+		expect(within(rowFor("Blocked terminals")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+		expect(within(rowFor("Watchlist")).getByRole("button", { name: "View" })).toBeInTheDocument();
 	});
 
 	it("offers Edit on every list to an administrator", () => {
 		signedInAs.current = person({ id: "u2", role: "admin" });
 		render(<ListsPage />);
-		expect(within(rowFor("Watchlist")).getByRole("link", { name: "Edit" })).toBeInTheDocument();
+		expect(within(rowFor("Watchlist")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
 	});
 
 	it("gives any signed-in role a New list button, agreeing with the capability table", () => {
@@ -268,7 +284,7 @@ describe("creating a list from the index", () => {
     expect(status).toHaveTextContent("1 duplicate was dropped");
     expect(within(status).getByRole("link", { name: "Open list" })).toHaveAttribute(
       "href",
-      "/lists/l9",
+      "/lists?open=l9",
     );
   });
 
@@ -368,5 +384,126 @@ describe("creating a list from the index", () => {
     await userEvent.click(screen.getByRole("button", { name: "New list" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("editing a list from the index", () => {
+  const dialog = () => screen.queryByRole("dialog");
+
+  it("opens the list in a dialog when its name is clicked, without leaving the page", async () => {
+    render(<ListsPage />);
+    await userEvent.click(screen.getByRole("link", { name: "Watchlist" }));
+
+    expect(screen.getByRole("dialog", { name: "Watchlist" })).toBeInTheDocument();
+    expect(getList).toHaveBeenCalledWith("l2", expect.anything());
+    // The table is still there behind it.
+    expect(screen.getByRole("link", { name: "Blocked terminals" })).toBeInTheDocument();
+  });
+
+  it("leaves a modified click to the browser, so a new tab still works", async () => {
+    render(<ListsPage />);
+    const link = screen.getByRole("link", { name: "Watchlist" });
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      // `fireEvent` returns false when the handler prevented the default.
+      expect(fireEvent.click(link, modifier)).toBe(true);
+    }
+    expect(dialog()).not.toBeInTheDocument();
+  });
+
+  it("opens from the Edit button and loads that list", async () => {
+    render(<ListsPage />);
+    await userEvent.click(within(rowFor("Blocked terminals")).getByRole("button", { name: "Edit" }));
+    expect(await screen.findByDisplayValue("Blocked terminals")).toBeInTheDocument();
+    expect(getList).toHaveBeenCalledWith("l1", expect.anything());
+  });
+
+  it("opens somebody else's list read-only from View", async () => {
+    render(<ListsPage />);
+    await userEvent.click(within(rowFor("Watchlist")).getByRole("button", { name: "View" }));
+    expect(await screen.findByDisplayValue("Watchlist")).toBeDisabled();
+    expect(screen.getByText(/Only the person who made this list/)).toBeInTheDocument();
+  });
+
+  it("saves, closes, refreshes and says what was kept, marking the row", async () => {
+    updateList.mockResolvedValue({
+      ...detail("l1"),
+      received: 4,
+      kept: 3,
+      duplicates_dropped: 1,
+    });
+    render(<ListsPage />);
+    await userEvent.click(within(rowFor("Blocked terminals")).getByRole("button", { name: "Edit" }));
+    await screen.findByDisplayValue("Blocked terminals");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(dialog()).not.toBeInTheDocument());
+    expect(reload).toHaveBeenCalled();
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Saved");
+    expect(status).toHaveTextContent("Blocked terminals");
+    expect(status).toHaveTextContent("3 items kept, 1 duplicate was dropped");
+    expect(status).toHaveTextContent("pick up the change on their next poll");
+    expect(rowFor("Blocked terminals")).toHaveClass("bg-accent-soft");
+  });
+
+  it("deletes, closes, refreshes and confirms, with no row left to mark", async () => {
+    // "Watchlist" is used by no rule, so it can be deleted; an administrator may
+    // delete a list somebody else made.
+    signedInAs.current = person({ id: "u2", role: "admin" });
+    render(<ListsPage />);
+    await userEvent.click(within(rowFor("Watchlist")).getByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Delete list" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    await waitFor(() => expect(dialog()).not.toBeInTheDocument());
+    expect(deleteList).toHaveBeenCalledWith("l2");
+    expect(reload).toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(/Deleted.*Watchlist/);
+    expect(document.querySelector(".bg-accent-soft")).toBeNull();
+  });
+
+  it("confirms nothing when it is closed without saving", async () => {
+    render(<ListsPage />);
+    await userEvent.click(screen.getByRole("link", { name: "Watchlist" }));
+    await screen.findByDisplayValue("Watchlist");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(dialog()).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("opens already when the old /lists/<id> link redirects here, and strips the flag on close", async () => {
+    search.current = "open=l2";
+    render(<ListsPage />);
+    expect(await screen.findByDisplayValue("Watchlist")).toBeInTheDocument();
+    expect(getList).toHaveBeenCalledWith("l2", expect.anything());
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(replace).toHaveBeenCalledWith("/lists");
+  });
+
+  it("does not touch the URL when it was opened by a click", async () => {
+    render(<ListsPage />);
+    await userEvent.click(screen.getByRole("link", { name: "Watchlist" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("opens the created list from the banner's Open list link", async () => {
+    render(<ListsPage />);
+    await userEvent.click(screen.getByRole("button", { name: "New list" }));
+    await userEvent.type(screen.getByLabelText("Name"), "Fresh list");
+    await userEvent.type(screen.getByLabelText("Items"), "a");
+    await userEvent.click(screen.getByRole("button", { name: "Create list" }));
+    await waitFor(() => expect(dialog()).not.toBeInTheDocument());
+
+    listsState.current = {
+      ...listsState.current,
+      lists: [...listsState.current.lists, summary({ id: "l9", name: "Fresh list" })],
+    };
+    await userEvent.click(screen.getByRole("link", { name: "Open list" }));
+    expect(await screen.findByDisplayValue("Fresh list")).toBeInTheDocument();
+    expect(getList).toHaveBeenCalledWith("l9", expect.anything());
   });
 });
