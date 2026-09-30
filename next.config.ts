@@ -49,6 +49,13 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   /**
+   * Lets a second `next dev` run beside the main one (for example against
+   * `scripts/mock-engine.mjs`) without fighting it over `.next`. Unset in
+   * every real environment, where this is the framework default.
+   */
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  /**
    * The reverse proxy compresses, not this process.
    *
    * Measured: with this at its default, a 209,790-byte proxied payload reached

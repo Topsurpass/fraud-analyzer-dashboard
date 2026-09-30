@@ -123,16 +123,16 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
   ];
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col px-5 pb-4">
       {/*
        * The answer before the picture. An analyst working a queue needs to know
        * whether this terminal moved without decoding two lines first.
        */}
       <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="tnum text-lg leading-none text-strong">
+        <span className="tnum text-[22px] leading-none font-semibold text-ink">
           {formatAxisValue(data.currentTotal)}
         </span>
-        <span className="text-[11px] text-muted">
+        <span className="text-[12.5px] text-muted">
           vs <span className="tnum">{formatAxisValue(data.previousTotal)}</span> previous
         </span>
         {/*
@@ -143,7 +143,7 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
          */}
         <ChangeBadge verdict={data.verdict} subject={title} />
         {gap && (
-          <span className="text-[11px] text-muted">
+          <span className="text-[12.5px] text-muted">
             widest gap at <span className="tnum">{gap.bucket}</span> (
             <span className="tnum">
               {gap.delta > 0 ? "+" : ""}
@@ -170,7 +170,7 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
       >
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data.points} margin={CHART_MARGIN}>
-            <CartesianGrid stroke={GRID_STROKE} strokeDasharray="2 4" vertical={false} />
+            <CartesianGrid stroke={GRID_STROKE} strokeDasharray="3 5" vertical={false} />
             <XAxis dataKey="bucket" tick={AXIS_TICK} tickLine={false} axisLine={false} />
             <YAxis
               tick={AXIS_TICK}
@@ -201,8 +201,8 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
               dataKey="previous"
               name="Previous"
               stroke={PREVIOUS_COLOR}
-              strokeWidth={1.5}
-              strokeDasharray="4 3"
+              strokeWidth={2}
+              strokeDasharray="5 4"
               dot={false}
               activeDot={false}
               // A gap in the previous window is a gap, not a line drawn across
@@ -217,9 +217,9 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
               dataKey="current"
               name="Current"
               stroke={CURRENT_COLOR}
-              strokeWidth={2}
+              strokeWidth={2.5}
               dot={<CurrentDot />}
-              activeDot={{ r: 3, fill: CURRENT_COLOR, stroke: "var(--surface-raised)" }}
+              activeDot={{ r: 5, fill: "var(--surface)", stroke: CURRENT_COLOR, strokeWidth: 2.5 }}
               connectNulls={false}
               isAnimationActive={animate}
               animationDuration={DATA_TWEEN_MS}
@@ -229,7 +229,10 @@ export function CompareChartView({ data, title }: CompareChartViewProps) {
         </ResponsiveContainer>
       </div>
 
-      <SeriesLegend series={legend} active={active} onActiveChange={setActive} />
+      {/* The legend carries its own gutter; cancel this view's. */}
+      <div className="-mx-5">
+        <SeriesLegend series={legend} active={active} onActiveChange={setActive} />
+      </div>
     </div>
   );
 }
@@ -249,8 +252,8 @@ function CurrentDot({ cx, cy, payload }: DotProps) {
       cy={cy}
       r={3.5}
       fill={ALERT_COLOR}
-      stroke="var(--surface-raised)"
-      strokeWidth={1.5}
+      stroke="var(--surface)"
+      strokeWidth={2}
     />
   );
 }

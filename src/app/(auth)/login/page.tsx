@@ -98,7 +98,7 @@ function LoginForm() {
 					   reason, where submitting an empty form gets the browser's
 					   own "fill this in" on the field that is missing. */
 					disabled={busy}
-					className="w-full py-2 text-[12.5px]"
+					className="w-full py-2 text-[13.5px]"
 				>
 					{busy ? "Signing in…" : "Sign in"}
 				</Button>

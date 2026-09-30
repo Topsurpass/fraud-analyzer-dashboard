@@ -50,7 +50,7 @@ export function ConnectionPowerButton({
   if (connection.paused) {
     return (
       <div className="flex items-center gap-2">
-        {problem ? <span className="text-[11.5px] text-change">{problem}</span> : null}
+        {problem ? <span className="text-[12.5px] text-change">{problem}</span> : null}
         <Button
           type="button"
           tone="primary"
@@ -66,7 +66,7 @@ export function ConnectionPowerButton({
 
   return (
     <div className="flex items-center gap-2">
-      {problem ? <span className="text-[11.5px] text-change">{problem}</span> : null}
+      {problem ? <span className="text-[12.5px] text-change">{problem}</span> : null}
       {confirming ? (
         <>
           <Button
@@ -104,7 +104,7 @@ export function ConnectionPowerButton({
  */
 export function DisconnectedNotice({ name }: { name: string }) {
   return (
-    <p className="mb-3 rounded-[var(--radius-sm)] border border-change/40 bg-change/5 px-3 py-2 text-[12px] text-change">
+    <p className="mb-3 rounded-[var(--radius-sm)] border border-change/40 bg-change/5 px-3 py-2 text-[13px] text-change">
       <strong className="font-semibold">{name} is disconnected.</strong> Nothing
       is running against it and no new rows are being flagged. Saved queries,
       rules and existing findings are all kept — reconnect to resume.

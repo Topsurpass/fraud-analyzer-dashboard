@@ -54,7 +54,7 @@ function SeverityPill({ severity }: { severity: FlagSeverity }) {
 				: "border-line/60 text-muted";
 	return (
 		<span
-			className={`border px-1.5 py-0.5 text-[10px] tracking-wide uppercase ${weight}`}
+			className={`border px-1.5 py-0.5 text-[11.5px] tracking-wide uppercase ${weight}`}
 		>
 			{severity}
 		</span>
@@ -86,7 +86,7 @@ function RuleLegend({
 				<button
 					type="button"
 					onClick={() => onPick(null)}
-					className="rounded-[var(--radius-full)] border border-line px-2 py-0.5 text-[11px] text-muted transition-colors hover:border-line-strong hover:text-ink"
+					className="rounded-[var(--radius-full)] border border-line px-2 py-0.5 text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-ink"
 				>
 					Show all
 				</button>
@@ -118,7 +118,7 @@ function RuleLegend({
 									: `Show only what ${rule.name} caught`
 							}
 							onClick={() => onPick(selected ? null : rule.id)}
-							className={`flex items-center gap-1 rounded-[var(--radius-full)] border px-2 py-0.5 text-[11px] transition-colors ${
+							className={`flex items-center gap-1 rounded-[var(--radius-full)] border px-2 py-0.5 text-[12.5px] transition-colors ${
 								selected
 									? "border-accent/50 bg-accent/12 text-ink"
 									: empty
@@ -300,7 +300,7 @@ function Section({
 							setPage(0);
 						}}
 					/>
-					<span className="text-[10px] text-muted">
+					<span className="text-[11.5px] text-muted">
 						{section.executed_at
 							? `as of ${new Date(section.executed_at).toLocaleString()}`
 							: "not run yet"}
@@ -308,31 +308,31 @@ function Section({
 				</div>
 
 				{problem ? (
-					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
+					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
 						{problem}
 					</p>
 				) : null}
 
 				{section.error_code ? (
-					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
+					<p className="border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
 						This query failed to run: {section.error_message ?? section.error_code}.
 						The rows below, if any, are from the last successful run.
 					</p>
 				) : null}
 
 				{section.warnings.map((warning) => (
-					<p key={warning} className="text-[11px] text-muted">
+					<p key={warning} className="text-[12.5px] text-muted">
 						{warning}
 					</p>
 				))}
 
 				{section.stale && section.flagged_count === 0 ? (
-					<p className="border border-dashed border-line px-3 py-4 text-[11px] text-muted">
+					<p className="border border-dashed border-line px-3 py-4 text-[12.5px] text-muted">
 						No cached result for this query, so nothing has been checked against its
 						rules yet. Refresh to run it.
 					</p>
 				) : section.flagged_count === 0 ? (
-					<p className="border border-dashed border-line px-3 py-4 text-[11px] text-muted">
+					<p className="border border-dashed border-line px-3 py-4 text-[12.5px] text-muted">
 						{section.dismissed_count > 0
 							? `All ${section.dismissed_count} flagged ${
 								section.dismissed_count === 1 ? "row has" : "rows have"
@@ -342,7 +342,7 @@ function Section({
 				) : (
 					<>
 					<div className="overflow-auto" style={{ maxHeight: BODY_MAX_HEIGHT }}>
-						<table className="w-full border-collapse text-[12px]">
+						<table className="w-full border-collapse text-[13px]">
 							<caption className="sr-only">
 								{section.flagged_count} flagged rows from {section.query_name}
 							</caption>
@@ -350,7 +350,7 @@ function Section({
 								<tr>
 									<th
 										scope="col"
-										className="border-b border-line px-2.5 py-1.5 text-left text-[10px] font-medium tracking-wide text-muted uppercase"
+										className="border-b border-line px-2.5 py-1.5 text-left text-[11.5px] font-medium tracking-wide text-muted uppercase"
 									>
 										Caught by
 									</th>
@@ -361,7 +361,7 @@ function Section({
 										<th
 											key={column}
 											scope="col"
-											className="border-b border-line px-2.5 py-1.5 text-left text-[10px] font-medium tracking-wide whitespace-nowrap text-muted uppercase"
+											className="border-b border-line px-2.5 py-1.5 text-left text-[11.5px] font-medium tracking-wide whitespace-nowrap text-muted uppercase"
 										>
 											{column}
 										</th>
@@ -383,7 +383,7 @@ function Section({
 													{hits.map((rule) => (
 														<span key={rule.id} className="flex items-center gap-1">
 															<SeverityPill severity={rule.severity} />
-															<span className="text-[11px] text-ink">{rule.name}</span>
+															<span className="text-[12.5px] text-ink">{rule.name}</span>
 														</span>
 													))}
 												</div>
@@ -423,7 +423,7 @@ function Section({
 							and a page is what someone can get through before losing their
 							place. The body scrolls within its own height so one busy query
 							cannot push every other section off the screen. */}
-					<div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2 text-[11.5px] text-muted">
+					<div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2 text-[12.5px] text-muted">
 						<span>
 							{ruleFilter ? "Matching this rule: " : ""}
 							<span className="tnum text-ink">{formatInteger(filtered.length)}</span>{" "}
@@ -538,20 +538,20 @@ export default function FlaggedPage({ params }: { params: Promise<{ id: string }
 			) : (
 				<div className="space-y-3">
 					{refreshError ? (
-						<p className="border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
+						<p className="border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
 							{refreshError.displayMessage}
 						</p>
 					) : null}
 
 					{data?.refresh_truncated ? (
-						<p className="border border-line px-3 py-2 text-[11px] text-muted">
+						<p className="border border-line px-3 py-2 text-[12.5px] text-muted">
 							Only the first queries on this connection were re-run. The engine caps
 							one refresh so a single click cannot fire every saved query at your
 							database at once.
 						</p>
 					) : null}
 
-					<p className="text-[11px] text-muted">
+					<p className="text-[12.5px] text-muted">
 						<span className="tnum text-ink">{formatInteger(data?.flagged_count ?? 0)}</span>{" "}
 						flagged {data?.flagged_count === 1 ? "row" : "rows"} across{" "}
 						{sections.length} {sections.length === 1 ? "query" : "queries"}

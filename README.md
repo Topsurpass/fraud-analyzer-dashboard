@@ -15,7 +15,7 @@ that, plus manages the connections, the accounts and the audit log.
 │ FRAUD    │  Connections › Payments DB          ● live  │
 │ ANALYZER │────────────────────────────────────────────│
 │          │  ┌───────────────┐ ┌───────────────┐        │
-│ ● Conn A │  │ ChartCard  ⟨pulse line⟩         │        │
+│ ● Conn A │  │ ChartCard  ⟨live dot⟩           │        │
 │ ○ Conn B │  └───────────────┘ └───────────────┘        │
 │──────────│  ┌───────────────┐ ┌───────────────┐        │
 │DASHBOARDS│  │ ChartCard     │ │ ChartCard     │        │
@@ -83,7 +83,7 @@ Registering a connection is an administrator's act, so the first form signs in
 before it writes anything. `--tick` only touches the SQLite file and needs no
 session.
 
-`--tick` is what makes the pulse line worth looking at: it writes new
+`--tick` is what makes the live indicator worth looking at: it writes new
 transactions continuously, so polls return `changed: true` and the cards
 actually deflect.
 
@@ -330,36 +330,77 @@ The hovered value is pinned to a fixed line above the grid instead of a floating
 tooltip: a tooltip under the pointer covers the neighbouring cells, which are
 the comparison the chart exists to make.
 
-### The pulse line
+### The live indicator
 
-`src/components/PulseLine.tsx` is the signature element and it is not
-decorative — every mark on it is a real poll:
+Each card header carries one small state indicator, and every state is a real
+poll result (`LivePill` in `src/components/ChartCard.tsx`):
 
-- **idle** — flat line in `--signal-live`, with a one-sample tremor per poll that
-  returned `changed: false`, so it reads as alive rather than frozen
-- **changed** — one sharp bipolar deflection in `--signal-change`, injected the
-  moment the engine reports a new `data_hash`, which then scrolls away
-- **error/stale** — dashed and dim in `--text-muted`, with an inline reason and a
-  retry action on the card
+- **beating green dot** - polling is healthy
+- **amber "changed" pill** - the last poll brought a new `data_hash`; the card
+  border also takes the change colour for that beat
+- **rose dot** - polling is failing; the card shows an inline reason and a retry
+- **nothing** - paused
 
-The trace scrolls right to left at a fixed rate, so its horizontal axis is
-genuinely time. Every pulse line on the page shares one `requestAnimationFrame`
-ticker (`src/lib/ticker.ts`) rather than starting its own.
+The word always accompanies the colour, so it survives colour blindness. The
+old oscilloscope trace (`PulseLine`) is gone; `src/lib/ticker.ts` remains because
+the number cards' count-up still uses it.
 
-### Type and rhythm
+### Design system
 
-Three faces, three jobs, per the brief: Space Grotesk for the wordmark and page
-titles, Inter for interface text, JetBrains Mono for **every** number, timestamp,
-hash and axis value. The scale that sits on top of them lives in `globals.css`
-as `.t-page` / `.t-card` / `.t-sub` / `.t-eyebrow`, because everything used to
-sit within a point of 13px and a grid with no hierarchy gives the eye nowhere to
-land first.
+A fintech SaaS surface: cool off-white ground, white cards with a hairline and a
+soft shadow, one indigo accent, generous radius. **Light is the default, dark is
+a full second theme**, chosen with the toggle in the top bar (stored in
+`localStorage` as `fae.theme`) or, with no choice made, by the OS.
 
-One monospace detail worth knowing: JetBrains Mono's dotted zero is the face's
-own default glyph, not an opt-in OpenType feature, so `font-feature-settings:
-"zero" 0` does not remove it. `.tnum-display` exists for large readouts and only
-adjusts tracking - the default `-0.01em` is set for 10-13px status text and
-leaves 4rem digits looking loose.
+- Every colour is a token in `src/app/globals.css`. The dark theme is the
+  `[data-theme="dark"]` block plus a `prefers-color-scheme` mirror of it for the
+  no-choice case. Components never use a literal colour, which is what lets one
+  stylesheet carry both themes.
+- `src/lib/theme.ts` holds the pure rules and the tiny init script inlined in
+  `<head>`, so a saved dark theme never flashes light. `ThemeToggle` reads the
+  attribute back rather than keeping a second copy in state.
+- One typeface, Inter, with tabular numerals (`.tnum`) so digit columns stay
+  steady as a poll lands. JetBrains Mono survives only for hashes, ids and SQL
+  (`.mono`). Scale: `.t-display` / `.t-page` / `.t-section` / `.t-card` / `.t-sub`.
+- Chart series colours are one mid-tone ramp (`charts/theme.ts`) that holds 3:1
+  against both card surfaces, so a chart does not change colour with the theme.
+  The ramp excludes amber and rose: see "What `--signal-alert` means".
+
+### Charts and the table
+
+Line charts are gradient area charts, bars have rounded tops and a gradient,
+pies are rounded-cap donuts whose legend carries each slice's share, and the
+tooltip is a single floating card shared by every chart. Recharts 2 is kept
+(it already drives every chart type here); the work is in how it is drawn.
+
+`charts/TableView.tsx` is built on **TanStack Table v8** (`@tanstack/react-table`,
+pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
+
+- click-to-sort headers, ascending first, NULLs always last, `aria-sort` on each
+- search across every cell, matching the text as displayed ("1,234" finds
+  1234567), and a flagged-only filter
+- known outcome words (`approved`, `pending`, `declined`...) drawn as badges
+- a count that says "12 of 140 rows" whenever the view is narrowed
+
+The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
+and filtered rows, and flag marks stay with their row through a sort.
+
+### Looking at it without an engine
+
+`scripts/mock-engine.mjs` is a fixture server that speaks enough of the engine's
+API to sign in and render every chart type. Any email with the password `demo`
+signs in.
+
+```bash
+node scripts/mock-engine.mjs                       # :8100
+ENGINE_BASE_URL=http://127.0.0.1:8100 NEXT_DIST_DIR=.next-preview npm run dev -- --port 3100
+node scripts/shoot.mjs ./shots --chrome --theme=light --base=http://localhost:3100 \
+  --engine=http://127.0.0.1:8100 --password=demo --routes=/,/dashboards/d1
+```
+
+`NEXT_DIST_DIR` lets this run beside your normal dev server without the two
+fighting over `.next`. Use `localhost`, not `127.0.0.1`: Next blocks dev
+resources requested from the latter.
 
 ### Working the grid
 
@@ -374,13 +415,11 @@ available without leaving the page.
   unfilled, which reads as broken rather than as sparse. Three columns at the
   top end rather than four: at four, a card on a 1600px screen is about 325px
   wide, and a plot plus its legend does not fit in that.
-- **Each card carries a state hairline** along its top edge, in the live colour
-  at rest and the change colour when the last poll brought new data. It is the
-  pulse line's reading at a glance: across a full grid you can see which cards
-  moved without any of their text being legible.
-- **Collapse the rail** with the toggle beside the app name. It becomes a 56px
-  strip that still shows every connection's status light — an instrument panel
-  should not lose its status lights to make room. See "The left rail" below.
+- **A card's border turns amber for a beat** when its last poll brought new
+  data, so across a full grid you can see which cards moved without reading any
+  of them.
+- **Collapse the rail** with the toggle beside the app name. It becomes a 68px
+  strip that still shows every connection's status light. See "The sidebar" above.
 - **Both popovers dismiss properly.** `src/components/Popover.tsx` is the one
   implementation: it closes on a choice, on a pointer down anywhere outside it,
   and on Escape, which also hands focus back to the trigger. Opening one closes
@@ -402,16 +441,17 @@ available without leaving the page.
   "earlier/later" stays true in the single-column mobile layout where
   "left/right" would not.
 
-### The left rail
+### The sidebar
 
-256px, and wide enough to be a status panel rather than a list of links. Every
-connection shows its database kind beside whether it last answered, every
-dashboard shows how many cards are on it, and the foot of the rail carries the
-engine's own state - the difference between "nothing is happening" and "nothing
-is being asked", which no individual card can tell you.
+264px, and wide enough to be a status panel rather than a list of links: an
+Overview link, every connection with its status dot and flagged count, every
+dashboard with its card count, the admin section for those allowed it, the
+signed-in account, and a detection-engine card that says whether the engine is
+reachable - the difference between "nothing is happening" and "nothing is being
+asked", which no individual card can tell you.
 
-Collapsed it becomes a 56px strip that still shows every status light. An
-instrument panel should not lose its lights to make room for charts.
+Collapsed it becomes a 68px strip of icons and status dots. Below `md` it is a
+drawer behind the menu button in the top bar.
 
 ### What `--signal-alert` means
 
@@ -458,10 +498,10 @@ specifically to fail if anyone reintroduces a recolour.
 
 ### Accessibility
 
-Focus rings in `--signal-live` on every interactive element; the rail collapses
+Focus rings in the accent colour on every interactive element; the rail collapses
 to a drawer below `md`; each card carries its query name as its accessible name;
-the legend highlights on keyboard focus as well as hover; count-ups and pulse
-spikes collapse to instant state changes under `prefers-reduced-motion`, while
+the legend highlights on keyboard focus as well as hover; count-ups and the live
+beacon collapse to instant state changes under `prefers-reduced-motion`, while
 still delivering the information the animation carried.
 
 ## Decisions worth knowing
@@ -642,5 +682,5 @@ them. Until it is redeployed, run the engine locally and point
 envelope — for the query on the failed `warehouse-neon` connection. Because that
 502 never reaches the app, it carries no `Access-Control-Allow-Origin` header
 either, so the browser reports it as a CORS failure. The CORS message is a
-symptom; the 502 is the cause. The card degrades correctly: dashed pulse line,
+symptom; the 502 is the cause. The card degrades correctly: rose status dot,
 inline "Cannot reach engine", and a retry.

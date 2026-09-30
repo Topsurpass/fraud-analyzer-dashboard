@@ -20,7 +20,6 @@ import { formatDuration, formatHash, formatInteger, formatRelative } from "@/ser
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
-import { PulseLine } from "./PulseLine";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
 import { NumberCardView } from "./charts/NumberCardView";
@@ -35,7 +34,7 @@ import { TableView } from "./charts/TableView";
  * One live reading on the grid.
  *
  * The card owns its own poll loop, so a failing query degrades alone instead of
- * taking the dashboard with it, and the pulse line in its header is wired
+ * taking the dashboard with it, and the live indicator in its header is wired
  * straight to that loop's real state.
  */
 
@@ -205,30 +204,12 @@ export function ChartCard({
          off screen. A board of twenty charts otherwise pays for all twenty on
          every render even though four are visible - the single cheapest thing
          that makes a long dashboard feel immediate. */
-      className={`defer-paint group flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-sm transition-all duration-[var(--tween-fast)] hover:border-line-strong hover:shadow ${className ?? ""}`}
+      className={`defer-paint group flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border bg-surface shadow-sm transition-[border-color,box-shadow] duration-[var(--tween-fast)] hover:shadow ${
+        justChanged ? "border-change/40" : "border-line hover:border-line-strong"
+      } ${className ?? ""}`}
     >
       <header className="shrink-0">
-        {/*
-         * One hairline at the top of the card, coloured by the poll's own
-         * state. It is the pulse line's reading at a glance: from across the
-         * room a grid of cards shows which ones just moved without any of their
-         * text being legible. Live and change only - the alert colour stays
-         * inside chart data.
-         */}
-        <div
-          aria-hidden="true"
-          className="h-px w-full transition-colors duration-300"
-          style={{
-            background:
-              poll.phase === "error"
-                ? "var(--border)"
-                : justChanged
-                  ? "var(--signal-change)"
-                  : "var(--signal-live-dim)",
-          }}
-        />
-
-        <div className="flex items-start gap-2 px-3 pt-2 pb-1">
+        <div className="flex items-start gap-2 px-5 pt-4 pb-2">
           <div className="min-w-0 flex-1">
             {/* The chart's own name, not the query's. Four charts of one query
                 all headed "Transaction Summary" are four cards nobody can tell
@@ -237,9 +218,6 @@ export function ChartCard({
               <h3 className="t-card truncate" title={cardTitle}>
                 {cardTitle}
               </h3>
-              {/* Beside the name, not below it: "who can see this" belongs to
-                  the chart's identity, and a reader scanning a board should
-                  not have to look in a second place for it. */}
               {publishedChart ? <PublishedBadge chart={publishedChart} /> : null}
             </div>
             {/* The query underneath, so a card still says where its data came
@@ -252,61 +230,41 @@ export function ChartCard({
               <p className="t-sub mt-0.5 truncate">{query.description}</p>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-2">
             {/* Findings waiting on this query. Links into the review queue,
-                  because seeing the count is only useful if the next step is
-                  one click away. */}
+                because seeing the count is only useful if the next step is
+                one click away. */}
             {flaggedCount > 0 ? (
               <Link
                 href={`/connections/${query.connection_id}/flagged`}
                 aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
-               >
+              >
                 <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
               </Link>
             ) : null}
-            {/* Colour plus a word: the change state is never colour alone. */}
-            {justChanged ? (
-              <span className="tnum text-[9px] tracking-widest text-change uppercase">
-                changed
-              </span>
-            ) : null}
+            <LivePill phase={poll.phase} justChanged={justChanged} />
             {actions}
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
             {published ? null : (
-            <CardMenu
-              query={query}
-              chartId={chartId}
-              currentChartType={chartType}
-              isPublished={publishedChart?.is_public ?? false}
-              onMutated={() => {
-                // Re-poll immediately so a new chart type is drawn now rather
-                // than at the end of this card's interval.
-                poll.refresh();
-                onChanged?.();
-              }}
-              onDeleted={onDeleted}
-              extra={menuExtra}
-            />
+              <CardMenu
+                query={query}
+                chartId={chartId}
+                currentChartType={chartType}
+                isPublished={publishedChart?.is_public ?? false}
+                onMutated={() => {
+                  // Re-poll immediately so a new chart type is drawn now rather
+                  // than at the end of this card's interval.
+                  poll.refresh();
+                  onChanged?.();
+                }}
+                onDeleted={onDeleted}
+                extra={menuExtra}
+              />
             )}
           </div>
         </div>
-
-        <PulseLine
-          className="block w-full"
-          phase={poll.phase}
-          changeSeq={poll.changeSeq}
-          pollSeq={poll.pollSeq}
-          lastPolledAt={poll.lastPolledAt}
-          lastChangedAt={poll.lastChangedAt}
-        />
-
-        <StatusLine
-          poll={poll}
-          now={now}
-          chartType={chartType}
-        />
       </header>
 
       <div className="min-h-0 flex-1">
@@ -333,6 +291,8 @@ export function ChartCard({
         )}
       </div>
 
+      <StatusLine poll={poll} now={now} chartType={chartType} />
+
       {/* A stale card must say so even while it still shows its last good data. */}
       {poll.phase === "error" && snapshot ? (
         <CardErrorBanner
@@ -343,7 +303,7 @@ export function ChartCard({
       ) : null}
 
       {warnings.length > 0 ? (
-        <ul className="border-t border-line px-3 py-1.5 text-[10px] text-change">
+        <ul className="border-t border-line px-5 py-2 text-[12px] text-change">
           {warnings.slice(0, 2).map((warning) => (
             <li key={warning} className="truncate" title={warning}>
               {warning}
@@ -352,6 +312,50 @@ export function ChartCard({
         </ul>
       ) : null}
     </article>
+  );
+}
+
+/**
+ * The card's pulse, in one glance: a beating dot while polling is healthy, an
+ * amber "changed" when the last poll brought new data, grey when paused and a
+ * rose dot on failure. The word always comes with the colour.
+ */
+function LivePill({
+  phase,
+  justChanged,
+}: {
+  phase: ReturnType<typeof useQueryPolling>["phase"];
+  justChanged: boolean;
+}) {
+  if (justChanged) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-change/12 px-2 py-0.5 text-[11px] font-medium text-change">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+        changed
+      </span>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <span
+        className="size-2 rounded-full bg-alert"
+        title="Polling is failing"
+        role="img"
+        aria-label="Polling is failing"
+      />
+    );
+  }
+  if (phase === "paused") return null;
+  return (
+    <span
+      className="relative inline-grid size-2 place-items-center text-live"
+      title="Live: polling"
+      role="img"
+      aria-label="Live"
+    >
+      <span className="beacon absolute inset-0 rounded-full" aria-hidden="true" />
+      <span className="relative size-2 rounded-full bg-current" aria-hidden="true" />
+    </span>
   );
 }
 
@@ -367,18 +371,20 @@ function StatusLine({
   const snapshot = poll.snapshot;
 
   return (
-    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-b border-line px-3 pt-0.5 pb-1.5 text-[10px] text-muted">
+    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-t border-line px-5 py-2.5 text-[11.5px] text-muted">
       <span className="tnum shrink-0">
-        {snapshot ? `${formatInteger(snapshot.row_count)} rows` : "-- rows"}
+        {snapshot
+          ? `${formatInteger(snapshot.row_count)} ${snapshot.row_count === 1 ? "row" : "rows"}`
+          : "-- rows"}
       </span>
       <span aria-hidden="true" className="text-line-strong">
-        |
+        ·
       </span>
       <span className="tnum shrink-0">{formatDuration(snapshot?.duration_ms ?? null)}</span>
       <span aria-hidden="true" className="text-line-strong">
-        |
+        ·
       </span>
-      <span className="tnum truncate" title={poll.dataHash ?? undefined}>
+      <span className="mono truncate opacity-80" title={poll.dataHash ?? undefined}>
         {formatHash(poll.dataHash)}
       </span>
       <span className="tnum ml-auto shrink-0 whitespace-nowrap">
@@ -401,7 +407,7 @@ function CardError({ message, onRetry }: { message: string; onRetry: () => void 
       <button
         type="button"
         onClick={onRetry}
-        className="border border-line-strong px-2.5 py-1 text-[11px] text-muted transition-colors hover:border-live hover:text-live"
+        className="rounded-[var(--radius-sm)] border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
       >
         Retry
       </button>
@@ -419,8 +425,8 @@ function CardErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 border-t border-line bg-sunken px-3 py-1.5">
-      <span className="text-[10px] text-muted">
+    <div className="flex items-center gap-2 border-t border-change/25 bg-change/8 px-5 py-2">
+      <span className="text-[12px] text-change">
         Stale · {message}
         {attempts > 1 ? (
           <span className="tnum"> ({attempts} attempts)</span>
@@ -429,7 +435,7 @@ function CardErrorBanner({
       <button
         type="button"
         onClick={onRetry}
-        className="ml-auto text-[10px] text-live underline-offset-2 hover:underline"
+        className="ml-auto text-[12px] font-medium text-accent underline-offset-2 hover:underline"
       >
         Retry
       </button>
@@ -460,9 +466,9 @@ function ExpandButton({
       aria-pressed={expanded}
       aria-label={expanded ? `Shrink ${name}` : `Expand ${name}`}
       title={expanded ? "Shrink" : "Expand"}
-      className="shrink-0 px-1 text-muted transition-colors hover:text-live"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-raised hover:text-ink"
     >
-      <svg width={11} height={11} viewBox="0 0 12 12" aria-hidden="true">
+      <svg width={13} height={13} viewBox="0 0 12 12" aria-hidden="true">
         {expanded ? (
           <>
             <path d="M5 1v4H1" fill="none" stroke="currentColor" strokeWidth={1.25} />

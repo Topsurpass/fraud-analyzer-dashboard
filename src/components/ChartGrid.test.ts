@@ -5,9 +5,13 @@ import { chartCellClass, chartRowSpan } from "./ChartGrid";
 describe("chartRowSpan", () => {
   it("gives a number readout less height than a plot, but not half", () => {
     expect(chartRowSpan("number")).toBe(2);
-    for (const type of ["line", "bar", "pie", "table"] as const) {
+    for (const type of ["line", "bar", "pie"] as const) {
       expect(chartRowSpan(type)).toBe(3);
     }
+  });
+
+  it("gives a table the most rows, so there is something to scan", () => {
+    expect(chartRowSpan("table")).toBe(4);
   });
 });
 
@@ -15,7 +19,7 @@ describe("chartCellClass", () => {
   it("uses the dense default footprint when not expanded", () => {
     expect(chartCellClass("number")).toBe("card-cell-number");
     expect(chartCellClass("line")).toBe("card-cell");
-    expect(chartCellClass("table")).toBe("card-cell");
+    expect(chartCellClass("table")).toBe("card-cell-table");
   });
 
   it("uses the same larger footprint for every type when expanded", () => {
@@ -29,7 +33,7 @@ describe("chartCellClass", () => {
     // and would silently collapse every card to a single row.
     for (const type of CHART_TYPES) {
       for (const expanded of [true, false]) {
-        expect(chartCellClass(type, expanded)).toMatch(/^card-cell(-number|-expanded)?$/);
+        expect(chartCellClass(type, expanded)).toMatch(/^card-cell(-number|-table|-expanded)?$/);
       }
     }
   });

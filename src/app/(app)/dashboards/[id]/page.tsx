@@ -473,7 +473,7 @@ function BoardCardActions({
         Remove from this board
       </MenuButton>
       {error ? (
-        <p className="px-2.5 pt-1.5 text-[10px] leading-snug text-change">{error}</p>
+        <p className="px-2.5 pt-1.5 text-[11.5px] leading-snug text-change">{error}</p>
       ) : null}
     </>
   );

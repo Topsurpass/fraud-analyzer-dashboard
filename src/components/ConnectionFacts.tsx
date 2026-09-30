@@ -55,7 +55,7 @@ export function ConnectionFacts({
 		<Panel title="Connection">
 			<div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
 				<StatusDot status={connection.status} />
-				<span className="text-[12.5px] text-secondary">
+				<span className="text-[13.5px] text-secondary">
 					{connection.paused
 						? "Paused by an administrator"
 						: connection.status === "ok"
@@ -70,14 +70,14 @@ export function ConnectionFacts({
 				{facts.map(([term, value]) => (
 					<div key={term} className="min-w-0">
 						<dt className="t-eyebrow">{term}</dt>
-						<dd className="tnum mt-0.5 truncate text-[12.5px] text-secondary" title={value}>
+						<dd className="tnum mt-0.5 truncate text-[13.5px] text-secondary" title={value}>
 							{value}
 						</dd>
 					</div>
 				))}
 			</dl>
 
-			<p className="border-t border-line px-3.5 py-2.5 text-[11.5px] leading-relaxed text-muted">
+			<p className="border-t border-line px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted">
 				Credentials and deletion are managed by an administrator. The schema below is what
 				you write queries against.
 			</p>

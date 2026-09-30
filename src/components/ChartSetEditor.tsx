@@ -243,21 +243,21 @@ export function ChartSetEditor({
       }
     >
       <div className="space-y-3 p-3">
-        <p className="text-[12px] leading-relaxed text-secondary">
+        <p className="text-[13px] leading-relaxed text-secondary">
           Every chart here draws the same result. The query runs{" "}
           <strong>once</strong> however many you add, so a trend line, a
           breakdown and the rows behind them cost one trip to your database.
         </p>
 
         {charts.length === 0 ? (
-          <p className="rounded-[var(--radius-sm)] border border-dashed border-line px-3 py-4 text-[12px] text-muted">
+          <p className="rounded-[var(--radius-sm)] border border-dashed border-line px-3 py-4 text-[13px] text-muted">
             No charts yet, so this query renders nothing. Add one to draw its
             result.
           </p>
         ) : null}
 
         {renamed ? (
-          <p className="rounded-[var(--radius-sm)] border border-change/40 bg-change/5 px-3 py-2 text-[11.5px] text-change">
+          <p className="rounded-[var(--radius-sm)] border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
             Renaming a chart replaces it. Any dashboard showing the old name
             will lose that card.
           </p>
@@ -379,7 +379,7 @@ export function ChartSetEditor({
                       />
                     </Field>
                   </div>
-                  <p className="min-w-[12rem] flex-1 pb-1.5 text-[11.5px] text-muted">
+                  <p className="min-w-[12rem] flex-1 pb-1.5 text-[12.5px] text-muted">
                     A magnitude, so {chart.surge_threshold_pct || DEFAULT_SURGE_THRESHOLD_PCT}{" "}
                     flags a rise and a fall of that size. Percent rather than an amount, because
                     terminals do not carry comparable volume. Blank follows the default.
@@ -388,7 +388,7 @@ export function ChartSetEditor({
               ) : null}
 
               {fieldProblem ? (
-                <p className="text-[11.5px] text-change">{fieldProblem}</p>
+                <p className="text-[12.5px] text-change">{fieldProblem}</p>
               ) : null}
             </div>
           );

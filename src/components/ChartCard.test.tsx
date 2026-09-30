@@ -145,7 +145,7 @@ describe("ChartCard", () => {
     await settle();
 
     expect(screen.getByText("20")).toBeInTheDocument();
-    expect(screen.getByText("1 rows")).toBeInTheDocument();
+    expect(screen.getByText("1 row")).toBeInTheDocument();
     expect(screen.getByText("12ms")).toBeInTheDocument();
     // The hash is shown without its algorithm prefix.
     expect(screen.getByText("aaa")).toBeInTheDocument();

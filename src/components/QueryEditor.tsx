@@ -316,7 +316,7 @@ export function QueryEditor({
         </Panel>
 
         {error ? (
-          <p className="border border-change/40 bg-change/5 px-3 py-2 text-[12px] text-change">
+          <p className="border border-change/40 bg-change/5 px-3 py-2 text-[13px] text-change">
             {error.displayMessage}
           </p>
         ) : null}
@@ -369,7 +369,7 @@ function PreviewPanel({
       title="Preview"
       actions={
         preview ? (
-          <span className="tnum text-[11px] text-muted">
+          <span className="tnum text-[12.5px] text-muted">
             {formatInteger(preview.row_count)} rows · {formatDuration(preview.duration_ms)}
             {/* A preview is capped far below the saved row limit, so a full
                 preview says so rather than letting the number read as the size
@@ -381,9 +381,9 @@ function PreviewPanel({
     >
       {error ? (
         <div className="p-3">
-          <p className="text-[12px] text-change">{error.displayMessage}</p>
+          <p className="text-[13px] text-change">{error.displayMessage}</p>
           {error.errorCode ? (
-            <p className="tnum mt-1 text-[10px] tracking-wide text-muted uppercase">
+            <p className="tnum mt-1 text-[11.5px] tracking-wide text-muted uppercase">
               {error.errorCode}
             </p>
           ) : null}
@@ -395,7 +395,7 @@ function PreviewPanel({
           ))}
         </div>
       ) : !table ? (
-        <p className="p-3 text-[12px] text-muted">
+        <p className="p-3 text-[13px] text-muted">
           Run a preview to see the columns and rows this SQL returns.
         </p>
       ) : (

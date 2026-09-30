@@ -101,14 +101,14 @@ export function NewUserForm({
 				{error ? (
 					<p
 						role="alert"
-						className="mt-3.5 rounded-[var(--radius-sm)] border border-alert/30 bg-alert/10 px-3 py-2 text-[12px] text-ink"
+						className="mt-3.5 rounded-[var(--radius-sm)] border border-alert/30 bg-alert/10 px-3 py-2 text-[13px] text-ink"
 					>
 						{error}
 					</p>
 				) : null}
 
 				<div className="mt-4 flex items-center gap-2">
-					<p className="text-[11.5px] leading-relaxed text-muted">
+					<p className="text-[12.5px] leading-relaxed text-muted">
 						A temporary password is generated and shown once. They choose their own the
 						first time they sign in.
 					</p>

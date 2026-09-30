@@ -3,74 +3,138 @@
 /*
  * Fraud Analyzer - design tokens.
  *
- * A modern analytics surface: a near-neutral dark ground, surfaces that lift
- * rather than outline, generous radius, and one brand accent that carries
- * interaction. Chrome is allowed to breathe; data is not. A review queue of
- * three hundred rows has to stay scannable, so tables and lists keep tight
- * rhythm inside an airy shell - that tension is the whole layout brief.
+ * A fintech SaaS surface in the vein of Stripe, Ramp and Mercury: a soft cool
+ * ground, white cards that lift with a hairline and a whisper of shadow, one
+ * confident indigo accent, and generous radius. Light is the default; dark is
+ * a full second theme rather than an inversion, selected by the toggle in the
+ * top bar (`data-theme` on <html>) or, with no choice made, by the OS.
  *
- * Three signal colours still mean exactly one thing each and are never
- * decoration: --signal-live for "polling is alive", --signal-change for "this
- * data just moved", --signal-alert only ever for flagged rows in the data. The
- * brand accent is separate from all three, so "this button is primary" can
- * never be mistaken for "this row is fraud".
+ * Every component reads these tokens, never a literal colour, which is what
+ * lets one stylesheet carry both themes.
+ *
+ * Three signal colours each mean exactly one thing and are never decoration:
+ * --signal-live for "polling is alive", --signal-change for "this data just
+ * moved", --signal-alert only ever for flagged rows in the data. The brand
+ * accent is separate from all three, so "this button is primary" can never be
+ * mistaken for "this row is fraud".
  */
 :root {
-  /* Ground and surfaces. Neutral rather than blue-black: at 14px on an OLED
-     panel a cool cast reads as a colour wash rather than as dark. */
-  --bg: #0b0b0e;
-  --surface: #131318;
-  --surface-raised: #1a1a21;
-  --surface-sunken: #0f0f13;
+  color-scheme: light;
 
-  /* Borders are low contrast and mostly structural. Elevation does the work
-     that hairlines used to, which is what makes the shell feel modern rather
-     than wireframed. */
-  --border: #23232c;
-  --border-strong: #33333f;
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface-raised: #f1f3f9;
+  --surface-sunken: #fafbfd;
 
-  --text-primary: #ededf2;
-  --text-secondary: #a6a6b5;
-  --text-muted: #75758a;
+  --border: #e7e9f1;
+  --border-strong: #d4d8e5;
 
-  /* Brand accent: interaction only. Deliberately not one of the signals. */
-  --accent: #7c6cf6;
-  --accent-hover: #8f81f8;
+  --text-primary: #0e1222;
+  --text-secondary: #485069;
+  --text-muted: #79819a;
+
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
   --accent-contrast: #ffffff;
+  --accent-soft: #eef0ff;
 
-  --signal-live: #3ecf8e;
-  --signal-change: #f5a524;
-  --signal-alert: #f2545b;
+  --signal-live: #059669;
+  --signal-change: #c2710c;
+  --signal-alert: #e11d48;
 
-  --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
-  --signal-live-dim: color-mix(in srgb, var(--signal-live) 18%, transparent);
-  --signal-change-dim: color-mix(in srgb, var(--signal-change) 20%, transparent);
-  --signal-alert-dim: color-mix(in srgb, var(--signal-alert) 18%, transparent);
+  --accent-dim: color-mix(in srgb, var(--accent) 12%, transparent);
+  --signal-live-dim: color-mix(in srgb, var(--signal-live) 14%, transparent);
+  --signal-change-dim: color-mix(in srgb, var(--signal-change) 16%, transparent);
+  --signal-alert-dim: color-mix(in srgb, var(--signal-alert) 12%, transparent);
 
-  /* Radius. Controls stay tighter than surfaces so a button inside a card does
-     not echo the card's own corner. */
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
   --radius-full: 999px;
 
-  /* Elevation. Two steps only. A dark UI cannot carry more without turning to
-     soup, and anything deeper reads as a modal that is not one. */
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow: 0 4px 16px -4px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.65);
+  --shadow-sm: 0 1px 2px rgb(16 24 64 / 0.05);
+  --shadow: 0 1px 2px rgb(16 24 64 / 0.05), 0 8px 24px -8px rgb(16 24 64 / 0.1);
+  --shadow-lg: 0 24px 60px -16px rgb(16 24 64 / 0.22);
 
-  /* Motion. Short enough that the panel still reads as fast. */
+  /* The sidebar's own ground, a touch apart from the page. */
+  --sidebar-bg: #ffffff;
+  --page-glow: radial-gradient(
+    900px 380px at 70% -120px,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    transparent 70%
+  );
+
   --tween-fast: 140ms;
   --tween-data: 360ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
-  /*
-   * Rail widths, here rather than in the component so the CSS that reserves
-   * space and the JS that animates it cannot drift apart.
-   */
-  --rail-width: 248px;
-  --rail-width-collapsed: 60px;
+  --rail-width: 264px;
+  --rail-width-collapsed: 68px;
+}
+
+/* Dark theme: applied by an explicit choice, or by the OS when none is made. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #070911;
+  --surface: #121627;
+  --surface-raised: #1b2033;
+  --surface-sunken: #0c0f1a;
+
+  --border: #1e2335;
+  --border-strong: #2c3250;
+
+  --text-primary: #eef0f8;
+  --text-secondary: #aab0c6;
+  --text-muted: #8d95b0;
+
+  --accent: #7b7bff;
+  --accent-hover: #9393ff;
+  --accent-contrast: #0a0c18;
+  --accent-soft: #1b1e3d;
+
+  --signal-live: #34d399;
+  --signal-change: #fbbf24;
+  --signal-alert: #fb7185;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 24px 60px -16px rgb(0 0 0 / 0.7);
+
+  --sidebar-bg: #0b0e18;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #070911;
+    --surface: #121627;
+    --surface-raised: #1b2033;
+    --surface-sunken: #0c0f1a;
+
+    --border: #1e2335;
+    --border-strong: #2c3250;
+
+    --text-primary: #eef0f8;
+    --text-secondary: #aab0c6;
+    --text-muted: #8d95b0;
+
+    --accent: #7b7bff;
+    --accent-hover: #9393ff;
+    --accent-contrast: #0a0c18;
+    --accent-soft: #1b1e3d;
+
+    --signal-live: #34d399;
+    --signal-change: #fbbf24;
+    --signal-alert: #fb7185;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+    --shadow-lg: 0 24px 60px -16px rgb(0 0 0 / 0.7);
+
+    --sidebar-bg: #0b0e18;
+  }
 }
 
 @theme inline {
@@ -86,12 +150,15 @@
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
   --color-live: var(--signal-live);
   --color-change: var(--signal-change);
   --color-alert: var(--signal-alert);
 
-  --font-display: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif, system-ui,
-    sans-serif;
+  /* One family for the whole product. Figures get tabular numerals rather
+     than a second typeface: that is how Stripe and Linear keep columns of
+     numbers steady without the "terminal" look. */
+  --font-display: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono",
     Menlo, monospace;
@@ -115,86 +182,82 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
+  font-feature-settings: "cv11" 1, "ss03" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/*
- * Every number, timestamp, hash and axis value is monospace. This is the single
- * decision that makes the app read as instrumentation rather than a website, so
- * it gets a named class and tabular figures — columns of digits must not shift
- * width as values change during a poll.
- */
-.tnum {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "zero" 1;
-  letter-spacing: -0.01em;
+/* Theme changes cross-fade instead of snapping. Scoped to the switch itself
+   (the toggle sets this class for one beat) so ordinary hovers are untouched. */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    color 220ms ease,
+    fill 220ms ease,
+    stroke 220ms ease !important;
 }
 
 /*
- * Tabular figures tuned for display sizes.
- *
- * Same face - the brief puts every number in JetBrains Mono and a 4rem readout
- * is the last place to break that - but tracking that works large. The default
- * -0.01em is set for 10-13px status text and leaves display digits looking
- * loose. Note the dotted zero is JetBrains Mono's own default glyph rather than
- * an opt-in feature, so it stays; it is the face the brief chose.
+ * Figures: tabular numerals in the UI face, so columns of digits never shift
+ * as a poll lands. `.tnum` keeps its name because it is used everywhere.
  */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
 .tnum-display {
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.035em;
+}
+
+/* Hashes, ids and SQL: the one place a fixed-width face still earns its keep. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
 }
 
 .display {
   font-family: var(--font-display);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
-/*
- * Type scale.
- *
- * Everything used to sit within a point of 13px, which left the grid with no
- * hierarchy: a card title, its description and its axis labels all carried the
- * same weight, so the eye had nowhere to land first. The steps below are the
- * hierarchy; the sizes are bigger than an instrument panel would use because
- * the shell is meant to breathe.
- */
+/* Type scale. */
 .t-display {
-  font-family: var(--font-display);
   font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
+  font-weight: 650;
+  letter-spacing: -0.035em;
   line-height: 1.15;
 }
 
 .t-page {
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 620;
   letter-spacing: -0.02em;
 }
 
 .t-section {
-  font-family: var(--font-display);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 620;
   letter-spacing: -0.015em;
 }
 
 .t-card {
-  font-size: 13.5px;
-  font-weight: 550;
-  letter-spacing: -0.01em;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
   line-height: 1.25;
 }
 
 .t-body {
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-secondary);
 }
 
@@ -205,44 +268,24 @@ body {
 }
 
 .t-eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
 }
 
-/*
- * Data surfaces opt out of the airy rhythm.
- *
- * The shell is generous on purpose, but a table of three hundred findings that
- * breathes the same way is a table nobody can scan. This tightens line-height
- * and figure size inside tables only, so density lives where the data is and
- * whitespace lives everywhere else.
- */
+/* Data surfaces stay tighter than the airy shell. */
 .data-dense {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
 }
 
-.data-dense td,
-.data-dense th {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-
-/*
- * One focus treatment across the app, in the brand accent rather than a signal
- * colour: "you are here" is interaction, and must not borrow the vocabulary
- * that means "this data is alive" or "this row is fraud".
- */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* Scrollbars that belong to a dark instrument, not to the OS. */
 * {
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
@@ -269,36 +312,24 @@ body {
   background-clip: content-box;
 }
 
-/*
- * Offscreen cards cost nothing to skip.
- *
- * A dashboard of twenty charts lays out and paints all twenty even though four
- * are on screen. `content-visibility` lets the browser skip the rest until they
- * scroll near, and `contain-intrinsic-size` keeps the scrollbar honest while
- * they are skipped. This is the single cheapest thing that makes a long
- * dashboard feel immediate.
- */
+/* Our own chevron on native selects: the OS picker and keyboard behaviour stay,
+   the platform arrow does not. Stroke is a mid grey that holds on both themes. */
+.select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238d95b0' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.9rem;
+}
+
+/* Offscreen cards cost nothing to skip. */
 .defer-paint {
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;
 }
 
 /*
- * Card footprints in the chart grid.
- *
- * Written as real CSS rather than Tailwind utilities because the class is
- * chosen from data at runtime, and a utility assembled at runtime is not
- * guaranteed to survive Tailwind's source scanning - a missing span silently
- * collapses every chart card to a single row.
- *
- * The default sizes are the dense scanning layout. Expanding is opt-in per
- * card: more rows always, and a second column once there is one to take.
- */
-/*
- * `grid-auto-flow: dense` on the grid itself, because cards have different row
- * spans: a two-row number card next to a three-row plot leaves a one-row hole
- * that the default flow will never backfill, and a panel with a ragged void in
- * it reads as broken rather than as sparse.
+ * Card footprints in the chart grid. Real CSS rather than runtime-assembled
+ * Tailwind utilities, which Tailwind's source scan cannot be trusted to keep.
  */
 .chart-grid {
   grid-auto-flow: dense;
@@ -316,27 +347,30 @@ body {
   grid-row: span 5;
 }
 
+.card-cell-table {
+  grid-row: span 4;
+}
+
 @media (min-width: 640px) {
-  .card-cell-expanded {
+  .card-cell-expanded,
+  .card-cell-table {
     grid-column: span 2;
   }
 }
 
-/* The skeleton stands in for a not-yet-known chart type. */
 .card-cell-pending {
   grid-row: span 3;
 }
 
-/* The skeleton shimmer: a slow sweep, not a pulsing block. */
 @keyframes sweep {
   0% {
-    opacity: 0.35;
+    opacity: 0.45;
   }
   50% {
-    opacity: 0.7;
+    opacity: 0.9;
   }
   100% {
-    opacity: 0.35;
+    opacity: 0.45;
   }
 }
 
@@ -344,11 +378,44 @@ body {
   animation: sweep 1.6s ease-in-out infinite;
 }
 
-/*
- * Reduced motion collapses every animation to an instant state change. The
- * information — that something changed — still has to arrive; only the
- * animation goes. The pulse line and count-up handle that in their own code.
- */
+/* "Live" beacon: a dot with one expanding ring, for a poll that is alive. */
+@keyframes beacon {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.beacon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: currentColor;
+  animation: beacon 2.2s ease-out infinite;
+}
+
+/* Cards and rows rise in as they arrive. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 360ms var(--ease-out) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

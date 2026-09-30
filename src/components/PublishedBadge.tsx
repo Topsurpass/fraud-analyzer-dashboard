@@ -25,7 +25,7 @@ export function PublishedBadge({
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-line-strong px-1 py-px text-[10px] font-medium leading-tight text-muted ${className ?? ""}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-line-strong px-1 py-px text-[11.5px] font-medium leading-tight text-muted ${className ?? ""}`}
       title="Everyone signed in can see this chart. Its query is frozen while it is published."
     >
       {/*

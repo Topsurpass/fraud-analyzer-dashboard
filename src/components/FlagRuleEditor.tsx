@@ -214,14 +214,14 @@ export function FlagRuleEditor({
 			}
 		>
 			<div className="space-y-3 p-3">
-				<p className="text-[11px] leading-relaxed text-text-secondary">
+				<p className="text-[12.5px] leading-relaxed text-text-secondary">
 					A row is flagged when <strong>any</strong> rule matches it. A rule matches
 					when <strong>all</strong> of its conditions hold. Rules run over the rows the
 					query returns, so they see at most the row limit.
 				</p>
 
 				{rules.length === 0 ? (
-					<p className="border border-dashed border-line px-3 py-4 text-[11px] text-text-secondary">
+					<p className="border border-dashed border-line px-3 py-4 text-[12.5px] text-text-secondary">
 						No rules yet, so nothing on this query will be flagged. The dashboard
 						does not guess: a row is marked only when a rule here says so.
 					</p>
@@ -262,7 +262,7 @@ export function FlagRuleEditor({
 									</Select>
 								</Field>
 
-								<label className="flex items-center gap-1.5 pb-1.5 text-[11px] text-text-secondary">
+								<label className="flex items-center gap-1.5 pb-1.5 text-[12.5px] text-text-secondary">
 									<input
 										type="checkbox"
 										checked={rule.enabled}
@@ -273,7 +273,7 @@ export function FlagRuleEditor({
 								</label>
 
 								{matched !== undefined ? (
-									<span className="pb-1.5 text-[11px] tnum text-text-secondary">
+									<span className="pb-1.5 text-[12.5px] tnum text-text-secondary">
 										{matched} in preview
 									</span>
 								) : null}
@@ -295,7 +295,7 @@ export function FlagRuleEditor({
 										<div key={conditionIndex} className="space-y-1">
 											<div className="flex flex-wrap items-center gap-2">
 												{conditionIndex > 0 ? (
-													<span className="text-[10px] uppercase tracking-wide text-text-secondary">
+													<span className="text-[11.5px] uppercase tracking-wide text-text-secondary">
 														and
 													</span>
 												) : null}
@@ -384,7 +384,7 @@ export function FlagRuleEditor({
 
 												{takesTwoValues(condition.operator) ? (
 													<>
-														<span className="text-[10px] uppercase tracking-wide text-text-secondary">
+														<span className="text-[11.5px] uppercase tracking-wide text-text-secondary">
 															and
 														</span>
 														<Input
@@ -421,7 +421,7 @@ export function FlagRuleEditor({
 											</div>
 
 											{problem ? (
-												<p className="text-[11px] text-change">{problem}</p>
+												<p className="text-[12.5px] text-change">{problem}</p>
 											) : null}
 										</div>
 									);

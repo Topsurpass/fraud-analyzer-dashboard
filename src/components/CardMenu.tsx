@@ -73,8 +73,8 @@ export function CardMenu({
       label={`Actions for ${query.name}`}
       title="Chart actions"
       trigger={<span aria-hidden="true">⋯</span>}
-      triggerClassName="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
-      panelClassName="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1"
+      triggerClassName="grid size-7 cursor-pointer list-none place-items-center rounded-md text-[15px] leading-none text-muted transition-colors hover:bg-raised hover:text-ink"
+      panelClassName="absolute top-full right-0 z-30 mt-1.5 w-56 rounded-[var(--radius)] border border-line bg-surface py-1.5 shadow-lg"
     >
       <CardMenuPanel
         query={query}
@@ -226,7 +226,7 @@ function CardMenuPanel({
 
   return (
     <>
-        <p className="px-2.5 pt-1 pb-1.5 text-[10px] tracking-widest text-muted uppercase">
+        <p className="px-3 pt-1 pb-1.5 text-[11px] font-semibold tracking-wide text-muted">
           Chart
         </p>
         <ul className="px-1.5 pb-1">
@@ -239,8 +239,8 @@ function CardMenuPanel({
                   disabled={busy !== null}
                   onClick={() => chooseChart(type)}
                   aria-pressed={selected}
-                  className={`flex w-full items-center gap-2 px-1 py-1 text-left text-[12px] transition-colors disabled:opacity-40 ${
-                    selected ? "text-live" : "text-muted hover:text-ink"
+                  className={`flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[13px] transition-colors disabled:opacity-40 ${
+                    selected ? "bg-accent-soft font-medium text-accent" : "text-secondary hover:bg-raised hover:text-ink"
                   }`}
                 >
                   {/* A mark, not just colour, shows which type is active. */}
@@ -275,7 +275,7 @@ function CardMenuPanel({
           <Link
             href={`/queries/${query.id}`}
             onClick={close}
-            className="block w-full px-2.5 py-1 text-left text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink"
+            className="block w-full px-3 py-1.5 text-left text-[13px] text-secondary transition-colors hover:bg-raised hover:text-ink"
           >
             Edit query
           </Link>
@@ -344,10 +344,10 @@ export function MenuButton({
         if (!keepOpen) close();
       }}
       disabled={disabled}
-      className={`block w-full px-2.5 py-1 text-left text-[12px] transition-colors disabled:opacity-40 ${
+      className={`block w-full px-3 py-1.5 text-left text-[13px] transition-colors disabled:opacity-40 ${
         tone === "danger"
-          ? "text-change hover:bg-surface"
-          : "text-muted hover:bg-surface hover:text-ink"
+          ? "text-alert hover:bg-alert/8"
+          : "text-secondary hover:bg-raised hover:text-ink"
       }`}
     >
       {children}

@@ -9,11 +9,11 @@ import { coalescedPoll } from "./coalesce";
 /**
  * Drives one ChartCard's live data.
  *
- * The design brief makes the poll state visible: the pulse line is flat while
- * polls come back unchanged, spikes when the engine reports changed data, and
- * goes dashed on error or timeout. So this hook exposes the poll *events*, not
- * just the latest payload - `changeSeq` and `pollSeq` are what the waveform
- * animates from, and they only move when the engine actually said something.
+ * The design makes the poll state visible: the card's live indicator beats while
+ * polls come back unchanged, flips to "changed" when the engine reports new
+ * data, and goes rose on error or timeout. So this hook exposes the poll
+ * *events*, not just the latest payload - `changeSeq` and `pollSeq` are what
+ * the indicator reads from, and they only move when the engine actually said something.
  *
  * Cadence comes from the engine: every response carries `poll_interval_ms`, and
  * that value replaces our local one. On failure the interval backs off

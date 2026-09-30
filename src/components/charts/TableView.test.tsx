@@ -106,9 +106,12 @@ describe("TableView", () => {
   it("keeps every column header in the header row", () => {
     render(<TableView data={table(["id", "country", "amount"], [[1, "NG", 5]])} title="T" />);
     const header = screen.getAllByRole("row")[0];
-    for (const name of ["id", "country", "amount"]) {
+    // Shown humanised ("risk_score" reads "Risk score"); the raw column name
+    // stays on the title for anyone who needs to match it to the SQL.
+    for (const name of ["ID", "Country", "Amount"]) {
       expect(within(header).getByText(name)).toBeInTheDocument();
     }
+    expect(within(header).getByText("Country")).toHaveAttribute("title", "country");
   });
 });
 

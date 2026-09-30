@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -79,19 +79,24 @@ function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) 
   if (flagged) {
     return (
       <g>
-        <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={ALERT_COLOR} strokeWidth={1.5} />
-        <circle cx={cx} cy={cy} r={1.5} fill={ALERT_COLOR} />
+        <circle cx={cx} cy={cy} r={6} fill={ALERT_COLOR} opacity={0.16} />
+        <circle cx={cx} cy={cy} r={4.5} fill="var(--surface)" stroke={ALERT_COLOR} strokeWidth={2} />
+        <circle cx={cx} cy={cy} r={1.6} fill={ALERT_COLOR} />
       </g>
     );
   }
 
-  if (showAll) return <circle cx={cx} cy={cy} r={2.5} fill={stroke ?? "currentColor"} />;
+  if (showAll)
+    return <circle cx={cx} cy={cy} r={3.5} fill="var(--surface)" stroke={stroke ?? "currentColor"} strokeWidth={2} />;
 
   return null;
 }
 
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
   const reducedMotion = useReducedMotion();
+  // Gradient ids are scoped per chart: several cards share one document.
+  const gradientScope = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const gradientId = (index: number) => `fill-${gradientScope}-${index}`;
   const [activeSeries, setActiveSeries] = useState<string | null>(null);
 
   /*
@@ -164,22 +169,23 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
    * React.Children and is seen correctly.
    */
   const axes = [
-    <CartesianGrid key="grid" stroke={GRID_STROKE} strokeDasharray="2 4" vertical={false} />,
+    <CartesianGrid key="grid" stroke={GRID_STROKE} strokeDasharray="3 5" vertical={false} />,
     <XAxis
       key="x"
       dataKey={data.xKey}
       tick={AXIS_TICK}
       tickLine={false}
-      axisLine={{ stroke: GRID_STROKE }}
-      minTickGap={24}
-      height={20}
+      axisLine={false}
+      tickMargin={8}
+      minTickGap={28}
+      height={28}
     />,
     <YAxis
       key="y"
       tick={AXIS_TICK}
       tickLine={false}
       axisLine={false}
-      width={44}
+      width={48}
       tickFormatter={(value: number) => formatAxisValue(value)}
     />,
     <Tooltip
@@ -193,13 +199,35 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
        */
       cursor={
         kind === "line"
-          ? { stroke: CURSOR_STROKE, strokeWidth: 1, strokeDasharray: "3 3" }
-          : { fill: "var(--surface-raised)", fillOpacity: 0.75 }
+          ? { stroke: CURSOR_STROKE, strokeWidth: 1.5 }
+          : { fill: "var(--surface-raised)", fillOpacity: 0.6, radius: 8 }
       }
       // The tooltip must not lag the crosshair; it is a readout, not a card.
       isAnimationActive={false}
     />,
   ];
+
+  // One soft vertical fade per series colour: strong at the line, gone at the
+  // axis. It is what makes the plot read as a modern area chart instead of a
+  // bare stroke, and in a bar chart it gives each column depth.
+  const gradients = (
+    <defs>
+      {data.seriesKeys.map((key, index) => (
+        <linearGradient key={key} id={gradientId(index)} x1="0" y1="0" x2="0" y2="1">
+          <stop
+            offset="0%"
+            stopColor={seriesColor(index)}
+            stopOpacity={kind === "line" ? (data.seriesKeys.length > 1 ? 0.28 : 0.38) : 1}
+          />
+          <stop
+            offset="100%"
+            stopColor={seriesColor(index)}
+            stopOpacity={kind === "line" ? 0.02 : 0.72}
+          />
+        </linearGradient>
+      ))}
+    </defs>
+  );
 
   const opacityFor = (key: string) =>
     activeSeries === null || activeSeries === key ? 1 : 0.22;
@@ -213,40 +241,50 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
       >
         <ResponsiveContainer width="100%" height="100%">
           {kind === "line" ? (
-            <LineChart data={data.data} margin={CHART_MARGIN}>
+            <AreaChart data={data.data} margin={CHART_MARGIN}>
+              {gradients}
               {axes}
               {data.seriesKeys.map((key, index) => (
-                <Line
+                <Area
                   key={key}
                   type="monotone"
                   dataKey={key}
                   stroke={seriesColor(index)}
-                  strokeWidth={2}
+                  strokeWidth={2.25}
                   strokeOpacity={opacityFor(key)}
+                  fill={`url(#${gradientId(index)})`}
+                  fillOpacity={opacityFor(key)}
                   // `false`, not a component, when this series has nothing to
                   // mark: recharts skips the dot layer entirely rather than
                   // calling a renderer 900 times to be told "draw nothing".
                   dot={showAllDots || alerted.has(key) ? <AlertDot showAll={showAllDots} /> : false}
-                  activeDot={{ r: 3.5, strokeWidth: 0 }}
+                  activeDot={{
+                    r: 5,
+                    fill: "var(--surface)",
+                    stroke: seriesColor(index),
+                    strokeWidth: 2.5,
+                  }}
                   isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
                   connectNulls
                 />
               ))}
-            </LineChart>
+            </AreaChart>
           ) : (
-            <BarChart data={data.data} margin={CHART_MARGIN} barCategoryGap="18%">
+            <BarChart data={data.data} margin={CHART_MARGIN} barCategoryGap="22%" barGap={3}>
               {hatch.defs}
+              {gradients}
               {axes}
               {data.seriesKeys.map((key, index) => (
                 <Bar
                   key={key}
                   dataKey={key}
-                  fill={seriesColor(index)}
+                  fill={`url(#${gradientId(index)})`}
                   fillOpacity={opacityFor(key)}
                   isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
-                  radius={[2, 2, 0, 0]}
+                  maxBarSize={44}
+                  radius={[6, 6, 0, 0]}
                 >
                   {/*
                    * A flagged bar keeps its series colour and takes the hatch
@@ -264,7 +302,7 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                         return (
                           <Cell
                             key={pointIndex}
-                            fill={hatch.fill(seriesColor(index), flagged)}
+                            fill={flagged ? hatch.fill(seriesColor(index), true) : `url(#${gradientId(index)})`}
                             stroke={flagged ? ALERT_COLOR : undefined}
                             strokeWidth={flagged ? 1 : 0}
                           />

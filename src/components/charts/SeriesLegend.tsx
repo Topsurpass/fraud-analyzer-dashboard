@@ -21,7 +21,7 @@ import { AlertGlyph } from "./AlertHatch";
  * from the legend.
  */
 export interface SeriesLegendProps {
-  series: { id: string; label: string; color: string; alert?: boolean }[];
+  series: { id: string; label: string; color: string; alert?: boolean; detail?: string }[];
   /** Currently highlighted series id, or null when nothing is hovered. */
   active: string | null;
   onActiveChange: (id: string | null) => void;
@@ -31,14 +31,14 @@ export function SeriesLegend({ series, active, onActiveChange }: SeriesLegendPro
   if (series.length < 2) return null;
 
   return (
-    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2">
+    <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 pb-3">
       {series.map((entry) => {
         const dimmed = active !== null && active !== entry.id;
         return (
           <li key={entry.id}>
             <button
               type="button"
-              className="flex items-center gap-1.5 text-[11px] transition-opacity"
+              className="flex items-center gap-2 text-[13px] transition-opacity"
               style={{ opacity: dimmed ? 0.35 : 1 }}
               onMouseEnter={() => onActiveChange(entry.id)}
               onMouseLeave={() => onActiveChange(null)}
@@ -48,10 +48,13 @@ export function SeriesLegend({ series, active, onActiveChange }: SeriesLegendPro
             >
               <span
                 aria-hidden="true"
-                className="h-[3px] w-3 shrink-0"
+                className="size-2.5 shrink-0 rounded-full"
                 style={{ background: entry.color }}
               />
-              <span className="tnum text-muted">{entry.label}</span>
+              <span className="text-secondary">{entry.label}</span>
+              {entry.detail ? (
+                <span className="tnum font-medium text-ink">{entry.detail}</span>
+              ) : null}
               {entry.alert ? <AlertGlyph /> : null}
               {entry.alert ? <span className="sr-only">anomalous</span> : null}
             </button>

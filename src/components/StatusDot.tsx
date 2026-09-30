@@ -23,18 +23,24 @@ export function StatusDot({
   status: ConnectionStatus;
   className?: string;
 }) {
-  const stroke = status === "ok" ? "var(--signal-live)" : "var(--text-muted)";
+  const stroke =
+    status === "ok"
+      ? "var(--signal-live)"
+      : status === "failed"
+        ? "var(--signal-change)"
+        : "var(--text-muted)";
 
   return (
     <svg
       viewBox="0 0 10 10"
-      width={9}
-      height={9}
+      width={10}
+      height={10}
       className={`shrink-0 ${className ?? ""}`}
       role="img"
       aria-label={LABELS[status]}
     >
       <title>{LABELS[status]}</title>
+      {status === "ok" ? <circle cx={5} cy={5} r={4.6} fill={stroke} opacity={0.18} /> : null}
       <circle
         cx={5}
         cy={5}

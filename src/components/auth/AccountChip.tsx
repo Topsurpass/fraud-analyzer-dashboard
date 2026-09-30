@@ -62,25 +62,25 @@ export function AccountChip({
 	}
 
 	return (
-		<div ref={wrapper} className="relative shrink-0 border-t border-line">
+		<div ref={wrapper} className="relative shrink-0 border-t border-line p-2">
 			<button
 				type="button"
 				onClick={() => setOpen((current) => !current)}
 				aria-expanded={open}
 				aria-haspopup="menu"
 				title={collapsed ? `${user.full_name} · ${role}` : undefined}
-				className={`flex w-full items-center gap-2.5 text-left transition-colors hover:bg-raised ${
-					collapsed ? "justify-center px-1 py-2.5" : "px-3 py-2.5"
+				className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] text-left transition-colors hover:bg-raised ${
+					collapsed ? "justify-center px-1 py-2" : "px-2 py-2"
 				}`}
 			>
 				<Avatar initials={initials} admin={user.role === "admin"} />
 				{collapsed ? null : (
 					<>
 						<span className="min-w-0 flex-1">
-							<span className="block truncate text-[12px] font-medium text-ink">
+							<span className="block truncate text-[13px] font-medium text-ink">
 								{user.full_name}
 							</span>
-							<span className="block truncate text-[10px] text-muted">{role}</span>
+							<span className="block truncate text-[11.5px] text-muted">{role}</span>
 						</span>
 						<Chevron open={open} />
 					</>
@@ -90,7 +90,7 @@ export function AccountChip({
 			{open ? (
 				<div
 					role="menu"
-					className="absolute bottom-full left-2 z-50 mb-1 w-[212px] overflow-hidden rounded-[var(--radius)] border border-line bg-raised py-1 shadow-lg"
+					className="absolute bottom-full left-2 z-50 mb-2 w-[232px] overflow-hidden rounded-[var(--radius)] border border-line bg-surface py-1 shadow-lg"
 				>
 					<p className="truncate px-3 py-1.5 text-[11px] text-muted" title={user.email}>
 						{user.email}
@@ -112,7 +112,7 @@ export function AccountChip({
 						role="menuitem"
 						onClick={() => void onSignOut()}
 						disabled={busy}
-						className="block w-full px-3 py-1.5 text-left text-[12px] text-secondary transition-colors hover:bg-surface hover:text-ink disabled:opacity-40"
+						className="block w-full px-3 py-1.5 text-left text-[13px] text-secondary transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
 					>
 						{busy ? "Signing out…" : "Sign out"}
 					</button>
@@ -141,7 +141,7 @@ function MenuLink({
 				onClick();
 				onNavigate?.();
 			}}
-			className="block px-3 py-1.5 text-[12px] text-secondary transition-colors hover:bg-surface hover:text-ink"
+			className="block px-3 py-1.5 text-[13px] text-secondary transition-colors hover:bg-raised hover:text-ink"
 		>
 			{children}
 		</Link>
@@ -159,8 +159,8 @@ function Avatar({ initials, admin }: { initials: string; admin: boolean }) {
 	return (
 		<span
 			aria-hidden="true"
-			className={`tnum flex size-7 shrink-0 items-center justify-center rounded-full bg-surface text-[10px] font-medium text-secondary ${
-				admin ? "ring-1 ring-accent/50" : "ring-1 ring-line"
+			className={`tnum flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+				admin ? "bg-accent text-accent-contrast" : "bg-raised text-secondary ring-1 ring-line"
 			}`}
 		>
 			{initials}

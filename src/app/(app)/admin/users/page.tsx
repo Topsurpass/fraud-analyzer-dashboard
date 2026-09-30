@@ -86,19 +86,19 @@ function UsersScreen() {
 						<span className="flex items-center gap-1.5">
 							<span className="truncate font-medium text-ink">{user.full_name}</span>
 							{me?.id === user.id ? (
-								<span className="shrink-0 rounded-full border border-line px-1.5 text-[9.5px] tracking-wide text-muted uppercase">
+								<span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold tracking-wide text-muted uppercase">
 									you
 								</span>
 							) : null}
 						</span>
-						<span className="block truncate text-[11px] text-muted">{user.email}</span>
+						<span className="block truncate text-[12.5px] text-muted">{user.email}</span>
 					</div>
 				),
 			},
 			{
 				key: "role",
 				header: "Role",
-				width: "132px",
+				width: "168px",
 				cell: (user) => (
 					<RolePicker
 						user={user}
@@ -117,13 +117,13 @@ function UsersScreen() {
 			{
 				key: "status",
 				header: "Status",
-				width: "116px",
+				width: "130px",
 				cell: (user) => <StatusCell user={user} />,
 			},
 			{
 				key: "last",
 				header: "Last signed in",
-				width: "120px",
+				width: "132px",
 				numeric: true,
 				secondary: true,
 				cell: (user) => (
@@ -135,7 +135,7 @@ function UsersScreen() {
 			{
 				key: "actions",
 				header: "",
-				width: "196px",
+				width: "268px",
 				cell: (user) => (
 					<div className="flex items-center justify-end gap-1.5">
 						<Button
@@ -213,7 +213,7 @@ function UsersScreen() {
 									}
 									placeholder="Search name or email"
 									aria-label="Search people"
-									className="w-[190px]"
+									className="w-[240px] shrink-0"
 								/>
 								<Select
 									value={query.role}
@@ -224,7 +224,7 @@ function UsersScreen() {
 										}))
 									}
 									aria-label="Filter by role"
-									className="w-[130px]"
+									className="w-[150px] shrink-0"
 								>
 									<option value="all">Every role</option>
 									{USER_ROLES.map((role) => (
@@ -242,7 +242,7 @@ function UsersScreen() {
 										}))
 									}
 									aria-label="Filter by status"
-									className="w-[120px]"
+									className="w-[140px] shrink-0"
 								>
 									<option value="all">Any status</option>
 									<option value="active">Active</option>
@@ -254,7 +254,7 @@ function UsersScreen() {
 						{actionError ? (
 							<p
 								role="alert"
-								className="border-b border-line bg-alert/10 px-3.5 py-2 text-[12px] text-ink"
+								className="border-b border-line bg-alert/10 px-5 py-2.5 text-[13px] text-ink"
 							>
 								{actionError}
 							</p>
@@ -290,9 +290,9 @@ function UsersScreen() {
 							/>
 						)}
 
-						<div className="flex items-center gap-3 border-t border-line px-3.5 py-2">
+						<div className="flex items-center gap-3 border-t border-line px-5 py-3">
 							<ResultCount shown={shown.length} total={users.length} noun="account" plural="accounts" />
-							<span className="tnum ml-auto text-[11px] text-muted">
+							<span className="tnum ml-auto text-[12.5px] text-muted">
 								{admins} active {admins === 1 ? "administrator" : "administrators"}
 								{loading && !initial ? " · refreshing" : ""}
 							</span>
@@ -330,7 +330,7 @@ function RolePicker({
 			title={lockedReason ?? undefined}
 			aria-label={`Role for ${user.full_name}`}
 			onChange={(event) => onChange(event.target.value as UserRole)}
-			className="py-1 text-[11.5px]"
+			className="py-1 text-[12.5px]"
 		>
 			{USER_ROLES.map((role) => (
 				<option key={role} value={role}>
@@ -350,7 +350,7 @@ function RolePicker({
 function StatusCell({ user }: { user: UserRead }) {
 	if (!user.is_active) {
 		return (
-			<span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
+			<span className="inline-flex items-center gap-1.5 rounded-full bg-raised px-2.5 py-1 text-[12.5px] font-medium text-muted">
 				<Dot className="bg-muted" />
 				Deactivated
 			</span>
@@ -359,7 +359,7 @@ function StatusCell({ user }: { user: UserRead }) {
 	if (user.must_change_password) {
 		return (
 			<span
-				className="inline-flex items-center gap-1.5 text-[11.5px] text-change"
+				className="inline-flex items-center gap-1.5 rounded-full bg-change/12 px-2.5 py-1 text-[12.5px] font-medium text-change"
 				title="Has a temporary password and has not chosen their own yet"
 			>
 				<Dot className="bg-change" />
@@ -368,7 +368,7 @@ function StatusCell({ user }: { user: UserRead }) {
 		);
 	}
 	return (
-		<span className="inline-flex items-center gap-1.5 text-[11.5px] text-secondary">
+		<span className="inline-flex items-center gap-1.5 rounded-full bg-live/12 px-2.5 py-1 text-[12.5px] font-medium text-live">
 			<Dot className="bg-live" />
 			Active
 		</span>

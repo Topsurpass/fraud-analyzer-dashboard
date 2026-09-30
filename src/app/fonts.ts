@@ -1,7 +1,7 @@
 import localFont from "next/font/local";
 
 /**
- * The three type roles the design brief specifies, self-hosted.
+ * The two type roles the design uses, self-hosted.
  *
  * These are the same Google Fonts the brief names, in the same latin variable
  * cuts, but the files come from the `@fontsource-variable/*` packages rather
@@ -16,17 +16,8 @@ import localFont from "next/font/local";
  * with no network step in the build and nothing binary in version control.
  */
 
-/** Display: page titles and dashboard names only. Used sparingly. */
-export const spaceGrotesk = localFont({
-  src: "../../node_modules/@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2",
-  weight: "300 700",
-  style: "normal",
-  display: "swap",
-  variable: "--font-space-grotesk",
-  fallback: ["ui-sans-serif", "system-ui", "sans-serif"],
-});
-
-/** UI: nav, labels, buttons, form fields, prose. */
+/** The product face: nav, labels, buttons, headings, prose and every figure
+ *  (with tabular numerals). */
 export const inter = localFont({
   src: "../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2",
   weight: "100 900",
@@ -36,7 +27,7 @@ export const inter = localFont({
   fallback: ["ui-sans-serif", "system-ui", "sans-serif"],
 });
 
-/** Data: every number, timestamp, hash and axis value in the app. */
+/** Hashes, ids and SQL only. */
 export const jetBrainsMono = localFont({
   src: "../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2",
   weight: "100 800",

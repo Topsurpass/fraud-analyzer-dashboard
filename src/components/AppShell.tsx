@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <FlaggedProvider>
       <div className="flex h-dvh min-h-0 w-full">
         <aside
-          className="hidden shrink-0 border-r border-line bg-sunken transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
+          className="hidden shrink-0 border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
           style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}
         >
           <Rail
@@ -76,13 +76,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => setNavOpen(false)}
               className="absolute inset-0 bg-bg/70 backdrop-blur-sm"
             />
-            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line bg-sunken shadow-lg">
+            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line bg-[var(--sidebar-bg)] shadow-lg">
               <Rail onNavigate={() => setNavOpen(false)} />
             </div>
           </div>
         ) : null}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          style={{ backgroundImage: "var(--page-glow)", backgroundRepeat: "no-repeat" }}
+        >
           <NavContext.Provider value={openNav}>{children}</NavContext.Provider>
         </div>
       </div>

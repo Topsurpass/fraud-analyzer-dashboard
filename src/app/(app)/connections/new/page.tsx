@@ -68,7 +68,7 @@ function NewConnectionScreen() {
           />
 
           {error ? (
-            <p className="mt-3 border border-change/40 bg-change/5 px-3 py-2 text-[12px] text-change">
+            <p className="mt-3 border border-change/40 bg-change/5 px-3 py-2 text-[13px] text-change">
               {error.displayMessage}
             </p>
           ) : null}

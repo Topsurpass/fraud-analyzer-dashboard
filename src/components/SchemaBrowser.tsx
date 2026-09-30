@@ -38,13 +38,13 @@ export function SchemaBrowser({
       className={className}
       actions={
         tables.data ? (
-          <span className="tnum text-[11px] text-muted">{tables.data.tables.length}</span>
+          <span className="tnum text-[12.5px] text-muted">{tables.data.tables.length}</span>
         ) : null
       }
     >
       <div className="max-h-80 overflow-y-auto p-2">
         {tables.error ? (
-          <p className="px-1 text-[12px] text-muted">{tables.error.displayMessage}</p>
+          <p className="px-1 text-[13px] text-muted">{tables.error.displayMessage}</p>
         ) : tables.initial ? (
           <ul className="skeleton-sweep space-y-1.5 p-1">
             {[0, 1, 2, 3, 4].map((index) => (
@@ -52,7 +52,7 @@ export function SchemaBrowser({
             ))}
           </ul>
         ) : (tables.data?.tables ?? []).length === 0 ? (
-          <p className="px-1 text-[12px] text-muted">No tables visible to this user.</p>
+          <p className="px-1 text-[13px] text-muted">No tables visible to this user.</p>
         ) : (
           <ul>
             {tables.data?.tables.map((table) => (
@@ -99,12 +99,12 @@ function TableRow({
         >
           <span
             aria-hidden="true"
-            className="tnum w-2 shrink-0 text-[9px] text-muted"
+            className="tnum w-2 shrink-0 text-[11px] text-muted"
           >
             {open ? "−" : "+"}
           </span>
-          <span className="tnum truncate text-[12px]">{name}</span>
-          <span className="ml-auto shrink-0 text-[9px] tracking-wide text-muted uppercase">
+          <span className="tnum truncate text-[13px]">{name}</span>
+          <span className="ml-auto shrink-0 text-[11px] tracking-wide text-muted uppercase">
             {kind}
           </span>
         </button>
@@ -114,7 +114,7 @@ function TableRow({
             onClick={() => onInsert(name)}
             aria-label={`Insert ${name} into the query`}
             title="Insert into the query"
-            className="shrink-0 px-1 text-[11px] text-muted transition-colors hover:text-live"
+            className="shrink-0 px-1 text-[12.5px] text-muted transition-colors hover:text-live"
           >
             <span aria-hidden="true">↵</span>
           </button>
@@ -143,7 +143,7 @@ function Columns({
 
   if (columns.error) {
     return (
-      <p className="py-1 pl-4 text-[11px] text-muted">{columns.error.displayMessage}</p>
+      <p className="py-1 pl-4 text-[12.5px] text-muted">{columns.error.displayMessage}</p>
     );
   }
 
@@ -186,8 +186,8 @@ function ColumnRow({
 
   const content = (
     <>
-      <span className="tnum truncate text-[11px]">{column.name}</span>
-      <span className="tnum ml-auto shrink-0 text-[9px] text-muted">{meta}</span>
+      <span className="tnum truncate text-[12.5px]">{column.name}</span>
+      <span className="tnum ml-auto shrink-0 text-[11px] text-muted">{meta}</span>
     </>
   );
 

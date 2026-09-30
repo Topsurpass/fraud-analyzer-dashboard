@@ -89,18 +89,18 @@ const HeatmapRow = memo(function HeatmapRow({
     <tr>
       <th
         scope="row"
-        className="sticky left-0 z-10 max-w-[9rem] truncate bg-raised pr-2 text-right text-[11px] font-normal text-muted"
+        className="sticky left-0 z-10 max-w-[9rem] truncate bg-surface pr-3 text-right text-[12.5px] font-normal text-muted"
         title={row.category}
       >
         {row.category}
       </th>
       {row.cells.map((cell) => (
-        <td key={cell.bucket} className="p-[1px]">
+        <td key={cell.bucket} className="p-[2px]">
           <div
             // A div inside the cell, not the cell itself: a td with a
             // height and a border collapses differently across
             // browsers, and this keeps every swatch the same size.
-            className="h-4 w-full min-w-[8px]"
+            className="h-6 w-full min-w-[8px] rounded-[5px]"
             style={{
               backgroundColor: cell.value === null ? "transparent" : swatch(cell.intensity),
               outline: cell.alert ? `1.5px solid ${ALERT_COLOR}` : undefined,
@@ -146,7 +146,7 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
     : null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col px-5 pb-4">
       {/*
        * A fixed-height readout line. Putting the hovered value in a floating
        * tooltip means the pointer covers neighbouring cells - the exact
@@ -154,7 +154,7 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
        * instead, and the row keeps its height whether or not anything is
        * hovered so the grid below never jumps.
        */}
-      <div className="tnum mb-1.5 h-4 text-[11px] leading-4 text-muted">
+      <div className="tnum mb-3 h-5 text-[13px] leading-5 text-muted">
         {readout ?? (
           <span>
             {data.rows.length} categories · {data.buckets.length} buckets ·{" "}
@@ -191,11 +191,11 @@ export function HeatmapView({ data, title }: HeatmapViewProps) {
         </table>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
+      <div className="mt-3 flex items-center gap-2 text-[12.5px] text-muted">
         <span className="tnum">{formatAxisValue(data.min)}</span>
         <span
           aria-hidden="true"
-          className="h-2 flex-1"
+          className="h-2 flex-1 rounded-full"
           style={{
             background: `linear-gradient(to right, color-mix(in srgb, ${BASE_COLOR} ${
               MIN_ALPHA * 100

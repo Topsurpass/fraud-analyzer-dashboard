@@ -30,13 +30,13 @@ export default function SegmentError({
     <div className="flex h-full min-h-0 items-center justify-center p-6">
       <div className="max-w-md rounded-[var(--radius)] border border-alert/30 bg-surface p-6 shadow-sm">
         <p className="t-section text-ink">This page could not be displayed</p>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">
           Something in the dashboard failed while drawing this screen. Your
           saved queries, rules and findings are stored on the engine and are
           unaffected.
         </p>
         {error.message ? (
-          <p className="tnum mt-3 max-h-24 overflow-auto rounded-[var(--radius-sm)] border border-line bg-sunken px-2.5 py-2 text-[11.5px] text-secondary">
+          <p className="tnum mt-3 max-h-24 overflow-auto rounded-[var(--radius-sm)] border border-line bg-sunken px-2.5 py-2 text-[12.5px] text-secondary">
             {error.message}
           </p>
         ) : null}

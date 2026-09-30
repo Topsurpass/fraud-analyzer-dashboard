@@ -21,8 +21,8 @@ export function AddToDashboardMenu({ chartId }: { chartId: string }) {
       label="Add to dashboard"
       title="Add to dashboard"
       trigger={<span aria-hidden="true">+</span>}
-      triggerClassName="cursor-pointer list-none px-1 text-[13px] leading-none text-muted transition-colors hover:text-live"
-      panelClassName="absolute top-full right-0 z-30 mt-1 w-52 border border-line-strong bg-raised py-1"
+      triggerClassName="grid size-7 cursor-pointer list-none place-items-center rounded-md text-[15px] leading-none text-muted transition-colors hover:bg-raised hover:text-ink"
+      panelClassName="absolute top-full right-0 z-30 mt-1.5 w-56 rounded-[var(--radius)] border border-line bg-surface py-1.5 shadow-lg"
     >
       <AddToDashboardPanel chartId={chartId} />
     </Popover>
@@ -56,12 +56,12 @@ function AddToDashboardPanel({ chartId }: { chartId: string }) {
 
   return (
     <>
-        <p className="px-2.5 pt-1 pb-1.5 text-[10px] tracking-widest text-muted uppercase">
+        <p className="px-2.5 pt-1 pb-1.5 text-[11.5px] tracking-widest text-muted uppercase">
           Dashboards
         </p>
 
         {dashboards.length === 0 ? (
-          <p className="px-2.5 pb-1.5 text-[11px] text-muted">None yet</p>
+          <p className="px-2.5 pb-1.5 text-[12.5px] text-muted">None yet</p>
         ) : (
           <ul>
             {dashboards.map((dashboard) => {
@@ -82,7 +82,7 @@ function AddToDashboardPanel({ chartId }: { chartId: string }) {
                             : addChartTo(dashboard.id, chartId),
                       )
                     }
-                    className="flex w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] text-muted transition-colors disabled:opacity-40 hover:bg-surface hover:text-ink"
+                    className="flex w-full items-center gap-2 px-2.5 py-1 text-left text-[13px] text-muted transition-colors disabled:opacity-40 hover:bg-surface hover:text-ink"
                   >
                     <span
                       aria-hidden="true"
@@ -111,14 +111,14 @@ function AddToDashboardPanel({ chartId }: { chartId: string }) {
                 router.push(`/dashboards/${dashboard.id}`);
               })
             }
-            className="w-full px-2.5 py-1 text-left text-[12px] text-live transition-colors disabled:opacity-40 hover:bg-surface"
+            className="w-full px-2.5 py-1 text-left text-[13px] text-live transition-colors disabled:opacity-40 hover:bg-surface"
           >
             + New dashboard
           </button>
         </div>
 
         {error ? (
-          <p className="px-2.5 pt-1.5 text-[10px] leading-snug text-change">{error}</p>
+          <p className="px-2.5 pt-1.5 text-[11.5px] leading-snug text-change">{error}</p>
         ) : null}
     </>
   );

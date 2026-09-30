@@ -20,7 +20,9 @@ export function PageBody({
       <TopBar crumbs={crumbs} actions={actions} onOpenNav={openNav} />
       {/* The shell is where the whitespace lives; data surfaces inside stay
           dense. See .data-dense in globals.css. */}
-      <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+      </main>
     </>
   );
 }
