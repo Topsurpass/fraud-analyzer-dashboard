@@ -73,6 +73,22 @@ export interface ChartCardProps {
   style?: React.CSSProperties;
 }
 
+/**
+ * What a payload asks the card to draw: the rows' hash plus every chart's type
+ * and field mapping. Two payloads with the same key render identically, so the
+ * second can be skipped; a different key must be re-shaped.
+ */
+function drawingKey(response: RunResponse | null): string | null {
+  if (!response) return null;
+  const charts = response.charts
+    .map(
+      (chart) =>
+        `${chart.id}:${chart.type}:${chart.x_field ?? ""}:${chart.y_field ?? ""}:${chart.series_field ?? ""}:${chart.surge_threshold_pct ?? ""}`,
+    )
+    .join("|");
+  return `${response.data_hash}#${charts}`;
+}
+
 export function ChartCard({
   query,
   published = false,
@@ -110,12 +126,17 @@ export function ChartCard({
    * every card on the board; keying it on the hash means the work happens when
    * the data moved and not otherwise.
    *
+   * "Differed" means the rows OR how they are drawn. Changing a chart's type
+   * re-runs the query and comes back with the same rows, so the same hash, but
+   * a different `charts` mapping. Keyed on the hash alone that answer was
+   * thrown away and the card kept drawing the old type until a full reload.
+   *
    * Adjusting state during render is React's documented way to derive from a
    * changing prop without an extra pass, and it is the pattern the poll loop
    * itself uses to reset when the query id changes.
    */
   const [shaped, setShaped] = useState<RunResponse | null>(snapshot);
-  if (snapshot?.data_hash !== shaped?.data_hash) setShaped(snapshot);
+  if (drawingKey(snapshot) !== drawingKey(shaped)) setShaped(snapshot);
 
   /*
    * Hand the shaping to React at transition priority.

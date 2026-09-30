@@ -223,6 +223,36 @@ describe("ChartCard", () => {
     expect(screen.getByText("bbb")).toBeInTheDocument();
   });
 
+  it("redraws when only the chart type changes, because the rows (and hash) do not", async () => {
+    /*
+     * Picking a new chart type re-runs the query and gets back the same rows,
+     * so the same `data_hash`, under a different `charts` mapping. The card
+     * used to key its re-shape on the hash alone and dropped that answer, so
+     * the old type stayed on screen until a full reload.
+     */
+    vi.useFakeTimers();
+    const asTable = (): PollResponse => {
+      const payload = changed("aaa", 20);
+      if (!("charts" in payload)) throw new Error("fixture must be a full payload");
+      return { ...payload, charts: [{ ...payload.charts[0], type: "table" }] };
+    };
+    pollQuery.mockResolvedValueOnce(changed("aaa", 20)).mockResolvedValue(asTable());
+
+    render(<ChartCard query={query} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+      await Promise.resolve();
+    });
+    // Drawn as a number readout: no table yet.
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
   it("never fails silently: a first-poll failure shows the reason and a retry", async () => {
     pollQuery.mockRejectedValue(
       new ApiError({ kind: "timeout", message: "Timed out", url: "/x" }),
