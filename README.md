@@ -638,14 +638,24 @@ Collapsed it becomes a 68px strip of icons and status dots. Below `md` it is a
 drawer behind the menu button in the top bar.
 
 **It does not scroll with the page.** `AppShell` is exactly the viewport
-(`h-dvh overflow-hidden`), the rail is `h-full overflow-hidden`, and the only
-scroll region is the `main` inside `PageBody`. The document itself can never
-scroll, so nothing can carry the rail along with a long page. This was reported
-for `connections/:id` and could not be reproduced in Chrome at 450 to 1080px of
-height (the rail's top stayed at 0 under wheel, End, Tab and `scrollIntoView`),
-so the clip is a structural guarantee rather than a fix for a measured fault. If
-you still see it, tell us the browser and whether the rail's own list or the whole
-rail moves; `npm run check:layout` is where a reproduction belongs.
+(`relative h-dvh overflow-hidden`), the rail is `h-full overflow-hidden`, and the
+only scroll region is the `main` inside `PageBody` (also `relative`). The document
+itself can never scroll, so nothing can carry the rail along with a long page.
+
+The cause, found on `connections/:id/flagged`: `overflow-hidden` does not clip an
+`absolute` element whose containing block is outside it, and nothing in the shell
+was positioned, so the containing block was `<body>`. A `sr-only` table caption
+is `position: absolute`; its static position is wherever it sits in the scrolled
+content, so one far down a long page stretched the document to that height. When
+`main` reached its end the wheel carried on into the document, and the sidebar
+scrolled away with it. Making the shell and `main` the containing blocks puts
+every such element inside a box that clips it. Rule of thumb: an `overflow-*`
+that is meant to contain a region needs `relative` (or any non-static `position`)
+on it too.
+
+`npm run check:layout` scrolls the connection page and the flagged page past the
+end of `main` by wheel, End and `scrollIntoView` and fails if the rail moves or
+the document overflows. The mock engine serves a 120-row flagged page for it.
 
 ### Layers
 

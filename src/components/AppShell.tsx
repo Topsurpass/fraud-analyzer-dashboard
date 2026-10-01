@@ -63,8 +63,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           page scrolls inside `main`, never as a document. `overflow-hidden`
           makes that structural rather than a habit of whatever is inside, and
           `h-full overflow-hidden` on the rail keeps the sidebar a fixed column
-          that cannot be carried along with the content. */}
-      <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+          that cannot be carried along with the content.
+
+          `relative` is what makes the clip hold. `overflow-hidden` does not clip
+          an `absolute` descendant whose containing block is outside it, and
+          nothing here was positioned, so it was `<body>`. A `sr-only` table
+          caption (`position: absolute`) far down a long page therefore stretched
+          the document to its own height, the wheel scrolled the document once
+          `main` hit its end, and the sidebar went with it. */}
+      <div className="relative flex h-dvh min-h-0 w-full overflow-hidden">
         <aside
           className="hidden h-full shrink-0 overflow-hidden border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
           style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}

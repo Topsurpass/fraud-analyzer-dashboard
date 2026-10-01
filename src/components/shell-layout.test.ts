@@ -47,9 +47,18 @@ describe("the shell", () => {
   const shell = read("AppShell.tsx");
 
   it("is the viewport and clips, so the document never scrolls", () => {
-    const classes = classesOf(shell, '<div className="flex h-dvh');
+    const classes = classesOf(shell, '<div className="relative flex h-dvh');
     expect(classes).toContain("h-dvh");
     expect(classes).toContain("overflow-hidden");
+  });
+
+  // `overflow-hidden` alone does not clip an `absolute` descendant whose
+  // containing block lies outside it. Without `relative` here and on `main`, a
+  // `sr-only` table caption deep in a long page stretched the document, and the
+  // sidebar scrolled away with it (connections/:id/flagged).
+  it("is the containing block for absolute descendants, so they are clipped", () => {
+    expect(classesOf(shell, '<div className="relative flex h-dvh')).toContain("relative");
+    expect(classesOf(read("PageBody.tsx"), "<main")).toContain("relative");
   });
 
   it("holds the sidebar to a fixed-height, clipped column", () => {

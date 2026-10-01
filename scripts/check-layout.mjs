@@ -14,8 +14,8 @@
  *     it hit-tests to the panel, at desktop, tablet and phone widths, and it
  *     stays inside the viewport.
  *  2. The sidebar is a fixed column: the document never scrolls, and the rail
- *     does not move when the page scrolls by wheel, by End, by Tab or by
- *     scrollIntoView.
+ *     does not move when the page is scrolled to its end and past it, by wheel,
+ *     End or scrollIntoView, on the connection page and the long flagged page.
  *  3. Every item of every card's menus is reachable without expanding the card:
  *     the panel is inside the viewport, and each item, scrolled to inside the
  *     panel if it scrolls, hit-tests to itself. The keyboard gets in (Enter,
@@ -47,13 +47,14 @@ const check = (ok, what, detail = "") => {
 const { token } = await signIn(engine, { email, password });
 const browser = await chromium.launch(args.has("no-chrome") ? {} : { channel: "chrome" });
 
-async function open(width, height) {
+async function open(width, height, route = `/connections/${connection}`) {
   const context = await browser.newContext({ viewport: { width, height } });
   await context.addCookies([{ name: "switchboard_session", value: token, url: base }]);
   await context.addInitScript((t) => localStorage.setItem("fae.session-token", t), token);
   const page = await context.newPage();
-  await page.goto(`${base}/connections/${connection}`, { waitUntil: "networkidle" });
-  await page.waitForSelector("article", { timeout: 15_000 });
+  await page.goto(`${base}${route}`, { waitUntil: "networkidle" });
+  // Cards on the grid page, tables on the flagged page.
+  await page.waitForSelector("article, main table", { timeout: 15_000 });
   await page.waitForTimeout(1500);
   return { context, page };
 }
@@ -84,35 +85,51 @@ for (const [w, h] of [[1440, 800], [1024, 600], [800, 700], [390, 800]]) {
 }
 
 /* 2. the sidebar --------------------------------------------------------- */
-for (const [w, h] of [[1440, 700], [1920, 1080], [1280, 450], [800, 700]]) {
-  const { context, page } = await open(w, h);
+// The flagged page is here because it is the long one: forty-row tables whose
+// `sr-only` captions are `position: absolute`. Left unclipped they stretched the
+// document, and once `main` reached its end the wheel scrolled the document and
+// the sidebar went with it. So every case scrolls PAST the end of `main`.
+const SIDEBAR_CASES = [
+  ["/connections/" + connection, 1440, 700],
+  ["/connections/" + connection, 1280, 450],
+  ["/connections/" + connection, 800, 700],
+  ["/connections/" + connection + "/flagged", 1440, 700],
+  ["/connections/" + connection + "/flagged", 1280, 450],
+  ["/connections/" + connection + "/flagged", 800, 700],
+];
+for (const [route, w, h] of SIDEBAR_CASES) {
+  const { context, page } = await open(w, h, route);
   const state = () =>
     page.evaluate(() => ({
-      doc: document.scrollingElement.scrollTop + window.scrollY,
+      doc: document.scrollingElement.scrollTop,
       docOverflow: document.documentElement.scrollHeight - innerHeight,
       aside: document.querySelector("aside").getBoundingClientRect().top,
       main: document.querySelector("main").scrollTop,
+      mainMax: document.querySelector("main").scrollHeight - document.querySelector("main").clientHeight,
     }));
   const moves = [];
   await page.mouse.move(Math.floor(w / 2), Math.floor(h / 2));
-  await page.mouse.wheel(0, 4000);
-  await page.waitForTimeout(300);
-  moves.push(["wheel", await state()]);
+  for (let i = 0; i < 16; i++) {
+    await page.mouse.wheel(0, 700);
+    await page.waitForTimeout(120);
+  }
+  moves.push(["wheel x16", await state()]);
   await page.keyboard.press("End");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(250);
   moves.push(["End", await state()]);
   await page.evaluate(() => {
-    const a = document.querySelectorAll("article");
-    a[a.length - 1].scrollIntoView();
+    const el = document.querySelector("main").lastElementChild;
+    el?.scrollIntoView({ block: "end" });
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(250);
   moves.push(["scrollIntoView", await state()]);
-  const scrolled = moves.some(([, s]) => s.main > 0);
-  check(scrolled, `sidebar ${w}x${h}: the page does scroll (the check is meaningful)`);
+  const last = moves[0][1];
+  const label = `${route} ${w}x${h}`;
+  check(last.mainMax > 0 && last.main >= last.mainMax - 1, `sidebar ${label}: scrolled main to its end (the check is meaningful)`, `main ${last.main}/${last.mainMax}`);
   check(
     moves.every(([, s]) => s.aside === 0 && s.doc === 0 && s.docOverflow <= 0),
-    `sidebar ${w}x${h}: rail fixed, document never scrolls`,
-    moves.map(([n, s]) => `${n}: aside ${s.aside}, doc ${s.doc}, main ${s.main}`).join(" | "),
+    `sidebar ${label}: rail fixed, document never scrolls`,
+    moves.map(([n, s]) => `${n}: aside ${s.aside}, doc ${s.doc}, docOverflow ${s.docOverflow}`).join(" | "),
   );
   await context.close();
 }

@@ -494,6 +494,46 @@ createServer((req, res) => {
     }
     if (path === "/auth/logout") return send(res, 204);
     if (path === "/auth/me") return send(res, 200, user);
+    // A long flagged page: three queries of forty rows each, so the page has
+    // to scroll. `scripts/check-layout.mjs` needs this to mean anything.
+    const flaggedMatch = path.match(/^\/connections\/([^/]+)\/flagged$/);
+    if (flaggedMatch) {
+      const sections = ["Declined spike", "Card testing", "Large amounts"].map((name, s) => {
+        const rules = [{ id: `r${s}`, name: `${name} rule`, severity: s === 0 ? "high" : "medium", matched: 40 }];
+        const rows = Array.from({ length: 40 }, (_, i) => ({
+          index: i + 1,
+          rule_ids: [`r${s}`],
+          rule_names: [`${name} rule`],
+          values: [`TX-${s}${String(i).padStart(4, "0")}`, `Merchant ${i % 7}`, 100 + i * 13],
+          fingerprint: `fp-${s}-${i}`,
+          severity: s === 0 ? "high" : "medium",
+          first_seen_at: iso(3_600_000 + i * 60_000),
+          last_seen_at: iso(60_000),
+        }));
+        return {
+          query_id: `q_flag_${s}`,
+          query_name: name,
+          columns: ["transaction", "merchant", "amount"],
+          rows,
+          rules,
+          warnings: [],
+          flagged_count: rows.length,
+          dismissed_count: 0,
+          executed_at: iso(60_000),
+          stale: false,
+          error_code: null,
+          error_message: null,
+        };
+      });
+      return send(res, 200, {
+        connection_id: flaggedMatch[1],
+        queries: sections,
+        flagged_count: 120,
+        dismissed_count: 0,
+        refreshed: false,
+        refresh_truncated: false,
+      });
+    }
     if (path === "/connections") return send(res, 200, connections);
     if (path === "/dashboards") return send(res, 200, dashboards);
     if (path.startsWith("/dashboards/")) {
