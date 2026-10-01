@@ -25,7 +25,7 @@ const POLL_MS = Number(process.env.MOCK_POLL_MS ?? 5000);
 const NOW = Date.now();
 const iso = (msAgo) => new Date(NOW - msAgo).toISOString();
 
-const user = {
+const adminUser = {
   id: "u1",
   email: "ada@fraudguard.io",
   full_name: "Ada Lovelace",
@@ -37,6 +37,23 @@ const user = {
   last_login_at: iso(3_600_000),
   created_at: iso(86_400_000 * 40),
 };
+
+/**
+ * A second person, for anything that depends on who is asking (publishing needs
+ * an administrator's approval, alerts are shared, dismissals are personal).
+ * Signing in with an email that starts with "analyst" gives this account and a
+ * token that says so; anything else is the administrator above. `user` is the
+ * caller of the request being handled, set once per request from its token.
+ */
+const analystUser = {
+  ...adminUser,
+  id: "u2",
+  email: "grace@fraudguard.io",
+  full_name: "Grace Hopper",
+  role: "analyst",
+};
+const ANALYST_TOKEN = "mock-token-analyst";
+let user = adminUser;
 
 const connections = [
   ["c1", "Payments (prod)", "postgres", "ok"],
@@ -174,6 +191,22 @@ const queryDefs = [
   ["q_biaxial", "c1", "Volume and decline rate"],
 ];
 
+/**
+ * Where a chart is in the publishing workflow (docs/shared-publishing.md):
+ * `private`, `pending` (asked, not decided) or `published`. Held on the chart
+ * objects themselves, which the query and board payloads share, so a decision
+ * shows everywhere the chart does.
+ */
+const PUBLISH_DEFAULTS = {
+  is_public: false,
+  publish_status: "private",
+  published_by: null,
+  published_by_name: null,
+  published_at: null,
+  publish_requested_at: null,
+  publish_rejection: null,
+};
+
 const charts = chartDefs.map(([id, query_id, name, chart_type, x, y, s], i) => ({
   id,
   query_id,
@@ -184,9 +217,7 @@ const charts = chartDefs.map(([id, query_id, name, chart_type, x, y, s], i) => (
   y_field: y,
   series_field: s,
   surge_threshold_pct: null,
-  is_public: false,
-  published_by: null,
-  published_at: null,
+  ...PUBLISH_DEFAULTS,
   created_at: iso(86_400_000),
   updated_at: iso(86_400_000),
 }));
@@ -196,7 +227,8 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   connection_id,
   name,
   description: null,
-  sql_text: "select 1",
+  // Distinct and multi-line, so the definition dialog has something real to show.
+  sql_text: `SELECT bucket, outcome, COUNT(*) AS transactions\nFROM ${id}_source\nWHERE amount > 0\nGROUP BY bucket, outcome\nORDER BY bucket`,
   table_hint: null,
   row_limit: 1000,
   poll_interval_ms: POLL_MS,
@@ -334,7 +366,147 @@ const dashboards = [
     created_at: iso(86_400_000 * 3),
     updated_at: iso(3_600_000),
   },
+  {
+    // The analyst's own board. A board shows what the team has published only
+    // when it is yours, so this is where "Published by the team" appears for her.
+    id: "d3",
+    name: "Grace's board",
+    chart_ids: ["ch_kpi"],
+    charts: charts.filter((c) => c.id === "ch_kpi"),
+    owner_id: "u2",
+    owner_name: analystUser.full_name,
+    owner_email: analystUser.email,
+    created_at: iso(86_400_000 * 2),
+    updated_at: iso(3_600_000),
+  },
 ];
+
+/* ------------------------------------------------- shared publishing state
+ * See docs/shared-publishing.md. In memory, like everything here, and put back
+ * the way it started by POST /__reset so the browser check can run twice.
+ */
+
+/** Per person, per query: the fingerprints that person has dismissed. */
+const dismissals = new Map();
+const dismissedBy = (userId, queryId) => {
+  const mine = dismissals.get(userId) ?? new Map();
+  dismissals.set(userId, mine);
+  const set = mine.get(queryId) ?? new Set();
+  mine.set(queryId, set);
+  return set;
+};
+
+function resetPublication() {
+  for (const chart of charts) Object.assign(chart, PUBLISH_DEFAULTS);
+  // One chart is already published by the administrator, so the analyst's board
+  // has something under "Published by the team" and the viewer paths have a
+  // chart that is not hers.
+  Object.assign(charts.find((c) => c.id === "ch_table"), {
+    is_public: true,
+    publish_status: "published",
+    published_by: adminUser.id,
+    published_by_name: adminUser.full_name,
+    published_at: iso(7_200_000),
+  });
+  dismissals.clear();
+}
+resetPublication();
+
+const queryOf = (chart) => queries.find((q) => q.id === chart.query_id);
+const mayActOn = (query) => user.role === "admin" || query?.owner_id === user.id;
+const notAdmin = () => ({
+  error_code: "FORBIDDEN",
+  message: "This needs an administrator account.",
+  detail: null,
+});
+
+/**
+ * The flagged view's queries. Three of them, forty findings each: one the
+ * administrator owns and has published (so everyone sees it), one the
+ * administrator owns and has not (so only the administrator does), and one the
+ * analyst owns.
+ */
+const FLAG_SECTIONS = [
+  { id: "q_flag_0", name: "Declined spike", owner: "u1", published: true, severity: "high" },
+  { id: "q_flag_1", name: "Card testing", owner: "u1", published: false, severity: "medium" },
+  { id: "q_flag_2", name: "Large amounts", owner: "u2", published: false, severity: "medium" },
+];
+
+function flaggedSections() {
+  return FLAG_SECTIONS.flatMap((def, s) => {
+    if (user.role !== "admin" && def.owner !== user.id && !def.published) return [];
+    const all = Array.from({ length: 40 }, (_, i) => ({
+      index: i + 1,
+      rule_ids: [`r${s}`],
+      rule_names: [`${def.name} rule`],
+      values: [`TX-${s}${String(i).padStart(4, "0")}`, `Merchant ${i % 7}`, 100 + i * 13],
+      fingerprint: `fp-${s}-${i}`,
+      severity: def.severity,
+      first_seen_at: iso(3_600_000 + i * 60_000),
+      last_seen_at: iso(60_000),
+    }));
+    const mine = dismissedBy(user.id, def.id);
+    const rows = all.filter((row) => !mine.has(row.fingerprint));
+    const owner = users.find((u) => u.id === def.owner);
+    return [
+      {
+        query_id: def.id,
+        query_name: def.name,
+        shared: def.owner !== user.id,
+        owner_name: owner?.full_name ?? null,
+        columns: ["transaction", "merchant", "amount"],
+        rows,
+        rules: [{ id: `r${s}`, name: `${def.name} rule`, severity: def.severity, matched: rows.length }],
+        warnings: [],
+        flagged_count: rows.length,
+        dismissed_count: all.length - rows.length,
+        executed_at: iso(60_000),
+        stale: false,
+        error_code: null,
+        error_message: null,
+      },
+    ];
+  });
+}
+
+/** The summary the bell and rail read: what the caller may see, minus what they dismissed. */
+function summaryForCaller() {
+  const sections = flaggedSections();
+  // q_table is published, so everyone sees its static tally; q_flagged is not.
+  const fixed = flaggedSummary.queries
+    .filter((q) => user.role === "admin" || q.query_id === "q_table")
+    .map((q) => ({ ...q, shared: q.query_id !== "q_table" ? false : adminUser.id !== user.id }));
+  const queriesOut = [
+    ...sections.map((s) => ({
+      query_id: s.query_id,
+      connection_id: "c1",
+      flagged_count: s.flagged_count,
+      severity: s.rules[0].severity,
+      newest_first_seen_at: iso(600_000),
+      shared: s.shared,
+    })),
+    ...fixed,
+  ].filter((q) => q.flagged_count > 0);
+  const byConnection = new Map();
+  for (const q of queriesOut) {
+    const entry = byConnection.get(q.connection_id) ?? {
+      connection_id: q.connection_id,
+      connection_name: connections.find((c) => c.id === q.connection_id)?.name ?? q.connection_id,
+      flagged_count: 0,
+      severity: q.severity,
+      newest_first_seen_at: q.newest_first_seen_at,
+    };
+    entry.flagged_count += q.flagged_count;
+    byConnection.set(q.connection_id, entry);
+  }
+  const connectionsOut = [...byConnection.values()].sort((a, b) => b.flagged_count - a.flagged_count);
+  return {
+    connections: connectionsOut,
+    queries: queriesOut,
+    flagged_count: connectionsOut.reduce((n, c) => n + c.flagged_count, 0),
+    newest_first_seen_at: connectionsOut.length ? iso(600_000) : null,
+  };
+}
 
 const flaggedSummary = {
   connections: [
@@ -350,9 +522,9 @@ const flaggedSummary = {
 };
 
 const users = [
-  user,
-  { ...user, id: "u2", email: "grace@fraudguard.io", full_name: "Grace Hopper", role: "analyst" },
-  { ...user, id: "u3", email: "alan@fraudguard.io", full_name: "Alan Turing", role: "analyst", is_active: false },
+  adminUser,
+  analystUser,
+  { ...adminUser, id: "u3", email: "alan@fraudguard.io", full_name: "Alan Turing", role: "analyst", is_active: false },
 ];
 
 /* ----------------------------------------------------------------- lists
@@ -385,6 +557,24 @@ let nextListId = 3;
 
 /** Flag rules saved through PUT, by query id. Enough to know what uses a list. */
 const savedRules = new Map();
+// Rules on the published chart's query, so its definition has something to show:
+// one on a number, one that names a list (the list's name is shown, never its items).
+savedRules.set("q_table", [
+  {
+    id: "fr_q_table_0",
+    name: "Very large transfer",
+    severity: "high",
+    enabled: true,
+    conditions: [{ column_name: "amount", operator: "gt", value: "900", value2: null, list_name: null }],
+  },
+  {
+    id: "fr_q_table_1",
+    name: "Terminal on the watchlist",
+    severity: "medium",
+    enabled: true,
+    conditions: [{ column_name: "terminal", operator: "in_list", value: null, value2: null, list_name: "MFBs Terminal" }],
+  },
+]);
 
 /*
  * The engine keys items with Python's Decimal: decimal literals only (no hex,
@@ -495,6 +685,8 @@ createServer((req, res) => {
   let body = "";
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
+    // Who is asking: the token the BFF forwards from the session cookie.
+    user = (req.headers.authorization ?? "").endsWith(ANALYST_TOKEN) ? analystUser : adminUser;
     if (path === "/health") return send(res, 200, { status: "ok" });
     if (path === "/__executions") return send(res, 200, Object.fromEntries(executions));
     if (path === "/__flag" && req.method === "POST") {
@@ -511,49 +703,186 @@ createServer((req, res) => {
       if (creds.password !== "demo") {
         return send(res, 401, { error_code: "INVALID_CREDENTIALS", message: "Wrong email or password.", detail: null });
       }
-      return send(res, 200, { token: "mock-token", user });
+      const who = String(creds.email ?? "").startsWith("analyst") ? analystUser : adminUser;
+      return send(res, 200, { token: who === analystUser ? ANALYST_TOKEN : "mock-token", user: who });
     }
     if (path === "/auth/logout") return send(res, 204);
     if (path === "/auth/me") return send(res, 200, user);
-    // A long flagged page: three queries of forty rows each, so the page has
-    // to scroll. `scripts/check-layout.mjs` needs this to mean anything.
+    if (path === "/__reset") {
+      resetPublication();
+      return send(res, 200, { reset: true });
+    }
+
+    // A long flagged page: three queries of forty rows each, so the page has to
+    // scroll (`scripts/check-layout.mjs` needs that to mean anything). Which of
+    // them the caller sees, and what they have dismissed, depends on who they are.
     const flaggedMatch = path.match(/^\/connections\/([^/]+)\/flagged$/);
     if (flaggedMatch) {
-      const sections = ["Declined spike", "Card testing", "Large amounts"].map((name, s) => {
-        const rules = [{ id: `r${s}`, name: `${name} rule`, severity: s === 0 ? "high" : "medium", matched: 40 }];
-        const rows = Array.from({ length: 40 }, (_, i) => ({
-          index: i + 1,
-          rule_ids: [`r${s}`],
-          rule_names: [`${name} rule`],
-          values: [`TX-${s}${String(i).padStart(4, "0")}`, `Merchant ${i % 7}`, 100 + i * 13],
-          fingerprint: `fp-${s}-${i}`,
-          severity: s === 0 ? "high" : "medium",
-          first_seen_at: iso(3_600_000 + i * 60_000),
-          last_seen_at: iso(60_000),
-        }));
-        return {
-          query_id: `q_flag_${s}`,
-          query_name: name,
-          columns: ["transaction", "merchant", "amount"],
-          rows,
-          rules,
-          warnings: [],
-          flagged_count: rows.length,
-          dismissed_count: 0,
-          executed_at: iso(60_000),
-          stale: false,
-          error_code: null,
-          error_message: null,
-        };
-      });
+      const sections = flaggedSections();
       return send(res, 200, {
         connection_id: flaggedMatch[1],
         queries: sections,
-        flagged_count: 120,
-        dismissed_count: 0,
+        flagged_count: sections.reduce((n, s) => n + s.flagged_count, 0),
+        dismissed_count: sections.reduce((n, s) => n + s.dismissed_count, 0),
         refreshed: false,
         refresh_truncated: false,
       });
+    }
+
+    // Dismissals are personal: recorded for the caller only, and nothing stored
+    // is deleted, so everybody else keeps seeing the finding.
+    const dismissMatch = path.match(/^\/queries\/([^/]+)\/flag-dismissals$/);
+    if (dismissMatch && (req.method === "POST" || req.method === "DELETE")) {
+      const mine = dismissedBy(user.id, dismissMatch[1]);
+      if (req.method === "POST") {
+        const wanted = JSON.parse(body || "{}").fingerprints ?? [];
+        const before = mine.size;
+        for (const fingerprint of wanted) mine.add(fingerprint);
+        return send(res, 200, { query_id: dismissMatch[1], changed: mine.size - before });
+      }
+      const named = url.searchParams.getAll("fingerprint");
+      const before = mine.size;
+      if (named.length === 0) mine.clear();
+      else for (const fingerprint of named) mine.delete(fingerprint);
+      return send(res, 200, { query_id: dismissMatch[1], changed: before - mine.size });
+    }
+    if (/^\/queries\/[^/]+\/flagged-rows$/.test(path) && req.method === "DELETE") {
+      return send(res, 200, { query_id: path.split("/")[2], changed: 0 });
+    }
+
+    /* ------------------------------------------------------ publishing
+     * docs/shared-publishing.md, section 1 and 4. Literal paths first, so
+     * "published" and "publish-requests" are never read as a chart id.
+     */
+    if (path === "/queries/charts/published") {
+      return send(res, 200, charts.filter((c) => c.is_public));
+    }
+    if (path === "/queries/charts/publish-requests") {
+      if (user.role !== "admin") return send(res, 403, notAdmin());
+      const waiting = charts
+        .filter((c) => c.publish_status === "pending")
+        .sort((a, b) => a.publish_requested_at.localeCompare(b.publish_requested_at))
+        .map((chart) => {
+          const query = queryOf(chart);
+          const asker = users.find((u) => u.id === query.owner_id);
+          return {
+            chart,
+            query_id: query.id,
+            query_name: query.name,
+            connection_id: query.connection_id,
+            connection_name: connections.find((c) => c.id === query.connection_id)?.name ?? query.connection_id,
+            requested_by: { id: asker.id, full_name: asker.full_name, email: asker.email },
+            requested_at: chart.publish_requested_at,
+          };
+        });
+      return send(res, 200, waiting);
+    }
+    const chartAction = path.match(/^\/queries\/charts\/([^/]+)\/(publish|publish\/cancel|publish\/approve|publish\/reject|unpublish|definition)$/);
+    if (chartAction) {
+      const chart = charts.find((c) => c.id === chartAction[1]);
+      const query = chart && queryOf(chart);
+      const missing = () => send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such chart.", detail: null });
+      const action = chartAction[2];
+
+      if (action === "definition") {
+        // Anyone may read a published chart's; the author and an admin any state.
+        if (!chart || !(chart.is_public || mayActOn(query))) return missing();
+        const owner = users.find((u) => u.id === query.owner_id);
+        return send(res, 200, {
+          chart,
+          query: {
+            id: query.id,
+            name: query.name,
+            description: query.description,
+            sql_text: query.sql_text,
+            row_limit: query.row_limit,
+            poll_interval_ms: query.poll_interval_ms,
+          },
+          rules: (savedRules.get(query.id) ?? []).map((rule) => ({
+            id: rule.id,
+            name: rule.name,
+            severity: rule.severity,
+            enabled: rule.enabled,
+            conditions: rule.conditions.map((c) => ({
+              column_name: c.column_name,
+              operator: c.operator,
+              value: c.value ?? null,
+              value2: c.value2 ?? null,
+              list_name: c.list_name ?? null,
+            })),
+          })),
+          connection_name: connections.find((c) => c.id === query.connection_id)?.name ?? null,
+          owner_name: owner?.full_name ?? null,
+          read_only: !mayActOn(query),
+        });
+      }
+
+      if (!chart || !mayActOn(query)) return missing();
+      const notPending = () =>
+        send(res, 409, { error_code: "PUBLISH_NOT_PENDING", message: "This chart is not waiting for approval.", detail: null });
+      const owner = users.find((u) => u.id === query.owner_id);
+
+      if (action === "publish") {
+        if (chart.publish_status === "private") {
+          if (user.role === "admin") {
+            Object.assign(chart, {
+              is_public: true,
+              publish_status: "published",
+              published_by: user.id,
+              published_by_name: user.full_name,
+              published_at: new Date().toISOString(),
+              publish_rejection: null,
+            });
+          } else {
+            Object.assign(chart, {
+              publish_status: "pending",
+              publish_requested_at: new Date().toISOString(),
+              publish_rejection: null,
+            });
+          }
+        }
+        return send(res, 200, chart);
+      }
+      if (action === "publish/cancel") {
+        if (chart.publish_status === "pending") {
+          Object.assign(chart, { publish_status: "private", publish_requested_at: null });
+        }
+        chart.publish_rejection = null;
+        return send(res, 200, chart);
+      }
+      if (action === "unpublish") {
+        if (chart.is_public && user.role !== "admin" && chart.published_by !== user.id) {
+          return send(res, 403, {
+            error_code: "FORBIDDEN",
+            message: "An administrator published this chart, so only an administrator can unpublish it.",
+            detail: null,
+          });
+        }
+        if (chart.is_public) Object.assign(chart, PUBLISH_DEFAULTS);
+        return send(res, 200, chart);
+      }
+      // approve and reject: administrators only, and only for a waiting request.
+      if (user.role !== "admin") return send(res, 403, notAdmin());
+      if (chart.publish_status !== "pending") return notPending();
+      if (action === "publish/approve") {
+        Object.assign(chart, {
+          is_public: true,
+          publish_status: "published",
+          // The author stays the publisher: an author may retract their own.
+          published_by: owner.id,
+          published_by_name: owner.full_name,
+          published_at: new Date().toISOString(),
+          publish_requested_at: null,
+        });
+        return send(res, 200, chart);
+      }
+      const reason = JSON.parse(body || "{}").reason ?? null;
+      Object.assign(chart, {
+        publish_status: "private",
+        publish_requested_at: null,
+        publish_rejection: { reason, rejected_at: new Date().toISOString(), rejected_by_name: user.full_name },
+      });
+      return send(res, 200, chart);
     }
     if (path === "/connections") return send(res, 200, connections);
     if (path === "/dashboards") return send(res, 200, dashboards);
@@ -561,7 +890,7 @@ createServer((req, res) => {
       const found = dashboards.find((d) => d.id === path.split("/")[2]);
       return found ? send(res, 200, found) : send(res, 404, { message: "not found" });
     }
-    if (path === "/flagged/summary") return send(res, 200, flaggedSummary);
+    if (path === "/flagged/summary") return send(res, 200, summaryForCaller());
     if (path === "/queries") {
       const ids = url.searchParams.get("ids");
       const wanted = ids ? ids.split(",") : null;

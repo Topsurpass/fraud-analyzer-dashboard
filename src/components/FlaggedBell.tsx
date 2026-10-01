@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
+import { usePublishRequests } from "@/services/publishing/PublishRequestsContext";
 import { formatInteger, formatRelative } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 
@@ -68,6 +69,7 @@ function subscribe(listener: () => void): () => void {
 
 export function FlaggedBell() {
 	const flagged = useFlagged();
+	const pendingRequests = usePublishRequests();
 	const now = useNow(30_000);
 
 	const seenAt = useSyncExternalStore(subscribe, readSeen, () => null);
@@ -153,6 +155,25 @@ export function FlaggedBell() {
 							</>
 						)}
 					</p>
+
+					{/* Administrators only in effect: the count is zero for anyone else,
+					    because the queue is never fetched for them. A request waiting
+					    is work somebody else is blocked on, so it is worth a line here
+					    even when nothing is flagged. */}
+					{pendingRequests.count > 0 ? (
+						<Link
+							href="/approvals"
+							onClick={() => setOpen(false)}
+							className="flex items-center gap-2 border-b border-line px-3 py-2.5 text-[13px] transition-colors hover:bg-raised"
+						>
+							<span className="text-ink">
+								{pendingRequests.count === 1
+									? "1 chart awaiting approval"
+									: `${formatInteger(pendingRequests.count)} charts awaiting approval`}
+							</span>
+							<span className="ml-auto shrink-0 text-[11px] text-accent">Review</span>
+						</Link>
+					) : null}
 
 					{flagged.connections.length > 0 ? (
 						<ul>

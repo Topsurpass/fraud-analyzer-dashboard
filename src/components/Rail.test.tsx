@@ -54,7 +54,19 @@ vi.mock("@/services/auth/AuthContext", async () => {
   };
 });
 
+const waitingApprovals = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/services/publishing/PublishRequestsContext", () => ({
+  usePublishRequests: () => ({
+    requests: [],
+    count: waitingApprovals.count,
+    initial: false,
+    error: null,
+    reload: vi.fn(),
+  }),
+}));
+
 beforeEach(() => {
+  waitingApprovals.count = 0;
   signedInAs.role = "admin";
   useConnections.mockReturnValue({
     connections: [
@@ -248,6 +260,47 @@ describe("what each role sees in the rail", () => {
     await userEvent.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Account" })).toHaveAttribute("href", "/account");
+  });
+});
+
+describe("Rail, the approvals queue", () => {
+  it("gives an administrator an Approvals link", () => {
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.getByRole("link", { name: /Approvals/ })).toHaveAttribute("href", "/approvals");
+  });
+
+  it("shows how many requests are waiting", () => {
+    waitingApprovals.count = 3;
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    const link = screen.getByRole("link", { name: /Approvals/ });
+    expect(link).toHaveTextContent("3");
+    expect(screen.getByLabelText("3 waiting")).toBeInTheDocument();
+  });
+
+  it("shows no number when nothing is waiting", () => {
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.getByRole("link", { name: /Approvals/ })).not.toHaveTextContent(/\d/);
+    expect(screen.queryByLabelText(/waiting/)).not.toBeInTheDocument();
+  });
+
+  it("caps a long queue so the badge does not widen the rail", () => {
+    waitingApprovals.count = 250;
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.getByRole("link", { name: /Approvals/ })).toHaveTextContent("99+");
+  });
+
+  it("keeps the link, and the count in its title, when collapsed", () => {
+    waitingApprovals.count = 2;
+    render(<Rail collapsed onToggleCollapse={vi.fn()} />);
+    expect(screen.getByTitle("Approvals, 2 waiting")).toHaveAttribute("href", "/approvals");
+  });
+
+  it("never shows an analyst an Approvals link, whatever the queue holds", () => {
+    signedInAs.role = "analyst";
+    waitingApprovals.count = 5;
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.queryByRole("link", { name: /Approvals/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/waiting/)).not.toBeInTheDocument();
   });
 });
 

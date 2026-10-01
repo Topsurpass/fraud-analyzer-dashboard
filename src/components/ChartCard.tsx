@@ -28,7 +28,8 @@ import {
 } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
-import { PublishedBadge } from "./PublishedBadge";
+import { PublishedBadge, PublishRejectionNote } from "./PublishedBadge";
+import { ViewerCardMenu } from "./ViewerCardMenu";
 import { useReportFlags } from "./FlagOrder";
 import { useHoldFlagOrder } from "./flagOrderHold";
 import { worstSeverity } from "./flagRanking";
@@ -121,6 +122,10 @@ export function ChartCard({
   const flagged = useFlagged();
   const flaggedCount = flagged.countForQuery(query.id);
   const flaggedSeverity = flagged.severityForQuery(query.id);
+  // A published chart seen by somebody else has no connection id of its own, so
+  // the link used to point at /connections/undefined/flagged. The summary knows
+  // which connection holds the findings.
+  const flaggedConnectionId = query.connection_id ?? flagged.connectionForQuery(query.id);
   const poll = useQueryPolling(published && chartId ? chartId : query.id, {
     enabled,
     published,
@@ -293,24 +298,33 @@ export function ChartCard({
                 because seeing the count is only useful if the next step is
                 one click away. */}
             {flaggedCount > 0 ? (
-              <Link
-                href={`/connections/${query.connection_id}/flagged`}
-                aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
-              >
+              flaggedConnectionId ? (
+                <Link
+                  href={`/connections/${flaggedConnectionId}/flagged`}
+                  aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
+                >
+                  <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
+                </Link>
+              ) : (
                 <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
-              </Link>
+              )
             ) : null}
             <LivePill phase={poll.phase} justChanged={justChanged} />
             {actions}
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
-            {published ? null : (
+            {published ? (
+              chartId ? (
+                <ViewerCardMenu chartId={chartId} name={cardTitle} />
+              ) : null
+            ) : (
               <CardMenu
                 query={query}
                 chartId={chartId}
                 currentChartType={chartType}
                 isPublished={publishedChart?.is_public ?? false}
+                chart={publishedChart}
                 onMutated={() => {
                   // Re-read the result now so a new chart type, or the run
                   // that was just asked for, is drawn at once rather than at
@@ -328,6 +342,8 @@ export function ChartCard({
           </div>
         </div>
       </header>
+
+      {publishedChart && !published ? <PublishRejectionNote chart={publishedChart} /> : null}
 
       {/* The rules behind the marks below. A table lists its own in its footer. */}
       {chartType !== "table" ? <FlagStrip flags={source?.flags} /> : null}

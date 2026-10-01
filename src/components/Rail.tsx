@@ -7,6 +7,7 @@ import { useConnections } from "@/services/connections/ConnectionsContext";
 import { useEngineHealth, type EngineStatus } from "@/lib/useEngineHealth";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { useAuth } from "@/services/auth/AuthContext";
+import { usePublishRequests } from "@/services/publishing/PublishRequestsContext";
 import { AccountChip } from "./auth/AccountChip";
 import { FlaggedBadge } from "./FlaggedBadge";
 import { StatusDot } from "./StatusDot";
@@ -38,6 +39,7 @@ export function Rail({
   const { connections, initial, error } = useConnections();
   const { dashboards, initial: dashboardsLoading } = useDashboards();
   const flagged = useFlagged();
+  const pendingRequests = usePublishRequests();
   const { can, user } = useAuth();
   /*
    * An analyst queries these databases but never adds one, so the "+ New" affordance
@@ -212,6 +214,34 @@ export function Rail({
             
             <Section title="Administration" onNavigate={onNavigate} collapsed={collapsed}>
               <ul>
+                <li>
+                  <RailLink
+                    href="/approvals"
+                    active={pathname.startsWith("/approvals")}
+                    onNavigate={onNavigate}
+                    collapsed={collapsed}
+                    title={
+                      pendingRequests.count > 0
+                        ? `Approvals, ${pendingRequests.count} waiting`
+                        : "Approvals"
+                    }
+                  >
+                    <NavGlyph kind="approvals" />
+                    {collapsed ? null : <span className="truncate">Approvals</span>}
+                    {pendingRequests.count > 0 ? (
+                      // A count, not a colour: it is a to-do list length. Never
+                      // --signal-alert, which means a rule matched a row.
+                      <span
+                        className={`tnum rounded-full bg-accent px-1.5 text-[11px] leading-[18px] font-semibold text-white ${
+                          collapsed ? "absolute top-0.5 right-1.5" : "ml-auto"
+                        }`}
+                        aria-label={`${pendingRequests.count} waiting`}
+                      >
+                        {pendingRequests.count > 99 ? "99+" : pendingRequests.count}
+                      </span>
+                    ) : null}
+                  </RailLink>
+                </li>
                 <li>
                   <RailLink
                     href="/admin/users"
@@ -466,7 +496,7 @@ function Section({
  * Glyphs for the nav, so the collapsed rail keeps distinguishable rows instead
  * of identical dots. 16px, 1.5 stroke, currentColor.
  */
-function NavGlyph({ kind }: { kind: "overview" | "lists" | "people" | "log" }) {
+function NavGlyph({ kind }: { kind: "overview" | "lists" | "people" | "log" | "approvals" }) {
   return (
     <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className="shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
       {kind === "overview" ? (
@@ -480,6 +510,11 @@ function NavGlyph({ kind }: { kind: "overview" | "lists" | "people" | "log" }) {
         <>
           <path d="M6 4h7.5M6 8h7.5M6 12h7.5" />
           <path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
+        </>
+      ) : kind === "approvals" ? (
+        <>
+          <rect x={2.5} y={2.5} width={11} height={11} rx={2.6} />
+          <path d="M5.4 8.2 7.2 10l3.4-3.8" />
         </>
       ) : kind === "people" ? (
         <>
@@ -551,7 +586,7 @@ function RailLink({
       /* A filled pill rather than a left rule: the accent marks "you are here",
          which is interaction, and must not borrow the signal vocabulary that
          means "this data is alive". */
-      className={`mx-2 flex items-center gap-2.5 rounded-[var(--radius-sm)] py-2 text-[13px] transition-colors duration-[var(--tween-fast)] ${
+      className={`relative mx-2 flex items-center gap-2.5 rounded-[var(--radius-sm)] py-2 text-[13px] transition-colors duration-[var(--tween-fast)] ${
         collapsed ? "justify-center px-0" : "px-2.5"
       } ${
         active

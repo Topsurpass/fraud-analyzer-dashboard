@@ -57,7 +57,19 @@ function open() {
   );
 }
 
+const waitingApprovals = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/services/publishing/PublishRequestsContext", () => ({
+  usePublishRequests: () => ({
+    requests: [],
+    count: waitingApprovals.count,
+    initial: false,
+    error: null,
+    reload: () => {},
+  }),
+}));
+
 beforeEach(() => {
+  waitingApprovals.count = 0;
   vi.clearAllMocks();
   window.localStorage.clear();
   listConnections.mockResolvedValue([
@@ -199,5 +211,40 @@ describe("getting to the flagged view", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("charts waiting for approval", () => {
+  it("mentions them, with a link to the queue", async () => {
+    waitingApprovals.count = 2;
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: /flagged/i }));
+
+    const link = screen.getByRole("link", { name: /2 charts awaiting approval/ });
+    expect(link).toHaveAttribute("href", "/approvals");
+  });
+
+  it("says one in the singular", async () => {
+    waitingApprovals.count = 1;
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: /flagged/i }));
+    expect(screen.getByRole("link", { name: /1 chart awaiting approval/ })).toBeInTheDocument();
+  });
+
+  it("is still there when nothing is flagged", async () => {
+    waitingApprovals.count = 3;
+    getFlaggedSummary.mockResolvedValue(
+      summary({ connections: [], flagged_count: 0, newest_first_seen_at: null }),
+    );
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: /nothing flagged/i }));
+    expect(screen.getByRole("link", { name: /3 charts awaiting approval/ })).toBeInTheDocument();
+  });
+
+  it("is absent when nothing is waiting, which is every analyst's case", async () => {
+    waitingApprovals.count = 0;
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: /flagged/i }));
+    expect(screen.queryByText(/awaiting approval/)).toBeNull();
   });
 });
