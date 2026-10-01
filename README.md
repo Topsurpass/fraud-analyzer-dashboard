@@ -641,6 +641,21 @@ available without leaving the page.
   "earlier/later" stays true in the single-column mobile layout where
   "left/right" would not.
 
+### When the dashboard itself fails to load
+
+Two error screens, because Next has two places an error can land. `src/app/(app)/error.tsx`
+catches a page that throws while drawing and keeps the sidebar. `src/app/global-error.tsx`
+catches what it cannot: a failure in the root layout, the auth provider, or a server render.
+Without it Next shows its built-in black screen, "This page couldn't load", with no message,
+which gives nobody anything to report. Ours prints the error text and, for a server-side
+failure, the `digest` (search for it in the server's log), and offers Try again (which
+re-fetches from the server, via `retry`) and Reload.
+
+If you see the dashboard fail after sign-in, a screenshot of that screen is the whole bug
+report. Failures of the *engine* never reach either screen: an engine that is down, or that
+answers 404, 500 or 502 after sign-in, shows "Engine unreachable" in the rail and the page
+stays usable (tested in a production build against all three).
+
 ### The app icon
 
 The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon
