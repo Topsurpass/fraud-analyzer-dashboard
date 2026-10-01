@@ -55,7 +55,7 @@ export default function ConnectionPage({ params }: { params: Promise<{ id: strin
       {connection?.paused ? <DisconnectedNotice name={name} /> : null}
 
       {connection?.status === "failed" && !connection.paused ? (
-        <p className="mb-2 border border-change/40 bg-change/5 px-3 py-2 text-[11px] text-change">
+        <p className="mb-2 border border-change/40 bg-change/5 px-3 py-2 text-[12.5px] text-change">
           This connection last failed its test
           {connection.last_test_error ? `: ${connection.last_test_error.replace(/\.?$/, ".")}` : "."}{" "}
           Cards below will keep failing until it is fixed.

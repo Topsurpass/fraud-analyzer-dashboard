@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FlagRuleSetRead, SavedQueryRead } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
+import { ListsProvider } from "@/lib/ListsContext";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import { DashboardsProvider } from "@/services/dashboards";
 import QueryPage from "./page";
@@ -37,6 +38,7 @@ vi.mock("@/services/api-client", async () => {
     deleteQuery: vi.fn(),
     listConnections: vi.fn().mockResolvedValue([]),
     listDashboards: vi.fn().mockResolvedValue([]),
+    listLists: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -98,9 +100,11 @@ async function renderPage() {
     render(
       <ConnectionsProvider>
         <DashboardsProvider>
-          <Suspense fallback={null}>
-            <QueryPage params={Promise.resolve({ id: "q1" })} />
-          </Suspense>
+          <ListsProvider>
+            <Suspense fallback={null}>
+              <QueryPage params={Promise.resolve({ id: "q1" })} />
+            </Suspense>
+          </ListsProvider>
         </DashboardsProvider>
       </ConnectionsProvider>,
     );
@@ -202,5 +206,55 @@ describe("saved flag rules on reopen", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("999"));
+  });
+
+  it("sends a list condition's list_id back on save, so saving never unlinks it", async () => {
+    // The page maps stored conditions into editor state by hand. Leaving
+    // list_id out of that mapping would PUT a list rule with no list, which the
+    // engine refuses, or worse, quietly drop the link on an unrelated edit.
+    const listRules = ruleSet("");
+    listRules.rules[0].conditions = [
+      {
+        id: "c1",
+        position: 0,
+        column_name: "terminal",
+        operator: "in_list",
+        value: null,
+        value2: null,
+        list_id: "l1",
+        list_name: "Blocked terminals",
+      },
+    ];
+    getFlagRules.mockResolvedValue(listRules);
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByLabelText("List")).toHaveValue("l1"));
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(putFlagRules).toHaveBeenCalled());
+    const [condition] = putFlagRules.mock.calls[0][1].rules[0].conditions;
+    expect(condition).toMatchObject({ operator: "in_list", list_id: "l1", value: "" });
+  });
+
+  it("explains a rule whose list was deleted, instead of printing the engine's id", async () => {
+    getFlagRules.mockResolvedValue(ruleSet("500"));
+    putFlagRules.mockRejectedValue(
+      new ApiError({
+        kind: "http",
+        status: 404,
+        errorCode: "LIST_NOT_FOUND",
+        message: "No list with id 'abc'.",
+        url: "/queries/q1/flag-rules",
+      }),
+    );
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("500"));
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(
+      await screen.findByText("A rule uses a list that no longer exists. Pick another list."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No list with id/)).not.toBeInTheDocument();
   });
 });

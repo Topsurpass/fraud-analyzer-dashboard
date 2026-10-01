@@ -56,7 +56,7 @@ export function TemporaryPassword({
 				<h2 id="temp-password-title" className="t-section text-ink">
 					Temporary password for {forName}
 				</h2>
-				<p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
+				<p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">
 					Copy this now. It is not stored anywhere and cannot be shown again - if you lose
 					it, issue another reset.
 				</p>
@@ -70,12 +70,12 @@ export function TemporaryPassword({
 					{password}
 				</p>
 
-				<p className="mt-2.5 text-[11.5px] leading-relaxed text-muted">
+				<p className="mt-2.5 text-[12.5px] leading-relaxed text-muted">
 					They will be asked to choose their own password the first time they sign in.
 				</p>
 
 				{copyFailed ? (
-					<p role="alert" className="mt-2.5 text-[11.5px] text-change">
+					<p role="alert" className="mt-2.5 text-[12.5px] text-change">
 						This browser refused clipboard access. Select the password above and copy it
 						by hand.
 					</p>

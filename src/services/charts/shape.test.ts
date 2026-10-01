@@ -267,8 +267,8 @@ describe("buildPie", () => {
       chart: spec({ type: "pie", x_field: "reason", y_field: "count" }),
     });
     expect(built.slices).toEqual([
-      { name: "suspected_fraud", value: 120, alert: false },
-      { name: "expired_card", value: 30, alert: false },
+      { name: "suspected_fraud", value: 120, alert: false, rules: [], severity: null },
+      { name: "expired_card", value: 30, alert: false, rules: [], severity: null },
     ]);
     expect(built.total).toBe(150);
   });

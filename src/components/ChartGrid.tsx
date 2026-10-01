@@ -17,7 +17,7 @@ export function ChartGrid({ children }: { children: React.ReactNode }) {
     <div
       // `minmax(0,1fr)` rather than the default `1fr`: an auto-sized track lets
       // a wide child push the whole grid past the viewport on a phone.
-      className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3"
+      className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 xl:grid-cols-3"
       /*
        * A fixed row height, not `minmax(row, 1fr)`. The 1fr version was an
        * attempt to fill a short page and it does the opposite of what it looks
@@ -32,15 +32,16 @@ export function ChartGrid({ children }: { children: React.ReactNode }) {
   );
 }
 
-const ROW_HEIGHT_REM = 6.5;
+const ROW_HEIGHT_REM = 7;
 
 /**
  * Rows a chart type occupies by default. A number readout needs less height
- * than a plot but not half as much: the card header alone (title, description,
- * pulse line and status strip) is about 100px, so two rows is the floor at
+ * than a plot but not half as much: the card header plus its footer strip (title,
+ * description, status line) is about 120px, so two rows is the floor at
  * which the figure itself still fits without clipping.
  */
 export function chartRowSpan(type: ChartType): number {
+  if (type === "table") return 4;
   return type === "number" ? 2 : 3;
 }
 
@@ -53,6 +54,9 @@ export function chartRowSpan(type: ChartType): number {
  */
 export function chartCellClass(type: ChartType, expanded = false): string {
   if (expanded) return "card-cell-expanded";
+  // A table is wide by nature and needs rows to be worth scanning: a toolbar
+  // and three data rows in a one-column card is a preview, not a table.
+  if (type === "table") return "card-cell-table";
   return type === "number" ? "card-cell-number" : "card-cell";
 }
 

@@ -45,6 +45,7 @@ const ENGINE_GUARDS: Array<[Capability, "require_admin" | "require_user", string
 	["queries.run", "require_user", "POST /queries/{id}/run"],
 	["flagRules.write", "require_user", "PUT /queries/{id}/flag-rules"],
 	["dashboards.write", "require_user", "POST /dashboards"],
+	["lists.write", "require_user", "POST /lists"],
 	["users.manage", "require_admin", "POST /users"],
 	["auditLog.view", "require_admin", "GET /audit-log"],
 ];

@@ -54,9 +54,9 @@ export function MoversView({ data, title }: MoversViewProps) {
   const falling = data.rows.filter((row) => row.delta < 0).length;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px] text-muted">
-        <span className="tnum text-lg leading-none text-strong">
+    <div className="flex h-full flex-col px-5 pb-4">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12.5px] text-muted">
+        <span className="tnum text-[22px] leading-none font-semibold text-ink">
           {formatAxisValue(data.currentTotal)}
         </span>
         <span>
@@ -74,7 +74,7 @@ export function MoversView({ data, title }: MoversViewProps) {
        * window is "previous" but not previous to what, and two windows of
        * unstated length are two numbers they cannot act on.
        */}
-      <div className="mb-1.5 flex items-center gap-3 text-[11px] text-muted">
+      <div className="mb-1.5 flex items-center gap-3 text-[12.5px] text-muted">
         <span className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
@@ -114,7 +114,7 @@ export function MoversView({ data, title }: MoversViewProps) {
                 <tr key={row.category} className="align-middle">
                   <th
                     scope="row"
-                    className="max-w-[8rem] truncate py-[3px] pr-2 text-right text-[11px] font-normal text-muted"
+                    className="max-w-[8rem] truncate py-[6px] pr-2 text-right text-[12.5px] font-normal text-muted"
                     title={row.category}
                   >
                     {row.alert && (
@@ -128,9 +128,9 @@ export function MoversView({ data, title }: MoversViewProps) {
                     {row.alert && <span className="sr-only"> (flagged)</span>}
                   </th>
 
-                  <td className="w-full py-[3px]">
+                  <td className="w-full py-[6px]">
                     <div className="relative h-3">
-                      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line/50" />
+                      <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-raised" />
                       {/* The segment between the two marks: its length is the change. */}
                       <div
                         className="absolute top-1/2 h-[2px] -translate-y-1/2"
@@ -143,7 +143,7 @@ export function MoversView({ data, title }: MoversViewProps) {
                       />
                       <span
                         aria-hidden="true"
-                        className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-raised"
+                        className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface"
                         style={{ left: position(row.previous), borderColor: PREVIOUS_COLOR }}
                       />
                       <span
@@ -157,10 +157,10 @@ export function MoversView({ data, title }: MoversViewProps) {
                     </div>
                   </td>
 
-                  <td className="tnum whitespace-nowrap py-[3px] pl-2 text-right text-[11px] text-strong">
+                  <td className="tnum whitespace-nowrap py-[6px] pl-2 text-right text-[12.5px] text-ink">
                     {formatAxisValue(row.current)}
                   </td>
-                  <td className="whitespace-nowrap py-[3px] pl-2 text-right">
+                  <td className="whitespace-nowrap py-[6px] pl-2 text-right">
                     <span className="sr-only">from {formatAxisValue(row.previous)}, </span>
                     {/*
                      * One badge component across every chart, so "this moved

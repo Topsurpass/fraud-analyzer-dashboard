@@ -1,21 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
+  Rectangle,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
   type TooltipProps,
 } from "recharts";
-import type { CartesianData, ChartPoint } from "@/services/charts/shape";
-import { formatAxisValue } from "@/services/format";
+import type { CartesianData, ChartPoint, FlagMark } from "@/services/charts/shape";
+import { formatAxisValue, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { ChartEmpty } from "./ChartEmpty";
 import { useAlertHatch } from "./AlertHatch";
@@ -33,14 +35,14 @@ import {
 } from "./theme";
 
 /**
- * Line and bar rendering. One component because the two differ only in the mark:
+ * Line, bar and stacked-bar rendering. One component because they differ only in the mark:
  * the axes, crosshair, tooltip, legend behaviour, alert handling and animation
  * policy are identical, and keeping them together is what stops them drifting.
  */
 
 export interface CartesianChartViewProps {
   data: CartesianData;
-  kind: "line" | "bar";
+  kind: "line" | "bar" | "stacked_bar";
   /** Query name, used for the accessible description of the plot. */
   title: string;
 }
@@ -79,19 +81,170 @@ function AlertDot({ cx, cy, payload, dataKey, stroke, showAll }: AlertDotProps) 
   if (flagged) {
     return (
       <g>
-        <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={ALERT_COLOR} strokeWidth={1.5} />
-        <circle cx={cx} cy={cy} r={1.5} fill={ALERT_COLOR} />
+        <circle cx={cx} cy={cy} r={6} fill={ALERT_COLOR} opacity={0.16} />
+        <circle cx={cx} cy={cy} r={4.5} fill="var(--surface)" stroke={ALERT_COLOR} strokeWidth={2} />
+        <circle cx={cx} cy={cy} r={1.6} fill={ALERT_COLOR} />
       </g>
     );
   }
 
-  if (showAll) return <circle cx={cx} cy={cy} r={2.5} fill={stroke ?? "currentColor"} />;
+  if (showAll)
+    return <circle cx={cx} cy={cy} r={3.5} fill="var(--surface)" stroke={stroke ?? "currentColor"} strokeWidth={2} />;
 
   return null;
 }
 
+/** Bands drawn past this are noise; the per-point markers still show. */
+export const MAX_FLAG_BANDS = 60;
+
+/** A flagged x position: the raw axis value plus what flagged it. */
+export interface FlaggedBucket {
+  x: ChartPoint[string];
+  label: string;
+  mark: FlagMark;
+}
+
+/** Every x position with a flagged point, with the rules behind it. */
+export function flaggedBuckets(data: Pick<CartesianData, "data" | "xKey">): FlaggedBucket[] {
+  const found: FlaggedBucket[] = [];
+  for (const point of data.data) {
+    const mask = point.__alert;
+    if (!mask) continue;
+    let rules: string[] = [];
+    let severity: FlagMark["severity"] = null;
+    let any = false;
+    for (const key of Object.keys(mask)) {
+      if (mask[key] !== true) continue;
+      any = true;
+      const mark = point.__flag?.[key];
+      if (mark) {
+        rules = [...new Set([...rules, ...mark.rules])];
+        if (severity === null || rank(mark.severity) > rank(severity)) severity = mark.severity;
+      }
+    }
+    if (any) found.push({ x: point[data.xKey], label: String(point[data.xKey] ?? ""), mark: { rules, severity } });
+  }
+  return found;
+}
+
+function rank(severity: FlagMark["severity"]): number {
+  return severity === "high" ? 3 : severity === "medium" ? 2 : severity === "low" ? 1 : 0;
+}
+
+/**
+ * The marker at the top of a flagged column: a filled disc with an exclamation
+ * mark. A shape and a glyph, so it reads without the colour.
+ */
+export function BandMarker({ viewBox }: { viewBox?: { x: number; y: number; width: number } }) {
+  // Recharts passes a NaN position while the axis is still being measured, and
+  // whenever the column's x value cannot be placed on it. Drawing from NaN
+  // throws an attribute warning per circle, so there is simply nothing to draw.
+  if (
+    !viewBox ||
+    !Number.isFinite(viewBox.x) ||
+    !Number.isFinite(viewBox.y) ||
+    !Number.isFinite(viewBox.width)
+  ) {
+    return null;
+  }
+  const cx = viewBox.x + viewBox.width / 2;
+  // Sized to the column, so neighbouring flagged columns never merge into one
+  // blob. Too narrow for the "!" to read, it is a plain disc: still a mark.
+  const radius = Math.max(2.5, Math.min(8, viewBox.width / 2 - 1));
+  const cy = viewBox.y + radius + 1;
+  return (
+    <g aria-hidden="true">
+      <circle cx={cx} cy={cy} r={radius} fill={ALERT_COLOR} />
+      {radius >= 6 ? (
+        <text x={cx} y={cy + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">
+          !
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+/** Axis label for a flagged column: alert colour and weight, like the band. */
+export function FlagTick({
+  x,
+  y,
+  payload,
+  flagged,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: unknown };
+  flagged: ReadonlySet<string>;
+}) {
+  if (x === undefined || y === undefined || !payload) return null;
+  const isFlagged = flagged.has(String(payload.value));
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={14}
+      textAnchor="middle"
+      fontSize={AXIS_TICK.fontSize}
+      fontFamily={AXIS_TICK.fontFamily}
+      fontWeight={isFlagged ? 700 : 400}
+      fill={isFlagged ? ALERT_COLOR : AXIS_TICK.fill}
+    >
+      {String(payload.value)}
+    </text>
+  );
+}
+
+/**
+ * Whether series `index` is the topmost segment of this point's stack: no later
+ * series has a positive value here. Only the top segment of a stack is rounded,
+ * so the stack reads as one column rather than a pile of pills. Stacks are
+ * positive-only: a zero or negative later value takes no height above this one.
+ */
+export function isTopOfStack(
+  point: ChartPoint | undefined,
+  seriesKeys: readonly string[],
+  index: number,
+): boolean {
+  if (!point) return true;
+  for (let later = index + 1; later < seriesKeys.length; later += 1) {
+    const value = point[seriesKeys[later]];
+    if (typeof value === "number" && value > 0) return false;
+  }
+  return true;
+}
+
+/** One segment of a stacked column: a hairline of surface colour between
+ *  neighbours, and a rounded top only when nothing sits above it. */
+interface StackShapeProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fill?: string;
+  payload?: ChartPoint;
+}
+
+function StackSegment({ topmost, x, y, width, height, fill }: StackShapeProps & { topmost: boolean }) {
+  return (
+    <Rectangle
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      fill={fill}
+      radius={topmost ? [6, 6, 0, 0] : 0}
+      stroke="var(--surface)"
+      strokeWidth={1}
+    />
+  );
+}
+
 export function CartesianChartView({ data, kind, title }: CartesianChartViewProps) {
+  const stacked = kind === "stacked_bar";
   const reducedMotion = useReducedMotion();
+  // Gradient ids are scoped per chart: several cards share one document.
+  const gradientScope = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const gradientId = (index: number) => `fill-${gradientScope}-${index}`;
   const [activeSeries, setActiveSeries] = useState<string | null>(null);
 
   /*
@@ -114,6 +267,11 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
     }
     return keys;
   }, [data.data]);
+
+  // Which columns carry a flagged point, and which rules flagged them. Drives
+  // the bands, the axis labels and the tooltip.
+  const buckets = useMemo(() => flaggedBuckets(data), [data]);
+  const flaggedLabels = useMemo(() => new Set(buckets.map((bucket) => bucket.label)), [buckets]);
 
   // A series key is already unique here - the pivot dedupes them - so it is
   // both the identity and the label. The two are separate in the legend's
@@ -145,15 +303,34 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
       .map((item, index) => {
         const key = String(item.dataKey ?? item.name ?? "");
         const point = item.payload as ChartPoint | undefined;
+        const mark = point?.__flag?.[key];
         return {
           name: key,
           value: item.value as number,
           color: item.color ?? seriesColor(index),
           alert: point?.__alert?.[key] === true,
+          flag: mark ? { rules: mark.rules, severity: mark.severity } : undefined,
         };
       });
 
-    return <ChartTooltip label={String(label ?? "")} entries={entries} />;
+    // A stack is read by its total as much as its parts.
+    const total = stacked ? entries.reduce((sum, entry) => sum + entry.value, 0) : null;
+    return (
+      <ChartTooltip
+        label={String(label ?? "")}
+        entries={entries}
+        footer={
+          total === null ? undefined : (
+            <span className="flex items-center justify-between gap-3 text-[12.5px] text-secondary">
+              Total
+              <span className="tnum font-semibold text-ink">
+                {formatMetric(total, { compact: false })}
+              </span>
+            </span>
+          )
+        }
+      />
+    );
   };
 
   /*
@@ -164,22 +341,29 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
    * React.Children and is seen correctly.
    */
   const axes = [
-    <CartesianGrid key="grid" stroke={GRID_STROKE} strokeDasharray="2 4" vertical={false} />,
+    <CartesianGrid key="grid" stroke={GRID_STROKE} strokeDasharray="3 5" vertical={false} />,
     <XAxis
       key="x"
       dataKey={data.xKey}
-      tick={AXIS_TICK}
+      tick={
+        flaggedLabels.size > 0 ? (
+          <FlagTick flagged={flaggedLabels} />
+        ) : (
+          AXIS_TICK
+        )
+      }
       tickLine={false}
-      axisLine={{ stroke: GRID_STROKE }}
-      minTickGap={24}
-      height={20}
+      axisLine={false}
+      tickMargin={8}
+      minTickGap={28}
+      height={28}
     />,
     <YAxis
       key="y"
       tick={AXIS_TICK}
       tickLine={false}
       axisLine={false}
-      width={44}
+      width={48}
       tickFormatter={(value: number) => formatAxisValue(value)}
     />,
     <Tooltip
@@ -193,13 +377,57 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
        */
       cursor={
         kind === "line"
-          ? { stroke: CURSOR_STROKE, strokeWidth: 1, strokeDasharray: "3 3" }
-          : { fill: "var(--surface-raised)", fillOpacity: 0.75 }
+          ? { stroke: CURSOR_STROKE, strokeWidth: 1.5 }
+          : { fill: "var(--surface-raised)", fillOpacity: 0.6, radius: 8 }
       }
       // The tooltip must not lag the crosshair; it is a readout, not a card.
       isAnimationActive={false}
     />,
   ];
+
+  // One soft vertical fade per series colour: strong at the line, gone at the
+  // axis. It is what makes the plot read as a modern area chart instead of a
+  // bare stroke, and in a bar chart it gives each column depth.
+  const gradients = (
+    <defs>
+      {data.seriesKeys.map((key, index) => (
+        <linearGradient key={key} id={gradientId(index)} x1="0" y1="0" x2="0" y2="1">
+          <stop
+            offset="0%"
+            stopColor={seriesColor(index)}
+            stopOpacity={kind === "line" ? (data.seriesKeys.length > 1 ? 0.28 : 0.38) : 1}
+          />
+          <stop
+            offset="100%"
+            stopColor={seriesColor(index)}
+            stopOpacity={kind === "line" ? 0.02 : 0.72}
+          />
+        </linearGradient>
+      ))}
+    </defs>
+  );
+
+  // A faint column behind each flagged x position, with a marker on top. Drawn
+  // first so the series sit over it. Past MAX_FLAG_BANDS the columns would
+  // merge into a wash, so only the per-point marks remain.
+  const bands =
+    buckets.length <= MAX_FLAG_BANDS
+      ? buckets
+          // A null or empty x has no place on the axis to shade.
+          .filter((bucket) => bucket.x !== null && bucket.x !== undefined && bucket.x !== "")
+          .map((bucket, index) => (
+            <ReferenceArea
+              key={`flag-${index}`}
+              x1={bucket.x as string | number}
+              x2={bucket.x as string | number}
+              fill={ALERT_COLOR}
+              fillOpacity={0.09}
+              strokeOpacity={0}
+              ifOverflow="visible"
+              label={<BandMarker />}
+            />
+          ))
+      : [];
 
   const opacityFor = (key: string) =>
     activeSeries === null || activeSeries === key ? 1 : 0.22;
@@ -209,44 +437,77 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
       <div
         className="min-h-0 flex-1"
         role="img"
-        aria-label={`${title}: ${kind} chart, ${data.data.length} points across ${data.seriesKeys.length} series`}
+        aria-label={`${title}: ${stacked ? "stacked bar" : kind} chart, ${data.data.length} points across ${data.seriesKeys.length} series`}
       >
         <ResponsiveContainer width="100%" height="100%">
           {kind === "line" ? (
-            <LineChart data={data.data} margin={CHART_MARGIN}>
+            <AreaChart data={data.data} margin={CHART_MARGIN}>
+              {gradients}
               {axes}
+              {bands}
               {data.seriesKeys.map((key, index) => (
-                <Line
+                <Area
                   key={key}
                   type="monotone"
                   dataKey={key}
                   stroke={seriesColor(index)}
-                  strokeWidth={2}
+                  strokeWidth={2.25}
                   strokeOpacity={opacityFor(key)}
+                  fill={`url(#${gradientId(index)})`}
+                  fillOpacity={opacityFor(key)}
                   // `false`, not a component, when this series has nothing to
                   // mark: recharts skips the dot layer entirely rather than
                   // calling a renderer 900 times to be told "draw nothing".
                   dot={showAllDots || alerted.has(key) ? <AlertDot showAll={showAllDots} /> : false}
-                  activeDot={{ r: 3.5, strokeWidth: 0 }}
+                  activeDot={{
+                    r: 5,
+                    fill: "var(--surface)",
+                    stroke: seriesColor(index),
+                    strokeWidth: 2.5,
+                  }}
                   isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
                   connectNulls
                 />
               ))}
-            </LineChart>
+            </AreaChart>
           ) : (
-            <BarChart data={data.data} margin={CHART_MARGIN} barCategoryGap="18%">
+            <BarChart
+              data={data.data}
+              margin={CHART_MARGIN}
+              barCategoryGap="22%"
+              barGap={stacked ? 0 : 3}
+            >
               {hatch.defs}
+              {gradients}
               {axes}
+              {bands}
               {data.seriesKeys.map((key, index) => (
                 <Bar
                   key={key}
                   dataKey={key}
-                  fill={seriesColor(index)}
+                  // A stack is flat colour: the vertical fade of a lone bar
+                  // would make every segment fade into the one above it.
+                  fill={stacked ? seriesColor(index) : `url(#${gradientId(index)})`}
                   fillOpacity={opacityFor(key)}
                   isAnimationActive={animate}
                   animationDuration={DATA_TWEEN_MS}
-                  radius={[2, 2, 0, 0]}
+                  maxBarSize={44}
+                  stackId={stacked ? "stack" : undefined}
+                  radius={stacked ? 0 : [6, 6, 0, 0]}
+                  shape={
+                    stacked
+                      ? (raw: unknown) => {
+                          const props = raw as StackShapeProps;
+                          return (
+                            <StackSegment
+                              {...props}
+                              topmost={isTopOfStack(props.payload, data.seriesKeys, index)}
+                            />
+                          );
+                        }
+                      : undefined
+                  }
                 >
                   {/*
                    * A flagged bar keeps its series colour and takes the hatch
@@ -264,7 +525,13 @@ export function CartesianChartView({ data, kind, title }: CartesianChartViewProp
                         return (
                           <Cell
                             key={pointIndex}
-                            fill={hatch.fill(seriesColor(index), flagged)}
+                            fill={
+                              flagged
+                                ? hatch.fill(seriesColor(index), true)
+                                : stacked
+                                  ? seriesColor(index)
+                                  : `url(#${gradientId(index)})`
+                            }
                             stroke={flagged ? ALERT_COLOR : undefined}
                             strokeWidth={flagged ? 1 : 0}
                           />

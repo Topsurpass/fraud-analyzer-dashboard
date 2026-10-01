@@ -89,7 +89,10 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     cache: "no-store",
   });
 
-  const body = await upstream.text();
+  // 204, 205 and 304 must not carry a body, and the Response constructor throws
+  // on one (even an empty string). The engine answers 204 to every DELETE.
+  const bodiless = upstream.status === 204 || upstream.status === 205 || upstream.status === 304;
+  const body = bodiless ? null : await upstream.text();
   const response = new NextResponse(body, {
     status: upstream.status,
     headers: {

@@ -1,14 +1,53 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { FlagRule } from "@/contracts/api";
+import type { FlagRule, ItemListSummary } from "@/contracts/api";
+import { ApiError } from "@/services/api-client";
 import {
   FlagRuleEditor,
   emptyRule,
+  takesList,
   takesNoValue,
   takesTwoValues,
   validateRules,
 } from "./FlagRuleEditor";
+
+function summary(over: Partial<ItemListSummary> = {}): ItemListSummary {
+  return {
+    id: "l1",
+    name: "Blocked terminals",
+    description: null,
+    item_count: 12,
+    rule_count: 0,
+    created_by: "u1",
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+    ...over,
+  };
+}
+
+// The picker reads the shell's shared list load; the shell is not under test.
+const listsState = vi.hoisted(() => ({
+  current: { lists: [], loading: false, initial: false, error: null, reload: () => {} } as {
+    lists: ItemListSummary[];
+    loading: boolean;
+    initial: boolean;
+    error: ApiError | null;
+    reload: () => void;
+  },
+}));
+
+vi.mock("@/lib/ListsContext", () => ({ useLists: () => listsState.current }));
+
+beforeEach(() => {
+  listsState.current = {
+    lists: [summary(), summary({ id: "l2", name: "Watchlist", item_count: 400 })],
+    loading: false,
+    initial: false,
+    error: null,
+    reload: () => {},
+  };
+});
 
 function rule(overrides: Partial<FlagRule> = {}): FlagRule {
   return {
@@ -325,5 +364,315 @@ describe("FlagRuleEditor", () => {
     expect([...problems.keys()].filter((key) => key.startsWith("rule:"))).toEqual([]);
     expect(problems.size).toBe(2);
     expect(problems.get("cond:0:0")).toMatch(/needs a value/i);
+  });
+});
+
+describe("list operators", () => {
+  const listRule = (over: Partial<FlagRule["conditions"][number]> = {}) =>
+    rule({
+      conditions: [{ column_name: "terminal", operator: "in_list", list_id: "l1", ...over }],
+    });
+
+  it("knows which operators take a list", () => {
+    expect(takesList("in_list")).toBe(true);
+    expect(takesList("not_in_list")).toBe(true);
+    expect(takesList("in")).toBe(false);
+    expect(takesList("is_null")).toBe(false);
+  });
+
+  it("requires a list to be picked", () => {
+    const problems = validateRules([listRule({ list_id: null })]);
+    expect(problems.get("cond:0:0")).toBe("Pick a list.");
+    expect(validateRules([listRule({ list_id: "" })]).get("cond:0:0")).toBe("Pick a list.");
+  });
+
+  it("does not ask for a typed value once a list is picked", () => {
+    expect(validateRules([listRule()]).size).toBe(0);
+    expect(validateRules([listRule({ operator: "not_in_list" })]).size).toBe(0);
+  });
+
+  it("still asks for a column first", () => {
+    const problems = validateRules([listRule({ column_name: "" })]);
+    expect(problems.get("cond:0:0")).toMatch(/pick a column/i);
+  });
+
+  it("shows a list picker in place of the value input", () => {
+    render(<FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />);
+    const picker = screen.getByLabelText("List") as HTMLSelectElement;
+    expect(picker.value).toBe("l1");
+    expect(screen.queryByLabelText("Value")).toBeNull();
+    expect(screen.getByRole("option", { name: "Watchlist (400)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /manage lists/i })).toHaveAttribute("href", "/lists");
+  });
+
+  it("shows no picker for a plain comparison", () => {
+    render(<FlagRuleEditor rules={[rule()]} onChange={() => {}} columns={["amount"]} />);
+    expect(screen.queryByLabelText("List")).toBeNull();
+    expect(screen.getByLabelText("Value")).toBeInTheDocument();
+  });
+
+  it("sets list_id when a list is chosen, and clears it when unchosen", async () => {
+    const onChange = vi.fn();
+    render(
+      <FlagRuleEditor
+        rules={[listRule({ list_id: null })]}
+        onChange={onChange}
+        columns={["terminal"]}
+      />,
+    );
+    await userEvent.selectOptions(screen.getByLabelText("List"), "l2");
+    expect((onChange.mock.calls[0][0] as FlagRule[])[0].conditions[0].list_id).toBe("l2");
+  });
+
+  it("clears typed values when switching to a list operator", async () => {
+    const onChange = vi.fn();
+    render(
+      <FlagRuleEditor
+        rules={[
+          rule({
+            conditions: [
+              { column_name: "amount", operator: "between", value: "1", value2: "9" },
+            ],
+          }),
+        ]}
+        onChange={onChange}
+        columns={["amount"]}
+      />,
+    );
+    await userEvent.selectOptions(screen.getByLabelText("Comparison"), "in_list");
+    const condition = (onChange.mock.calls[0][0] as FlagRule[])[0].conditions[0];
+    expect(condition.operator).toBe("in_list");
+    expect(condition.value).toBe("");
+    expect(condition.value2).toBe("");
+  });
+
+  it("clears the list when switching to an operator that ignores it", async () => {
+    const onChange = vi.fn();
+    render(<FlagRuleEditor rules={[listRule()]} onChange={onChange} columns={["terminal"]} />);
+    await userEvent.selectOptions(screen.getByLabelText("Comparison"), "eq");
+    const condition = (onChange.mock.calls[0][0] as FlagRule[])[0].conditions[0];
+    expect(condition.operator).toBe("eq");
+    expect(condition.list_id).toBeNull();
+  });
+
+  it("keeps the list when flipping between in-list and not-in-list", async () => {
+    const onChange = vi.fn();
+    render(<FlagRuleEditor rules={[listRule()]} onChange={onChange} columns={["terminal"]} />);
+    await userEvent.selectOptions(screen.getByLabelText("Comparison"), "not_in_list");
+    const condition = (onChange.mock.calls[0][0] as FlagRule[])[0].conditions[0];
+    expect(condition.operator).toBe("not_in_list");
+    expect(condition.list_id).toBe("l1");
+  });
+
+  it("keeps a list that is not in the loaded set, marked as removed", () => {
+    // Rewriting it to "no list" would silently drop the condition's target.
+    render(
+      <FlagRuleEditor
+        rules={[listRule({ list_id: "gone" })]}
+        onChange={() => {}}
+        columns={["terminal"]}
+      />,
+    );
+    const picker = screen.getByLabelText("List") as HTMLSelectElement;
+    expect(picker.value).toBe("gone");
+    expect(screen.getByRole("option", { name: /unknown list \(removed\)/i })).toBeInTheDocument();
+  });
+
+  it("does not call a list removed while the lists are still loading", () => {
+    listsState.current = { ...listsState.current, lists: [], initial: true };
+    render(
+      <FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect(screen.queryByRole("option", { name: /removed/i })).toBeNull();
+    expect(screen.getByRole("option", { name: "Loading…" })).toBeInTheDocument();
+  });
+
+  it("disables the picker while a save is in flight", () => {
+    render(
+      <FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} disabled />,
+    );
+    expect(screen.getByLabelText("List")).toBeDisabled();
+  });
+
+  it("opens Manage lists in a new tab so unsaved rules are not lost", () => {
+    render(<FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />);
+    const link = screen.getByRole("link", { name: /manage lists/i });
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(link).toHaveTextContent(/new tab/i);
+  });
+
+  it("offers Refresh only after Manage lists was followed", async () => {
+    const reload = vi.fn();
+    listsState.current = { ...listsState.current, reload };
+    render(<FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />);
+    expect(screen.queryByRole("button", { name: /refresh lists/i })).toBeNull();
+
+    // jsdom does not navigate a _blank link; the click is what matters.
+    await userEvent.click(screen.getByRole("link", { name: /manage lists/i }));
+    await userEvent.click(screen.getByRole("button", { name: /refresh lists/i }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Manage lists once per rule, however many list conditions it has", () => {
+    render(
+      <FlagRuleEditor
+        rules={[
+          rule({
+            name: "A",
+            conditions: [
+              { column_name: "terminal", operator: "in_list", list_id: "l1" },
+              { column_name: "account", operator: "not_in_list", list_id: "l2" },
+              { column_name: "amount", operator: "gt", value: "1" },
+            ],
+          }),
+          rule({
+            name: "B",
+            conditions: [{ column_name: "terminal", operator: "in_list", list_id: "l1" }],
+          }),
+          rule({ name: "C" }),
+        ]}
+        onChange={() => {}}
+        columns={["terminal", "account", "amount"]}
+      />,
+    );
+    expect(screen.getAllByLabelText("List")).toHaveLength(3);
+    expect(screen.getAllByRole("link", { name: /manage lists/i })).toHaveLength(2);
+  });
+
+  it("shows one load error per rule, not per condition, and no Refresh beside it", () => {
+    listsState.current = {
+      lists: [],
+      loading: false,
+      initial: false,
+      error: new ApiError({ kind: "network", message: "x", url: "" }),
+      reload: () => {},
+    };
+    render(
+      <FlagRuleEditor
+        rules={[
+          rule({
+            conditions: [
+              { column_name: "terminal", operator: "in_list", list_id: "l1" },
+              { column_name: "account", operator: "in_list", list_id: "l2" },
+            ],
+          }),
+        ]}
+        onChange={() => {}}
+        columns={["terminal", "account"]}
+      />,
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /refresh lists/i })).toBeNull();
+  });
+
+  it("says lists failed to load, with a retry, and does not call a list removed", async () => {
+    const reload = vi.fn();
+    listsState.current = {
+      lists: [],
+      loading: false,
+      initial: false,
+      error: new ApiError({ kind: "network", message: "x", url: "" }),
+      reload,
+    };
+    render(
+      <FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not load lists/i);
+    expect(screen.getByRole("option", { name: "Not loaded" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /removed/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("ties 'Pick a list.' to the picker with aria-describedby", () => {
+    render(
+      <FlagRuleEditor
+        rules={[listRule({ list_id: null })]}
+        onChange={() => {}}
+        columns={["terminal"]}
+      />,
+    );
+    const picker = screen.getByLabelText("List");
+    const id = picker.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id as string)).toHaveTextContent("Pick a list.");
+  });
+
+  it("ties 'Pick a column.' to the column control the same way", () => {
+    render(
+      <FlagRuleEditor
+        rules={[rule({ conditions: [{ column_name: "", operator: "gt", value: "1" }] })]}
+        onChange={() => {}}
+        columns={["amount"]}
+      />,
+    );
+    const id = screen.getByLabelText("Column").getAttribute("aria-describedby");
+    expect(document.getElementById(id as string)).toHaveTextContent("Pick a column.");
+  });
+
+  it("sets no description when the condition is fine", () => {
+    render(<FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />);
+    expect(screen.getByLabelText("List")).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("asks the engine once before calling an unknown list removed", () => {
+    const reload = vi.fn();
+    listsState.current = { ...listsState.current, reload };
+    const { rerender } = render(
+      <FlagRuleEditor rules={[listRule({ list_id: "new" })]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // Still missing after the reload: now it is fair to say so, and no more asking.
+    rerender(
+      <FlagRuleEditor rules={[listRule({ list_id: "new" })]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    rerender(
+      <FlagRuleEditor rules={[listRule({ list_id: "new" }), rule()]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("option", { name: /unknown list \(removed\)/i })).toBeInTheDocument();
+  });
+
+  it("shows Loading while that reload is in flight, never 'removed'", () => {
+    listsState.current = { ...listsState.current, loading: true };
+    render(
+      <FlagRuleEditor rules={[listRule({ list_id: "new" })]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect(screen.getByRole("option", { name: "Loading…" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /removed/i })).toBeNull();
+  });
+
+  it("does not reload when every referenced list is already loaded", () => {
+    const reload = vi.fn();
+    listsState.current = { ...listsState.current, reload };
+    render(<FlagRuleEditor rules={[listRule()]} onChange={() => {}} columns={["terminal"]} />);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("does not reload for a rule with no list condition, or while lists are failing", () => {
+    const reload = vi.fn();
+    listsState.current = { ...listsState.current, reload };
+    render(<FlagRuleEditor rules={[rule()]} onChange={() => {}} columns={["amount"]} />);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("uses the reloaded set to find a list made in another tab", () => {
+    const reload = vi.fn();
+    listsState.current = { ...listsState.current, reload };
+    const { rerender } = render(
+      <FlagRuleEditor rules={[listRule({ list_id: "l9" })]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    listsState.current = {
+      ...listsState.current,
+      lists: [...listsState.current.lists, summary({ id: "l9", name: "Fresh", item_count: 4 })],
+    };
+    rerender(
+      <FlagRuleEditor rules={[listRule({ list_id: "l9" })]} onChange={() => {}} columns={["terminal"]} />,
+    );
+    expect((screen.getByLabelText("List") as HTMLSelectElement).value).toBe("l9");
+    expect(screen.queryByRole("option", { name: /removed/i })).toBeNull();
+    expect(screen.getByRole("option", { name: "Fresh (4)" })).toBeInTheDocument();
   });
 });

@@ -53,7 +53,7 @@ function AuditLogScreen() {
 				header: "When",
 				width: "150px",
 				cell: (entry) => (
-					<span className="tnum text-[11.5px] text-secondary" title={formatDateTime(entry.created_at)}>
+					<span className="tnum text-[12.5px] text-secondary" title={formatDateTime(entry.created_at)}>
 						{formatRelative(entry.created_at, now)}
 					</span>
 				),
@@ -97,7 +97,7 @@ function AuditLogScreen() {
 			}
 		>
 			<div className="mx-auto flex flex-col gap-4">
-				<p className="text-[12.5px] leading-relaxed text-muted">
+				<p className="text-[13.5px] leading-relaxed text-muted">
 					Every administrative change, newest first. Append-only: entries are never edited
 					or removed, and credentials never appear in one.
 				</p>

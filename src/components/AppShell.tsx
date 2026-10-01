@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { ListsProvider } from "@/lib/ListsContext";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import { DashboardsProvider } from "@/services/dashboards";
 import { FlaggedProvider } from "@/services/flagged/FlaggedContext";
@@ -57,9 +58,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ConnectionsProvider>
       <DashboardsProvider>
         <FlaggedProvider>
-      <div className="flex h-dvh min-h-0 w-full">
+        <ListsProvider>
+      {/* The shell is exactly the viewport and clips what it cannot fit: the
+          page scrolls inside `main`, never as a document. `overflow-hidden`
+          makes that structural rather than a habit of whatever is inside, and
+          `h-full overflow-hidden` on the rail keeps the sidebar a fixed column
+          that cannot be carried along with the content.
+
+          `relative` is what makes the clip hold. `overflow-hidden` does not clip
+          an `absolute` descendant whose containing block is outside it, and
+          nothing here was positioned, so it was `<body>`. A `sr-only` table
+          caption (`position: absolute`) far down a long page therefore stretched
+          the document to its own height, the wheel scrolled the document once
+          `main` hit its end, and the sidebar went with it. */}
+      <div className="relative flex h-dvh min-h-0 w-full overflow-hidden">
         <aside
-          className="hidden shrink-0 border-r border-line bg-sunken transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
+          className="hidden h-full shrink-0 overflow-hidden border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
           style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}
         >
           <Rail
@@ -76,16 +90,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => setNavOpen(false)}
               className="absolute inset-0 bg-bg/70 backdrop-blur-sm"
             />
-            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line bg-sunken shadow-lg">
+            <div className="absolute inset-y-0 left-0 w-[var(--rail-width)] max-w-[86vw] border-r border-line bg-[var(--sidebar-bg)] shadow-lg">
               <Rail onNavigate={() => setNavOpen(false)} />
             </div>
           </div>
         ) : null}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          style={{ backgroundImage: "var(--page-glow)", backgroundRepeat: "no-repeat" }}
+        >
           <NavContext.Provider value={openNav}>{children}</NavContext.Provider>
         </div>
       </div>
+        </ListsProvider>
         </FlaggedProvider>
       </DashboardsProvider>
     </ConnectionsProvider>

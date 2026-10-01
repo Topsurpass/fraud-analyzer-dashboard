@@ -118,6 +118,30 @@ describe("Rail", () => {
     );
   });
 
+  it("links to the lists page for every role", () => {
+    const { unmount } = render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Lists" })).toHaveAttribute("href", "/lists");
+    unmount();
+
+    signedInAs.role = "analyst";
+    render(<Rail collapsed={false} onToggleCollapse={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Lists" })).toHaveAttribute("href", "/lists");
+  });
+
+  it("keeps the lists link when collapsed, named by its title", () => {
+    render(<Rail collapsed onToggleCollapse={vi.fn()} />);
+    const link = screen.getByRole("link", { name: "Lists" });
+    expect(link).toHaveAttribute("href", "/lists");
+    expect(link).toHaveAttribute("title", "Lists");
+  });
+
+  it("closes the drawer when the lists link is followed", async () => {
+    const onNavigate = vi.fn();
+    render(<Rail onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("link", { name: "Lists" }));
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
   it("reports its own state on the toggle", async () => {
     const onToggleCollapse = vi.fn();
     const user = userEvent.setup();

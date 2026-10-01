@@ -69,6 +69,12 @@ const EXPECTATIONS = {
   // A row header per category. The coloured swatches are divs with no class of
   // their own, so the row headers are what proves the grid was built.
   heatmap: { selector: "th[scope=row]", min: 1 },
+  // Stacked segments are the same bar rectangles, one per series per column.
+  stacked_bar: { selector: "path.recharts-rectangle", min: 1 },
+  // Two measures means two bars per column. min: 2 is the point: a single set
+  // of bars is the failure this type has that the others do not (the right-axis
+  // column not resolving), and it passes a "did anything draw" check.
+  biaxial_bar: { selector: "path.recharts-rectangle", min: 2 },
 };
 
 async function main() {

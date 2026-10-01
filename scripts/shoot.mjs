@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Dev-only: screenshot a list of routes so the UI can actually be looked at.
- * node scripts/shoot.mjs <outDir> [--width=1440] [--height=900] [--wait=3500]
+ * node scripts/shoot.mjs <outDir> [--width=1440] [--height=900] [--wait=3500] [--chrome]
+ *   [--theme=dark|light]
  *
  * Every route but /login sits behind a session, so pass --password (or set
  * FAE_SMOKE_PASSWORD) to shoot anything else. Without one it shoots signed out,
@@ -29,11 +30,13 @@ const password = args.get("password") === undefined ? undefined : String(args.ge
 
 mkdirSync(outDir, { recursive: true });
 
-const browser = await chromium.launch();
+// --chrome uses the installed Google Chrome, for machines without the
+// playwright-managed browser download.
+const browser = await chromium.launch(args.has("chrome") ? { channel: "chrome" } : {});
 const context = await browser.newContext({
   viewport: { width, height },
   deviceScaleFactor: 2,
-  colorScheme: "dark",
+  colorScheme: String(args.get("theme") ?? "dark"),
   reducedMotion: args.has("reduced") ? "reduce" : "no-preference",
 });
 // Signed out unless a password is given: that is what makes the login screen
@@ -41,6 +44,8 @@ const context = await browser.newContext({
 if (password || process.env.FAE_SMOKE_PASSWORD) {
   const { token } = await signIn(engine, { email, password });
   await seedSession(context, token);
+  // The app's session is an httpOnly cookie set by the BFF login route.
+  await context.addCookies([{ name: "switchboard_session", value: token, url: base }]);
 }
 
 const page = await context.newPage();

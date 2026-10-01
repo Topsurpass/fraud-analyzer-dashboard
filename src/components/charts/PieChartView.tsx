@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type TooltipProps } from "recharts";
-import type { PieData, PieSlice } from "@/services/charts/shape";
+import { mergeFlagMark, type FlagMark, type PieData, type PieSlice } from "@/services/charts/shape";
 import { formatInteger, formatMetric } from "@/services/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useAlertHatch } from "./AlertHatch";
@@ -42,6 +42,12 @@ function foldSlices(slices: PieSlice[]): FoldedSlice[] {
     folded: 1,
   }));
   const tail = sorted.slice(MAX_SERIES - 1);
+  // The folded wedge stands for every category in the tail, so it is flagged by
+  // every rule that flagged any of them.
+  let foldedMark: FlagMark | undefined;
+  for (const slice of tail) {
+    if (slice.alert) foldedMark = mergeFlagMark(foldedMark, slice.rules, slice.severity);
+  }
 
   return [
     ...head,
@@ -49,6 +55,8 @@ function foldSlices(slices: PieSlice[]): FoldedSlice[] {
       name: OTHER_LABEL,
       value: tail.reduce((sum, slice) => sum + slice.value, 0),
       alert: tail.some((slice) => slice.alert),
+      rules: foldedMark?.rules ?? [],
+      severity: foldedMark?.severity ?? null,
       color: OTHER_COLOR,
       folded: tail.length,
     },
@@ -83,10 +91,16 @@ export function PieChartView({ data, title }: PieChartViewProps) {
       <ChartTooltip
         label={slice.name}
         entries={[
-          { name: "count", value: slice.value, color: slice.color, alert: slice.alert },
+          {
+            name: "count",
+            value: slice.value,
+            color: slice.color,
+            alert: slice.alert,
+            flag: slice.alert ? { rules: slice.rules, severity: slice.severity } : undefined,
+          },
         ]}
         footer={
-          <span className="tnum text-[11px] text-muted">
+          <span className="tnum text-[13px] text-muted">
             {share.toFixed(1)}% of {formatInteger(total)}
             {slice.folded > 1 ? ` · ${slice.folded} categories` : ""}
           </span>
@@ -100,7 +114,7 @@ export function PieChartView({ data, title }: PieChartViewProps) {
   return (
     <div className="flex h-full flex-col">
       <div
-        className="relative min-h-0 flex-1"
+        className="relative min-h-0 flex-1 px-3 pt-1"
         role="img"
         aria-label={`${title}: composition across ${data.slices.length} categories, total ${formatInteger(total)}`}
       >
@@ -122,9 +136,10 @@ export function PieChartView({ data, title }: PieChartViewProps) {
               data={slices}
               dataKey="value"
               nameKey="name"
-              innerRadius="58%"
-              outerRadius="86%"
-              paddingAngle={1.5}
+              innerRadius="68%"
+              outerRadius="92%"
+              paddingAngle={3}
+              cornerRadius={6}
               stroke="var(--surface)"
               strokeWidth={2}
               isAnimationActive={!reducedMotion}
@@ -142,8 +157,8 @@ export function PieChartView({ data, title }: PieChartViewProps) {
                   // React would collapse them into one cell.
                   key={index}
                   fill={hatch.fill(slice.color, slice.alert)}
-                  stroke={slice.alert ? ALERT_COLOR : "var(--surface)"}
-                  strokeWidth={slice.alert ? 1.5 : 2}
+                  stroke={slice.alert ? ALERT_COLOR : "none"}
+                  strokeWidth={slice.alert ? 1.5 : 0}
                   fillOpacity={active === null || active === String(index) ? 1 : 0.25}
                 />
               ))}
@@ -153,8 +168,10 @@ export function PieChartView({ data, title }: PieChartViewProps) {
 
         {/* The total sits in the hole, where the eye lands first. */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="tnum text-2xl leading-none">{formatMetric(total)}</span>
-          <span className="mt-1 text-[10px] tracking-wide text-muted uppercase">total</span>
+          <span className="tnum text-[26px] leading-none font-semibold tracking-tight">
+            {formatMetric(total)}
+          </span>
+          <span className="mt-1.5 text-[13px] text-muted">Total</span>
         </div>
       </div>
 
@@ -167,6 +184,9 @@ export function PieChartView({ data, title }: PieChartViewProps) {
           label: slice.name,
           color: slice.color,
           alert: slice.alert,
+          // The share, because a legend that only names a wedge leaves a
+          // sliver as unreadable as it is small.
+          detail: total > 0 ? `${((slice.value / total) * 100).toFixed(slice.value / total < 0.1 ? 1 : 0)}%` : undefined,
         }))}
         active={active}
         onActiveChange={setActive}

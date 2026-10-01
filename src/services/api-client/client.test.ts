@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import {
   createConnection,
+  createList,
+  deleteList,
+  getList,
+  listLists,
   listLogs,
   listQueries,
   pollQuery,
   request,
   resolveBaseUrl,
+  updateList,
 } from "./client";
 
 const BASE = "http://engine.test";
@@ -327,5 +332,58 @@ describe("endpoint helpers", () => {
     await createConnection({ name: "Payments DB", db_type: "sqlite" }, { baseUrl: BASE });
     expect(fetchMock.mock.calls[0][0]).toBe("http://engine.test/connections");
     expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+  });
+});
+
+describe("list helpers", () => {
+  const body = { name: "Blocked terminals", description: null, items: ["T-1", "T-2"] };
+
+  it("lists and reads lists at the documented paths", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+    await listLists({ baseUrl: BASE });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://engine.test/lists");
+    expect(fetchMock.mock.calls[0][1].method).toBe("GET");
+
+    fetchMock.mockResolvedValue(jsonResponse({ id: "l 1", items: [] }));
+    await getList("l 1", { baseUrl: BASE });
+    expect(fetchMock.mock.calls[1][0]).toBe("http://engine.test/lists/l%201");
+  });
+
+  it("creates with POST and sends the whole body", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ id: "l1", received: 2, kept: 2, duplicates_dropped: 0 }, 201),
+    );
+    const saved = await createList(body, { baseUrl: BASE });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://engine.test/lists");
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(body);
+    expect(saved.duplicates_dropped).toBe(0);
+  });
+
+  it("replaces with PUT on the list's own path", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: "l1" }));
+    await updateList("l1", body, { baseUrl: BASE });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://engine.test/lists/l1");
+    expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
+  });
+
+  it("deletes with DELETE and accepts the empty 204", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(deleteList("l1", { baseUrl: BASE })).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
+  });
+
+  it("surfaces LIST_IN_USE with the rules that block the delete", async () => {
+    const rules = [{ rule_name: "Blocked", query_id: "q1", query_name: "Transfers" }];
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { error_code: "LIST_IN_USE", message: "This list is used by 1 rule.", detail: { rules } },
+        409,
+      ),
+    );
+    const error = await failure(deleteList("l1", { baseUrl: BASE }));
+    expect(error.status).toBe(409);
+    expect(error.errorCode).toBe("LIST_IN_USE");
+    expect(error.detail).toEqual({ rules });
   });
 });

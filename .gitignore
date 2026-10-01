@@ -42,3 +42,5 @@ next-env.d.ts
 
 # local dev harness data (dev-seed.mjs)
 .dev/
+/.next-preview/
+/.next-build/

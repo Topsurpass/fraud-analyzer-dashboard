@@ -29,8 +29,8 @@ export function ChartEmpty({ label = "No rows in range" }: { label?: string }) {
         />
       </svg>
       <div>
-        <p className="text-[12px] text-muted">{label}</p>
-        <p className="mt-0.5 text-[10px] text-muted/70">The query ran and matched nothing.</p>
+        <p className="text-[13px] text-muted">{label}</p>
+        <p className="mt-0.5 text-[11.5px] text-muted/70">The query ran and matched nothing.</p>
       </div>
     </div>
   );

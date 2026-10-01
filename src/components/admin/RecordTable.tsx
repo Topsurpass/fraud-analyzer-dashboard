@@ -17,7 +17,7 @@ import { useVirtualRows } from "@/lib/useVirtualRows";
  * a single row growing to two lines puts every offset below it out by 30px and
  * the list starts drifting as you scroll.
  */
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 56;
 const VIRTUALISE_ABOVE = 60;
 
 export interface RecordColumn<Row> {
@@ -67,13 +67,13 @@ export function RecordTable<Row>({
 			    body would sit on a spacer div and scroll away with it. */}
 			<div
 				role="presentation"
-				className="grid shrink-0 gap-3 border-b border-line bg-sunken px-3.5 py-2"
+				className="grid shrink-0 gap-3 border-b border-line bg-sunken px-5 py-3"
 				style={{ gridTemplateColumns: template }}
 			>
 				{columns.map((column) => (
 					<span
 						key={column.key}
-						className={`t-eyebrow truncate ${column.numeric ? "text-right" : ""} ${
+						className={`truncate text-[12px] font-semibold text-muted ${column.numeric ? "text-right" : ""} ${
 							column.secondary ? "hidden md:block" : ""
 						}`}
 					>
@@ -97,7 +97,7 @@ export function RecordTable<Row>({
 						key={rowKey(row)}
 						role="row"
 						aria-rowindex={first + offset + 1}
-						className={`grid items-center gap-3 border-b border-line/60 px-3.5 text-[12.5px] transition-colors hover:bg-raised ${
+						className={`grid items-center gap-3 border-b border-line/70 px-5 text-[13.5px] transition-colors hover:bg-raised/70 ${
 							rowClassName?.(row) ?? ""
 						}`}
 						style={{ gridTemplateColumns: template, height: ROW_HEIGHT }}
@@ -107,7 +107,7 @@ export function RecordTable<Row>({
 								key={column.key}
 								role="cell"
 								className={`min-w-0 truncate ${
-									column.numeric ? "tnum text-right text-[11.5px] text-muted" : ""
+									column.numeric ? "tnum text-right text-[12.5px] text-muted" : ""
 								} ${column.secondary ? "hidden md:block" : ""}`}
 							>
 								{column.cell(row)}
@@ -143,7 +143,7 @@ export function ResultCount({
 }) {
 	const word = total === 1 ? noun : plural;
 	return (
-		<p className="tnum text-[11px] text-muted" aria-live="polite">
+		<p className="tnum text-[12.5px] text-muted" aria-live="polite">
 			{shown === total ? `${total} ${word}` : `${shown} of ${total} ${word} match this filter`}
 		</p>
 	);

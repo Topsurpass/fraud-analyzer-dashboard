@@ -18,19 +18,19 @@ const TONE: Record<ButtonTone, string> = {
   // Secondary: a raised surface rather than an outline, so a row of buttons
   // reads as a group of objects instead of a row of boxes.
   default:
-    "border border-line bg-raised text-secondary shadow-sm hover:border-line-strong hover:text-ink",
+    "border border-line bg-surface text-ink shadow-sm hover:border-line-strong hover:bg-raised",
   primary:
-    "border border-transparent bg-accent text-accent-contrast shadow-sm hover:bg-accent-hover",
+    "border border-transparent bg-accent text-accent-contrast shadow-[0_1px_2px_rgb(79_70_229/0.4),inset_0_1px_0_rgb(255_255_255/0.18)] hover:bg-accent-hover",
   // Never --signal-alert, which is reserved for data. A destructive control is
   // chrome, however serious it is.
-  danger: "border border-change/50 bg-change/10 text-change hover:bg-change/20",
+  danger: "border border-alert/30 bg-alert/8 text-alert hover:bg-alert/15",
   // No chrome until hovered: for controls that sit inside dense rows where a
   // border per action would out-shout the data.
   ghost: "border border-transparent text-muted hover:bg-raised hover:text-ink",
 };
 
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[12px] font-medium transition-all duration-[var(--tween-fast)] disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-sm)] px-3.5 py-2 text-[13px] font-medium whitespace-nowrap transition-all duration-[var(--tween-fast)] disabled:cursor-not-allowed disabled:opacity-40";
 
 export function Button({
   tone = "default",
@@ -65,28 +65,31 @@ export function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="block text-[11.5px] font-medium text-secondary">
+      <label htmlFor={htmlFor} className="block text-[12.5px] font-medium text-ink">
         {label}
       </label>
       {children}
-      {error ? (
-        <p className="text-[11.5px] text-change">{error}</p>
-      ) : hint ? (
-        <p className="text-[11.5px] leading-relaxed text-muted">{hint}</p>
-      ) : null}
+      {error ? <p className="text-[11.5px] text-change">{error}</p> : null}
+      {/* Kept beside the error: the hint is the rule the error is about, and
+          removing it at the moment of failure takes the answer away. */}
+      {hint ? <p className="text-[11.5px] leading-relaxed text-muted">{hint}</p> : null}
     </div>
   );
 }
 
 const CONTROL =
-  "w-full rounded-[var(--radius-sm)] border border-line bg-sunken px-2.5 py-1.5 text-[12.5px] text-ink transition-colors duration-[var(--tween-fast)] placeholder:text-muted/60 hover:border-line-strong focus:border-accent focus:outline-none";
+  "w-full rounded-[var(--radius-sm)] border border-line bg-surface px-3 py-2 text-[13.5px] text-ink shadow-sm transition-[border-color,box-shadow] duration-[var(--tween-fast)] placeholder:text-muted/70 hover:border-line-strong focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-dim)] focus:outline-none";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input {...props} className={`${CONTROL} ${className ?? ""}`} />;
 }
 
+/** Native `<select>` (so the OS picker and keyboard behaviour are kept) with
+ *  the platform chevron swapped for our own, so it matches the inputs. */
+const CHEVRON = "select-chevron appearance-none pr-9";
+
 export function Select({ className, ...props }: ComponentProps<"select">) {
-  return <select {...props} className={`${CONTROL} ${className ?? ""}`} />;
+  return <select {...props} className={`${CONTROL} ${CHEVRON} ${className ?? ""}`} />;
 }
 
 export function Textarea({ className, ref, ...props }: ComponentProps<"textarea">) {
@@ -107,12 +110,12 @@ export function Panel({
 }) {
   return (
     <section
-      className={`overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-sm ${className ?? ""}`}
+      className={`overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-sm ${className ?? ""}`}
     >
       {title ? (
-        <header className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
+        <header className="flex flex-wrap items-center gap-x-2 gap-y-3 border-b border-line px-5 py-3.5">
           <h2 className="t-section">{title}</h2>
-          {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div> : null}
         </header>
       ) : null}
       {children}
@@ -130,9 +133,9 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-[var(--radius)] border border-dashed border-line bg-surface/40 px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-line-strong bg-surface/60 px-6 py-16 text-center">
       <p className="t-section">{title}</p>
-      <p className="mt-1.5 max-w-sm text-[12.5px] leading-relaxed text-muted">{body}</p>
+      <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted">{body}</p>
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
@@ -152,9 +155,9 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <div className="rounded-[var(--radius)] border border-alert/30 bg-surface px-4 py-6 shadow-sm">
+    <div className="rounded-[var(--radius-lg)] border border-alert/30 bg-surface px-5 py-6 shadow-sm">
       <p className="t-section text-ink">{title}</p>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{message}</p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{message}</p>
       {onRetry ? (
         <Button className="mt-3" onClick={onRetry}>
           Retry

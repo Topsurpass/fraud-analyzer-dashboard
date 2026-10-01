@@ -134,12 +134,12 @@ export default function ChangePasswordPage() {
 					type="submit"
 					tone="primary"
 					disabled={busy || Boolean(lengthProblem) || mismatch || reusingCurrent}
-					className="w-full py-2 text-[12.5px]"
+					className="w-full py-2 text-[13.5px]"
 				>
 					{busy ? "Saving…" : "Save new password"}
 				</Button>
 
-				<p className="text-[11.5px] leading-relaxed text-muted">
+				<p className="text-[12.5px] leading-relaxed text-muted">
 					Every other session on this account is signed out. This one stays.
 				</p>
 			</form>

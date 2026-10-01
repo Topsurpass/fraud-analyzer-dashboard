@@ -201,6 +201,19 @@ describe("catch-all proxy: response passthrough", () => {
     });
   });
 
+  it.each([204, 205, 304])("passes a bodiless %i through instead of throwing", async (status) => {
+    // The engine answers 204 to every DELETE; building a Response with any
+    // body for a null-body status throws, which reached the browser as a 500.
+    fetchMock.mockResolvedValue(new Response(null, { status }));
+    const response = await DELETE(
+      makeRequest("lists/l1", { method: "DELETE", token: "tok-1", csrf: true }),
+      context("lists/l1"),
+    );
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe("");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("marks every proxied response no-store", async () => {
     fetchMock.mockResolvedValue(engineJson([]));
     const response = await GET(makeRequest("connections", { token: "tok-1" }), context("connections"));

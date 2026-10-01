@@ -170,6 +170,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
               operator: condition.operator,
               value: condition.value ?? "",
               value2: condition.value2 ?? "",
+              list_id: condition.list_id ?? null,
             })),
           }))}
           submitLabel="Save changes"
@@ -180,7 +181,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
           footer={
             <>
               {saved ? (
-                <p className="border border-live/40 bg-live/5 px-3 py-2 text-[12px] text-live">
+                <p className="border border-live/40 bg-live/5 px-3 py-2 text-[13px] text-live">
                   Saved. Cards using this query pick it up on their next poll.
                 </p>
               ) : null}
@@ -189,7 +190,7 @@ export default function QueryPage({ params }: { params: Promise<{ id: string }> 
 
               <Panel title="Danger zone">
                 <div className="p-3">
-                  <p className="text-[12px] text-muted">
+                  <p className="text-[13px] text-muted">
                     Deleting removes the query and its execution history, and takes it off
                     every dashboard that showed it.
                   </p>

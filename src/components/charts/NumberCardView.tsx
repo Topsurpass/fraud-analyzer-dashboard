@@ -15,7 +15,7 @@ import { useReducedMotion } from "@/lib/useReducedMotion";
  * (500ms) so the panel still feels fast.
  *
  * With reduced motion the value snaps instead. The information that it moved is
- * still delivered - by the card's pulse line and its "changed" label - so only
+ * still delivered - by the card's live indicator and its "changed" label - so only
  * the movement is dropped, never the meaning.
  */
 
@@ -76,24 +76,27 @@ export function NumberCardView({ data, title }: NumberCardViewProps) {
       : formatMetric(displayed);
 
   return (
-    <div className="@container flex h-full flex-col justify-center px-4 py-2">
+    <div className="@container flex h-full flex-col justify-center px-5 pb-4">
       <div
-        className="tnum-display leading-none font-medium"
-        style={{ fontSize: "clamp(2rem, 15cqw, 4.25rem)" }}
+        className="tnum-display leading-none font-semibold"
+        style={{ fontSize: "clamp(2rem, 14cqw, 3.5rem)" }}
         // Animated digits must not be announced on every frame.
         aria-hidden="true"
       >
         {text}
       </div>
-      <div className="mt-2 flex items-baseline gap-2">
+      <div className="mt-2.5 flex items-baseline gap-2">
         {/* The column name is the schema's word for this number, not the
             analyst's. */}
-        <span className="truncate text-[11px] text-muted" title={data.label}>
-          {humanizeColumn(data.label)}
-        </span>
+        {/* Not repeated when it only restates the card's own title. */}
+        {humanizeColumn(data.label).toLowerCase() === title.trim().toLowerCase() ? null : (
+          <span className="truncate text-[13px] text-muted" title={data.label}>
+            {humanizeColumn(data.label)}
+          </span>
+        )}
         {data.extraRows > 0 ? (
           <span
-            className="tnum text-[10px] text-change"
+            className="tnum rounded-full bg-change/12 px-2 py-0.5 text-[11px] font-medium text-change"
             title={`The query returned ${data.extraRows + 1} rows; a number card shows the first.`}
           >
             +{data.extraRows} rows hidden

@@ -15,7 +15,7 @@ that, plus manages the connections, the accounts and the audit log.
 │ FRAUD    │  Connections › Payments DB          ● live  │
 │ ANALYZER │────────────────────────────────────────────│
 │          │  ┌───────────────┐ ┌───────────────┐        │
-│ ● Conn A │  │ ChartCard  ⟨pulse line⟩         │        │
+│ ● Conn A │  │ ChartCard  ⟨live dot⟩           │        │
 │ ○ Conn B │  └───────────────┘ └───────────────┘        │
 │──────────│  ┌───────────────┐ ┌───────────────┐        │
 │DASHBOARDS│  │ ChartCard     │ │ ChartCard     │        │
@@ -83,7 +83,7 @@ Registering a connection is an administrator's act, so the first form signs in
 before it writes anything. `--tick` only touches the SQLite file and needs no
 session.
 
-`--tick` is what makes the pulse line worth looking at: it writes new
+`--tick` is what makes the live indicator worth looking at: it writes new
 transactions continuously, so polls return `changed: true` and the cards
 actually deflect.
 
@@ -110,6 +110,7 @@ npm run smoke -- --password=...            # every chart type puts marks on scre
 npm run smoke:dashboards -- --password=...  # a board is really server-owned
 npm run smoke:auth -- --password=...        # roles hold on both sides
 npm run check:endpoints                    # every documented operation is used
+npm run check:layout                       # bell, sidebar and card menus, measured (mock engine)
 ```
 
 The smoke lane exists because the gate lane structurally cannot catch this
@@ -174,8 +175,9 @@ contract at the boundary. Routes hold glue only.
 
 ### Charts built for a fraud queue
 
-Five of the nine chart types answer "what is the shape of this". Four answer the
-questions an analyst actually opens the app with.
+Seven of the eleven chart types answer "what is the shape of this" (line, bar,
+stacked bar, two-axis bar, pie, number, table). Four answer the questions an
+analyst actually opens the app with.
 
 **`compare` - the same measure over two consecutive windows.** Configure a time
 bucket (`x_field`) and a measure (`y_field`), and write a query returning *twice*
@@ -330,36 +332,262 @@ The hovered value is pinned to a fixed line above the grid instead of a floating
 tooltip: a tooltip under the pointer covers the neighbouring cells, which are
 the comparison the chart exists to make.
 
-### The pulse line
+### The live indicator
 
-`src/components/PulseLine.tsx` is the signature element and it is not
-decorative — every mark on it is a real poll:
+Each card header carries one small state indicator, and every state is a real
+poll result (`LivePill` in `src/components/ChartCard.tsx`):
 
-- **idle** — flat line in `--signal-live`, with a one-sample tremor per poll that
-  returned `changed: false`, so it reads as alive rather than frozen
-- **changed** — one sharp bipolar deflection in `--signal-change`, injected the
-  moment the engine reports a new `data_hash`, which then scrolls away
-- **error/stale** — dashed and dim in `--text-muted`, with an inline reason and a
-  retry action on the card
+- **beating green dot** - polling is healthy
+- **amber "changed" pill** - the last poll brought a new `data_hash`; the card
+  border also takes the change colour for that beat
+- **rose dot** - polling is failing; the card shows an inline reason and a retry
+- **nothing** - paused
 
-The trace scrolls right to left at a fixed rate, so its horizontal axis is
-genuinely time. Every pulse line on the page shares one `requestAnimationFrame`
-ticker (`src/lib/ticker.ts`) rather than starting its own.
+The word always accompanies the colour, so it survives colour blindness. The
+old oscilloscope trace (`PulseLine`) is gone; `src/lib/ticker.ts` remains because
+the number cards' count-up still uses it.
 
-### Type and rhythm
+### The poll interval, and what reaches your database
 
-Three faces, three jobs, per the brief: Space Grotesk for the wordmark and page
-titles, Inter for interface text, JetBrains Mono for **every** number, timestamp,
-hash and axis value. The scale that sits on top of them lives in `globals.css`
-as `.t-page` / `.t-card` / `.t-sub` / `.t-eyebrow`, because everything used to
-sit within a point of 13px and a grid with no hierarchy gives the eye nowhere to
-land first.
+A query's **poll interval is the most often it runs on the database**, however
+many people or tabs have it open. The engine runs it at most once per interval
+and answers every other poll from a cache that lasts exactly that long, so
+opening a page, leaving it, switching tabs and coming back never run the query.
+Each card's status line shows the facts about the data rather than about the
+visit: **`ran 12m ago · next in 48m`**. (It used to show how long ago the card
+last *asked*, which reads "0s ago" after every visit and looked as though the
+query had just run.) The "next" half is left out under 30 seconds, where it
+would only tick.
 
-One monospace detail worth knowing: JetBrains Mono's dotted zero is the face's
-own default glyph, not an opt-in OpenType feature, so `font-feature-settings:
-"zero" 0` does not remove it. `.tnum-display` exists for large readouts and only
-adjusts tracking - the default `-0.01em` is set for 10-13px status text and
-leaves 4rem digits looking loose.
+The dashboard keeps its side of that bargain in `useQueryPolling`:
+
+- **The timer follows the run, not the card.** Every answer says when the result
+  was produced (`executed_at`, on the lean "unchanged" answer too), and the next
+  poll is aimed just past `executed_at + interval`, when the cached result goes
+  stale. A hidden tab pauses; on return it polls only if the next run is
+  actually due, and otherwise waits out what is left. A card that remounts
+  (navigating away and back) has no data and fetches once, from the cache, then
+  lines up with the run.
+- **Only an explicit request runs the query early.** `Run now` runs it once, and
+  Retry on a failed card forces a run. Everything else re-reads: after `Run now`
+  or a chart-type change the card asks the engine for the whole current result
+  (`resync`), which is free. Both used to finish with a forced poll, so `Run now`
+  ran the query twice and a chart-type switch re-ran it for a change that only
+  affects drawing.
+- **A stale answer is retried gently.** If an answer arrives already past its
+  interval (the engine is refreshing behind it, or clocks differ), the card asks
+  again after 3 s, 10 s, 30 s and 60 s, then every 60 s until the new result
+  lands. Each retry is a cache read. (After the 60 s it used to wait a whole
+  interval, which for an hourly query left the card on old data for another
+  hour whenever the refresh had not landed within about 100 seconds.)
+
+The engine's half (fraud-analyzer-engine): editing a chart, or publishing it,
+redraws the cached result in place instead of discarding it, so it costs no run;
+a background refresh that **fails** is not retried until a further interval has
+passed, so a client polling a database that is down cannot hammer it; and the
+scheduler skips a query whose result somebody just ran, so a poll's refresh and
+the scheduler's run cannot both happen at the same boundary. Editing a query's
+SQL, a flag rule or a list still re-runs it, because those change what the result
+says. The engine must be rebuilt for these to take effect; until then the
+dashboard still works, with `executed_at` missing from unchanged answers (the
+status line then falls back to when the card last heard from the engine).
+
+**A sleeping laptop used to freeze the engine's cache clock.** Reported as "the
+hourly chart never re-runs": the card's log showed runs at 00:45 and 01:45, then
+nothing until the next morning, and the first poll after waking was answered from
+cache in 45 ms with no run, though the result was six hours old. Docker Desktop
+pauses its VM while the Mac sleeps and the VM's `time.monotonic()` stops with it
+(measured: a Docker backend up 24 hours, a container clock of 12.8), and the
+engine measured result age, the failure cooldown and the scheduler's due-times on
+that clock alone. A result one hour old at bedtime was "47 minutes old" at
+breakfast. The engine now takes the larger of the monotonic and wall-clock
+readings (`app/clock.py`), so a paused clock cannot make anything look fresher
+than it is, and a wall clock stepped backwards cannot either. This only bites
+where the engine runs on a machine that sleeps, which is a developer laptop; a
+server never notices.
+
+The interval is set per query (`Poll interval (ms)` in the query editor, which
+now states the value back in words and offers 1 min, 5 min, 15 min, 1 hour and
+1 day presets). Saved queries that have flag rules also run on a scheduler with
+nobody watching, at the same interval with a one-minute floor.
+
+### Design system
+
+A fintech SaaS surface: cool off-white ground, white cards with a hairline and a
+soft shadow, one indigo accent, generous radius. **Light is the default, dark is
+a full second theme**, chosen with the toggle in the top bar (stored in
+`localStorage` as `fae.theme`) or, with no choice made, by the OS.
+
+- Every colour is a token in `src/app/globals.css`. The dark theme is the
+  `[data-theme="dark"]` block plus a `prefers-color-scheme` mirror of it for the
+  no-choice case. Components never use a literal colour, which is what lets one
+  stylesheet carry both themes.
+- `src/lib/theme.ts` holds the pure rules and the tiny init script inlined in
+  `<head>`, so a saved dark theme never flashes light. `ThemeToggle` reads the
+  attribute back rather than keeping a second copy in state.
+- One typeface, Inter, with tabular numerals (`.tnum`) so digit columns stay
+  steady as a poll lands. JetBrains Mono survives only for hashes, ids and SQL
+  (`.mono`). Scale: `.t-display` / `.t-page` / `.t-section` / `.t-card` / `.t-sub`.
+- Chart series colours are one mid-tone ramp (`charts/theme.ts`) that holds 3:1
+  against both card surfaces, so a chart does not change colour with the theme.
+  The ramp excludes amber and rose: see "What `--signal-alert` means".
+
+### Charts and the table
+
+Line charts are gradient area charts, bars have rounded tops and a gradient,
+pies are rounded-cap donuts whose legend carries each slice's share, and the
+tooltip is a single floating card shared by every chart. Recharts 2 is kept
+(it already drives every chart type here); the work is in how it is drawn.
+
+`charts/TableView.tsx` is built on **TanStack Table v8** (`@tanstack/react-table`,
+pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
+
+- click-to-sort headers, ascending first, NULLs always last, `aria-sort` on each
+- search across every cell, matching the text as displayed ("1,234" finds
+  1234567), and a flagged-only filter
+- known outcome words (`approved`, `pending`, `declined`...) drawn as badges
+- a count that says "12 of 140 rows" whenever the view is narrowed
+
+The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
+and filtered rows, and flag marks stay with their row through a sort.
+
+### Writing your own queries
+
+`docs/query-cookbook.md` says which chart fits which question, what each one needs
+the query to return, and the traps (single-CTE queries rejected, numeric text,
+anchoring time windows on the data), with a section per chart: when to use it,
+which column goes to which axis, and a query sample. Its examples are real and
+runnable: `scripts/seed-chart-examples.mjs` creates one query per chart type, with
+flag rules and a dashboard, on the `fundgate_transactions` table. The SQL in the
+guide is generated from `scripts/lib/chart-examples.mjs` (`node
+scripts/sync-query-docs.mjs` after changing it), and a test fails if the two drift.
+
+### Stacked and two-axis bars
+
+Two bar variants, both drawn by the same tooltip, legend and flagging as a plain
+bar chart.
+
+**`stacked_bar` - the total and what it is made of.** Same fields as a bar
+chart: `x_field` (category), `y_field` (value), and an optional `series_field`
+that splits each bar into stacked segments. With no series it is an ordinary bar.
+Rows arrive in long form (one row per x and series), are pivoted exactly as a
+multi-series bar is, and only the top segment of each stack is rounded. The
+tooltip adds a total. Stacks are positive-only: a zero or negative segment takes
+no height.
+
+**`biaxial_bar` - a count beside a rate.** Two different measures over one
+category axis, each on its own y axis, so a count in the thousands and a
+percentage under one are both readable. A chart spec carries one `y_field`, so
+the mapping is:
+
+| Field | Meaning on this chart |
+| --- | --- |
+| `x_field` | category axis |
+| `y_field` | **left-axis** measure (first bar colour) |
+| `series_field` | **right-axis** measure column (second bar colour) |
+
+The query is in wide form, one row per x with a column per measure:
+
+```sql
+SELECT strftime('%H:00', occurred_at) AS bucket,
+       COUNT(*)                        AS txns,
+       ROUND(100.0 * SUM(status = 'declined') / COUNT(*), 1) AS decline_rate_pct
+FROM transactions GROUP BY 1
+```
+
+Each axis takes its bar's colour and the legend says "left axis" / "right axis"
+in words, so nothing depends on telling two hues apart. A row that a flag rule
+catches flags both of its bars. If the right-axis column is missing, or is the
+same column as the left, the card says so instead of drawing one axis.
+
+The editor relabels the fields for this type ("Left-axis measure", "Right-axis
+measure"); on the wire they are still `y_field` and `series_field`, which is what
+keeps the contract unchanged. **The engine must list both types**: add
+`stacked_bar` and `biaxial_bar` to `app/policy/chart_types.py` (a new member is
+stored as a string, so no migration) and deploy it before choosing either in the
+dashboard, or the engine refuses the chart type.
+
+### Creating lists, and importing them from a spreadsheet
+
+**Creating, editing and deleting a list are dialogs**, not pages. `New list`
+opens one over the lists table, and clicking a list's name (or `Edit` / `View`)
+opens that list in one. Saving closes it, refreshes the table, marks the row for
+a few seconds and says what happened in a banner ("Created "Blocked terminals"
+with 7 items. 1 duplicate was dropped.", "Saved ...", "Deleted ..."). A failed
+save keeps the dialog open with the reason, and while a save is in flight Escape,
+the backdrop and the close button do nothing so the answer cannot be lost behind
+a closed dialog.
+
+The edit dialog carries everything the old page did: a read-only view for a list
+somebody else made, and a delete section that asks twice, is disabled while rules
+use the list (naming them, linking to their queries, and counting ones on queries
+you cannot see), and offers `Check again`. Deleting closes the dialog once the
+engine agrees; a refusal keeps it open.
+
+`/lists/new` and `/lists/<id>` still work as links: they redirect to `/lists?new`
+and `/lists?open=<id>`, which open the right dialog on arrival (closing it
+removes the flag so a reload does not reopen it). The name in the table is a real
+link to `/lists?open=<id>`, so it can be copied or opened in a new tab; only a
+plain click is taken over. The dialog is the reusable `components/Modal.tsx`
+(the native `<dialog>` element: real focus trap, inert page behind, Escape,
+focus returns to the opener).
+
+**Items can come from a file.** `Import from Excel or CSV` in the list form
+accepts `.xlsx`, `.csv`, `.tsv` and `.txt`, by choosing or dropping a file:
+
+1. pick the sheet (when a workbook has several) and the column,
+2. say whether the first row is headings (guessed for multi-column sheets, never
+   for a single column, where the first line is as likely to be an item),
+3. see the count, the duplicates that will be dropped and the first few values,
+4. `Add N items` appends them to the box, or replaces it if ticked.
+
+The file is read **in the browser and never uploaded**; only the confirmed
+column of text is saved, as ordinary items. Limits: 10 MB per file and 200,000
+rows per sheet (the engine's own item cap, 20,000 by default, is what stops a
+save). Old `.xls` workbooks, password-protected or corrupt files and unsupported
+types are refused with a sentence saying what to do instead. Parsing lives in
+`components/lists/spreadsheet.ts`: `read-excel-file` for `.xlsx` and
+`papaparse` for CSV, both loaded only when a file is chosen. SheetJS's `xlsx` is
+deliberately not used: its npm package is an unmaintained 0.18.5 with published
+prototype-pollution and ReDoS advisories.
+
+### How a chart shows what was flagged
+
+The engine returns, with every run, which rows the query's flag rules caught.
+`ChartCard` hands that outcome to the chart builders, and the rule names and
+severity travel with each flagged mark (`FlagMark` in `services/charts/shape.ts`),
+through pivots, the "Other" fold and merged pie slices. Every chart type then
+says *where* and *why*:
+
+- **Line and bar:** a shaded column behind each flagged x position with a `!`
+  marker on top, the axis label in bold alert colour, hatched bars, and a
+  tooltip that names the rules and the worst severity. Past 60 flagged columns
+  the bands stop (they would merge into a wash) and the per-point marks remain.
+- **Donut:** hatched wedge, a flag glyph in the legend, rules in the tooltip.
+- **Heatmap, movers, compare grid:** outlined cells or a marked row; the heatmap
+  readout and each cell's text say "flagged by <rule>".
+- **Every card:** a strip under the title with one chip per matching rule, its
+  row count and its severity in words (`charts/FlagStrip.tsx`). Rules that
+  matched nothing are not shown.
+
+Colour is never the only signal: each mark is also a shape, a glyph or a word.
+
+### Looking at it without an engine
+
+`scripts/mock-engine.mjs` is a fixture server that speaks enough of the engine's
+API to sign in and render every chart type. Any email with the password `demo`
+signs in.
+
+```bash
+node scripts/mock-engine.mjs                       # :8100
+ENGINE_BASE_URL=http://127.0.0.1:8100 NEXT_DIST_DIR=.next-preview npm run dev -- --port 3100
+node scripts/shoot.mjs ./shots --chrome --theme=light --base=http://localhost:3100 \
+  --engine=http://127.0.0.1:8100 --password=demo --routes=/,/dashboards/d1
+```
+
+`NEXT_DIST_DIR` lets this run beside your normal dev server without the two
+fighting over `.next`. Use `localhost`, not `127.0.0.1`: Next blocks dev
+resources requested from the latter.
 
 ### Working the grid
 
@@ -374,21 +602,32 @@ available without leaving the page.
   unfilled, which reads as broken rather than as sparse. Three columns at the
   top end rather than four: at four, a card on a 1600px screen is about 325px
   wide, and a plot plus its legend does not fit in that.
-- **Each card carries a state hairline** along its top edge, in the live colour
-  at rest and the change colour when the last poll brought new data. It is the
-  pulse line's reading at a glance: across a full grid you can see which cards
-  moved without any of their text being legible.
-- **Collapse the rail** with the toggle beside the app name. It becomes a 56px
-  strip that still shows every connection's status light — an instrument panel
-  should not lose its status lights to make room. See "The left rail" below.
-- **Both popovers dismiss properly.** `src/components/Popover.tsx` is the one
-  implementation: it closes on a choice, on a pointer down anywhere outside it,
-  and on Escape, which also hands focus back to the trigger. Opening one closes
-  any other. The panel is unmounted while shut, so a half-finished delete
-  confirmation is never waiting on the next open. Async items keep the menu open
-  until the write lands, because the panel is where the failure is reported -
-  closing on click would report "could not change the chart type" to an element
-  that is no longer on the page.
+- **A card's border turns amber for a beat** when its last poll brought new
+  data, so across a full grid you can see which cards moved without reading any
+  of them.
+- **Collapse the rail** with the toggle beside the app name. It becomes a 68px
+  strip that still shows every connection's status light. See "The sidebar" above.
+- **Both popovers dismiss properly, and are never clipped.**
+  `src/components/Popover.tsx` is the one implementation: it closes on a choice,
+  on a pointer down anywhere outside it, and on Escape, which also hands focus
+  back to the trigger. Opening one closes any other. The panel is unmounted
+  while shut, so a half-finished delete confirmation is never waiting on the
+  next open. Async items keep the menu open until the write lands, because the
+  panel is where the failure is reported - closing on click would report "could
+  not change the chart type" to an element that is no longer on the page.
+
+  The panel is drawn in a portal on `document.body` with `position: fixed`,
+  placed by `src/components/popoverPlacement.ts`. It has to be: a card clips its
+  contents, and the card menu is 15 items and about 570px tall, so drawn inside
+  its card only five items were reachable on a number card and nine on the rest.
+  Now it opens below the trigger, flips above when that side has more room,
+  is capped to the room it has and scrolls inside itself past that, stays inside
+  the viewport, and follows the trigger while the page scrolls. A caller passes
+  `panelClassName` for looks only (width, border, shadow); `shell-layout.test.ts`
+  fails any caller that tries to position its own panel. Because a portal moves
+  the panel in the tab order, the keyboard is bridged by hand: Tab from the
+  trigger enters the panel, Tab past its last item closes it and returns to the
+  trigger, Shift+Tab before its first returns without closing, and Escape returns.
 - **Each card's `⋯` menu** carries the actions for the query behind it: pick how
   it is drawn (line, bar, pie, number, table), run it now, edit it, or delete
   it. Chart type is a property of the saved query rather than a view preference,
@@ -402,16 +641,54 @@ available without leaving the page.
   "earlier/later" stays true in the single-column mobile layout where
   "left/right" would not.
 
-### The left rail
+### The sidebar
 
-256px, and wide enough to be a status panel rather than a list of links. Every
-connection shows its database kind beside whether it last answered, every
-dashboard shows how many cards are on it, and the foot of the rail carries the
-engine's own state - the difference between "nothing is happening" and "nothing
-is being asked", which no individual card can tell you.
+264px, and wide enough to be a status panel rather than a list of links: an
+Overview link, every connection with its status dot and flagged count, every
+dashboard with its card count, the admin section for those allowed it, the
+signed-in account, and a detection-engine card that says whether the engine is
+reachable - the difference between "nothing is happening" and "nothing is being
+asked", which no individual card can tell you.
 
-Collapsed it becomes a 56px strip that still shows every status light. An
-instrument panel should not lose its lights to make room for charts.
+Collapsed it becomes a 68px strip of icons and status dots. Below `md` it is a
+drawer behind the menu button in the top bar.
+
+**It does not scroll with the page.** `AppShell` is exactly the viewport
+(`relative h-dvh overflow-hidden`), the rail is `h-full overflow-hidden`, and the
+only scroll region is the `main` inside `PageBody` (also `relative`). The document
+itself can never scroll, so nothing can carry the rail along with a long page.
+
+The cause, found on `connections/:id/flagged`: `overflow-hidden` does not clip an
+`absolute` element whose containing block is outside it, and nothing in the shell
+was positioned, so the containing block was `<body>`. A `sr-only` table caption
+is `position: absolute`; its static position is wherever it sits in the scrolled
+content, so one far down a long page stretched the document to that height. When
+`main` reached its end the wheel carried on into the document, and the sidebar
+scrolled away with it. Making the shell and `main` the containing blocks puts
+every such element inside a box that clips it. Rule of thumb: an `overflow-*`
+that is meant to contain a region needs `relative` (or any non-static `position`)
+on it too.
+
+`npm run check:layout` scrolls the connection page and the flagged page past the
+end of `main` by wheel, End and `scrollIntoView` and fails if the rail moves or
+the document overflows. The mock engine serves a 120-row flagged page for it.
+
+### Layers
+
+Three levels, and nothing else should invent one.
+
+| Layer | `z-index` | What |
+| --- | --- | --- |
+| Page cards | none | Each card is its own stacking context (`defer-paint`, `rise`) |
+| Top bar | 40 | `relative z-40`. The bell's panel hangs from it over the cards |
+| Drawer, popovers | 50 | The mobile navigation, and every `Popover` panel |
+| Modals | top layer | `<dialog>.showModal()`, above all of the above |
+
+The header needs its own level because `backdrop-blur` makes it a stacking
+context at the bottom of the order, and the cards after it in the document
+painted over its dropdown and took the clicks. On a phone the bell's panel spans
+the header (`inset-x-3`) instead of hanging from the bell, which sits mid-header
+and put the panel 17 to 47px off the left edge.
 
 ### What `--signal-alert` means
 
@@ -458,10 +735,10 @@ specifically to fail if anyone reintroduces a recolour.
 
 ### Accessibility
 
-Focus rings in `--signal-live` on every interactive element; the rail collapses
+Focus rings in the accent colour on every interactive element; the rail collapses
 to a drawer below `md`; each card carries its query name as its accessible name;
-the legend highlights on keyboard focus as well as hover; count-ups and pulse
-spikes collapse to instant state changes under `prefers-reduced-motion`, while
+the legend highlights on keyboard focus as well as hover; count-ups and the live
+beacon collapse to instant state changes under `prefers-reduced-motion`, while
 still delivering the information the animation carried.
 
 ## Decisions worth knowing
@@ -535,10 +812,11 @@ trips against a browser that opens six connections at a time.
 
 The batch keeps paying off rather than only helping on first paint, and nothing
 has to align the cards on a grid for that: every card in a batch is answered at
-the same instant, so every card in it schedules its next poll from the same
-moment. Cards sharing an interval stay in phase; cards on different intervals
-drift apart, which is correct, because they are not asking at the same time. No
-poll is ever delayed to make a batch bigger.
+the same instant, so every card in it learns the same run time and aims its next
+poll at the same moment (see "The poll interval", above). Cards of one query stay
+in phase; cards on different intervals drift apart, which is correct, because
+they are not asking at the same time. No poll is ever delayed to make a batch
+bigger.
 
 Results are matched back to their waiters by `query_id`, never by position. A
 batch is the one place an off-by-one shows up as a card rendering another card's
@@ -642,5 +920,5 @@ them. Until it is redeployed, run the engine locally and point
 envelope — for the query on the failed `warehouse-neon` connection. Because that
 502 never reaches the app, it carries no `Access-Control-Allow-Origin` header
 either, so the browser reports it as a CORS failure. The CORS message is a
-symptom; the 502 is the cause. The card degrades correctly: dashed pulse line,
+symptom; the 502 is the cause. The card degrades correctly: rose status dot,
 inline "Cannot reach engine", and a retry.

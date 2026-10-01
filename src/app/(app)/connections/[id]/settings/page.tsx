@@ -154,7 +154,7 @@ export default function ConnectionSettingsPage({
               )}
 
               {error ? (
-                <p className="mt-3 border border-change/40 bg-change/5 px-3 py-2 text-[12px] text-change">
+                <p className="mt-3 border border-change/40 bg-change/5 px-3 py-2 text-[13px] text-change">
                   {error.displayMessage}
                 </p>
               ) : null}
@@ -187,7 +187,7 @@ export default function ConnectionSettingsPage({
             {mayEdit ? (
             <Panel title="Danger zone">
               <div className="p-3">
-                <p className="text-[12px] text-muted">
+                <p className="text-[13px] text-muted">
                   Deleting a connection removes its saved queries and their execution history
                   from the engine. Dashboards that referenced them will drop the missing cards.
                 </p>

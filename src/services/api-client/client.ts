@@ -14,6 +14,10 @@ import type {
 	FlagRuleSetRead,
 	FlagRuleSetUpdate,
 	FlaggedSummary,
+	ItemListRead,
+	ItemListSaved,
+	ItemListSummary,
+	ItemListWrite,
 	PollResponse,
 	PreviewRequest,
 	PreviewResponse,
@@ -405,6 +409,38 @@ export const deleteDashboard = (dashboardId: string, options?: RequestOptions) =
 	request<void>({
 		method: "DELETE",
 		path: `/dashboards/${encodeURIComponent(dashboardId)}`,
+		...options,
+	});
+
+/* ----------------------------------------------------------------------- lists */
+
+export const listLists = (options?: RequestOptions) =>
+	request<ItemListSummary[]>({ method: "GET", path: "/lists", ...options });
+
+export const getList = (listId: string, options?: RequestOptions) =>
+	request<ItemListRead>({
+		method: "GET",
+		path: `/lists/${encodeURIComponent(listId)}`,
+		...options,
+	});
+
+export const createList = (body: ItemListWrite, options?: RequestOptions) =>
+	request<ItemListSaved>({ method: "POST", path: "/lists", body, ...options });
+
+/** Whole replace: name, description and items are all sent every time. */
+export const updateList = (listId: string, body: ItemListWrite, options?: RequestOptions) =>
+	request<ItemListSaved>({
+		method: "PUT",
+		path: `/lists/${encodeURIComponent(listId)}`,
+		body,
+		...options,
+	});
+
+/** 409 `LIST_IN_USE` when a rule references it; `detail.rules` names them. */
+export const deleteList = (listId: string, options?: RequestOptions) =>
+	request<void>({
+		method: "DELETE",
+		path: `/lists/${encodeURIComponent(listId)}`,
 		...options,
 	});
 

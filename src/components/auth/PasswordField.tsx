@@ -66,7 +66,7 @@ export function PasswordField({
 					disabled={disabled}
 					aria-pressed={revealed}
 					aria-label={revealed ? "Hide password" : "Show password"}
-					className="absolute inset-y-0 right-0 px-2.5 text-[10.5px] tracking-wider text-muted uppercase transition-colors hover:text-ink disabled:opacity-40"
+					className="absolute inset-y-0 right-0 px-2.5 text-[11.5px] tracking-wider text-muted uppercase transition-colors hover:text-ink disabled:opacity-40"
 				>
 					{revealed ? "Hide" : "Show"}
 				</button>

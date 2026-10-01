@@ -107,6 +107,58 @@ export function formatRelative(iso: string | null | undefined, now: number): str
 }
 
 /**
+ * A duration in words: "5 seconds", "1 hour", "1 hour 30 minutes", "2 days".
+ *
+ * For stating a setting back to the person who typed it in milliseconds, so
+ * 3600000 reads as what it is. Exact rather than rounded (an interval of 90
+ * seconds is "1 minute 30 seconds", not "2 minutes"), and it stops at two units:
+ * nobody needs "1 day 2 hours 3 minutes 4 seconds".
+ */
+export function describeDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0 seconds";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const totalSeconds = Math.round(ms / 1000);
+  const units: [string, number][] = [
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+    ["second", 1],
+  ];
+  const parts: string[] = [];
+  let remaining = totalSeconds;
+  for (const [name, size] of units) {
+    const count = Math.floor(remaining / size);
+    if (count > 0) {
+      parts.push(`${count} ${name}${count === 1 ? "" : "s"}`);
+      remaining -= count * size;
+    }
+    if (parts.length === 2) break;
+  }
+  return parts.join(" ");
+}
+
+/**
+ * How long until something, for the "next run" readout: "in 48m", "in 2h 5m".
+ *
+ * Coarse on purpose, like `formatRelative`: nobody schedules around the seconds
+ * of an hour-long wait. At or past the moment it reads "due now" rather than a
+ * negative duration.
+ */
+export function formatUntil(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "due now";
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `in ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest === 0 ? `in ${hours}h` : `in ${hours}h ${rest}m`;
+  }
+  return `in ${Math.floor(hours / 24)}d`;
+}
+
+/**
  * Data hashes are long; show enough to eyeball a change, not the whole digest.
  * The engine prefixes its digests with the algorithm ("sha256:abc..."), which
  * carries no information once every hash uses the same one, so it is dropped.

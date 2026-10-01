@@ -1,7 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { QueryChartInput } from "@/contracts/api";
-import { ChartSetEditor, hasThreshold } from "./ChartSetEditor";
+import {
+  ChartSetEditor,
+  hasThreshold,
+  needsSeries,
+  needsX,
+  needsY,
+  seriesFieldLabel,
+  seriesIsRequired,
+  yFieldLabel,
+} from "./ChartSetEditor";
 
 const chart = (over: Partial<QueryChartInput> = {}): QueryChartInput => ({
   name: "Per terminal",
@@ -105,5 +114,35 @@ describe("ChartSetEditor: the surge threshold", () => {
     expect(onChange).toHaveBeenCalledWith([
       expect.objectContaining({ chart_type: "table", surge_threshold_pct: null }),
     ]);
+  });
+});
+
+describe("stacked and two-axis bars", () => {
+  it("lets a stacked bar split by a series but not require one", () => {
+    expect(needsX("stacked_bar")).toBe(true);
+    expect(needsY("stacked_bar")).toBe(true);
+    expect(needsSeries("stacked_bar")).toBe(true);
+    // No series is a plain bar, which is still drawable.
+    expect(seriesIsRequired("stacked_bar")).toBe(false);
+    expect(seriesFieldLabel("stacked_bar")).toBe("Stack by (series)");
+  });
+
+  it("requires the second measure on a two-axis bar and labels it as one", () => {
+    expect(needsSeries("biaxial_bar")).toBe(true);
+    expect(seriesIsRequired("biaxial_bar")).toBe(true);
+    // The wire field is series_field; the label says what it means here.
+    expect(seriesFieldLabel("biaxial_bar")).toBe("Right-axis measure");
+    expect(yFieldLabel("biaxial_bar")).toBe("Left-axis measure");
+  });
+
+  it("neither uses a movement threshold", () => {
+    expect(hasThreshold("stacked_bar")).toBe(false);
+    expect(hasThreshold("biaxial_bar")).toBe(false);
+  });
+
+  it("shows the right-axis label when a two-axis bar is selected", () => {
+    editor([chart({ chart_type: "biaxial_bar", series_field: "terminal" })]);
+    expect(screen.getByText("Right-axis measure")).toBeInTheDocument();
+    expect(screen.getByText("Left-axis measure")).toBeInTheDocument();
   });
 });

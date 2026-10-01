@@ -126,7 +126,7 @@ export function ConnectionForm({
         </Select>
       </Field>
       {initial ? (
-        <p className="-mt-1 text-[11px] text-muted">
+        <p className="-mt-1 text-[12.5px] text-muted">
           The engine does not allow changing a connection&apos;s type after creation.
         </p>
       ) : null}

@@ -46,7 +46,7 @@ export default function AccountPage() {
 
 						<div className="min-w-0">
 							<h1 className="t-page truncate text-ink">{user.full_name}</h1>
-							<p className="truncate text-[12.5px] text-muted">{user.email}</p>
+							<p className="truncate text-[13.5px] text-muted">{user.email}</p>
 						</div>
 
 						<div className="ml-auto flex shrink-0 items-center gap-2">
@@ -77,14 +77,14 @@ export default function AccountPage() {
 				</Panel>
 
 				<Panel title={`What ${ROLE_LABELS[user.role]} can do`}>
-					<p className="border-b border-line px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted">
+					<p className="border-b border-line px-3.5 py-2.5 text-[13.5px] leading-relaxed text-muted">
 						{ROLE_HINTS[user.role]}
 					</p>
 					<ul className="divide-y divide-line/60">
 						{capabilities.map((capability) => (
 							<li
 								key={capability}
-								className="flex items-center gap-2.5 px-3.5 py-2 text-[12.5px] text-secondary"
+								className="flex items-center gap-2.5 px-3.5 py-2 text-[13.5px] text-secondary"
 							>
 								<Tick />
 								{CAPABILITY_SENTENCES[capability]}
@@ -92,7 +92,7 @@ export default function AccountPage() {
 						))}
 					</ul>
 					{user.role === "analyst" ? (
-						<p className="border-t border-line px-3.5 py-2.5 text-[11.5px] leading-relaxed text-muted">
+						<p className="border-t border-line px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted">
 							Adding, editing or pausing a connection, and managing accounts, need an
 							administrator. Your saved queries and dashboards are yours: an
 							administrator can see them, another analyst cannot.
@@ -121,6 +121,7 @@ const CAPABILITY_SENTENCES: Record<(typeof ROLE_CAPABILITIES)["admin"][number], 
 	"queries.run": "Run queries and poll them live",
 	"flagRules.write": "Write flag rules and work the flagged queue",
 	"dashboards.write": "Build dashboards out of saved queries",
+	"lists.write": "Create named lists for flag rules to check against",
 	"users.manage": "Open, deactivate and re-role accounts",
 	"auditLog.view": "Read the audit log",
 };
@@ -129,7 +130,7 @@ function Detail({ term, value, title }: { term: string; value: string; title?: s
 	return (
 		<div className="min-w-0">
 			<dt className="t-eyebrow">{term}</dt>
-			<dd className="tnum mt-0.5 truncate text-[12.5px] text-secondary" title={title}>
+			<dd className="tnum mt-0.5 truncate text-[13.5px] text-secondary" title={title}>
 				{value}
 			</dd>
 		</div>

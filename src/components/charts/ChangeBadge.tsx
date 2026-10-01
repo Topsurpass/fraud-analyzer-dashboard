@@ -35,7 +35,9 @@ export interface ChangeBadgeProps {
 function glyph(verdict: ChangeVerdict): string {
   if (verdict.severity === "surge") return "▲";
   if (verdict.severity === "drop") return "▼";
-  return verdict.pctChange === null ? "·" : verdict.pctChange > 0 ? "↑" : "↓";
+  // "flat" is no direction at all; an arrow there would claim a movement.
+  if (verdict.pctChange === null || Math.abs(verdict.pctChange) * 100 < 0.05) return "–";
+  return verdict.pctChange > 0 ? "↑" : "↓";
 }
 
 export function ChangeBadge({ verdict, subject, className }: ChangeBadgeProps) {
@@ -52,7 +54,7 @@ export function ChangeBadge({ verdict, subject, className }: ChangeBadgeProps) {
 
   if (!flagged) {
     return (
-      <span className={`tnum text-[10px] text-muted ${className ?? ""}`}>
+      <span className={`tnum text-[12px] text-muted ${className ?? ""}`}>
         <span aria-hidden="true">{glyph(verdict)} </span>
         <span aria-hidden="true">{label}</span>
         <span className="sr-only">{spoken}</span>
@@ -62,13 +64,13 @@ export function ChangeBadge({ verdict, subject, className }: ChangeBadgeProps) {
 
   return (
     <span
-      className={`tnum inline-flex shrink-0 items-center gap-0.5 rounded-[3px] px-1 py-px text-[10px] font-medium leading-tight ${className ?? ""}`}
+      className={`tnum inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-[11.5px] font-semibold leading-tight ${className ?? ""}`}
       style={{
         backgroundColor: "var(--signal-change-dim)",
         color: "var(--signal-change)",
         // A border as well as a fill: in forced-colours mode backgrounds are
         // replaced wholesale and a fill-only chip disappears entirely.
-        border: "1px solid var(--signal-change)",
+        border: "1px solid color-mix(in srgb, var(--signal-change) 35%, transparent)",
       }}
       title={`Past the ${verdict.threshold}% threshold`}
     >

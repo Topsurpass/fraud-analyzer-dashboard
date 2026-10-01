@@ -57,12 +57,12 @@ export function ExecutionLog({ queryId, limit = 20 }: { queryId: string; limit?:
       }
     >
       {runError ? (
-        <p className="border-b border-line px-3 py-1.5 text-[11px] text-change">{runError}</p>
+        <p className="border-b border-line px-3 py-1.5 text-[12.5px] text-change">{runError}</p>
       ) : null}
 
       <div className="max-h-64 overflow-y-auto">
         {logs.error ? (
-          <p className="p-3 text-[12px] text-muted">{logs.error.displayMessage}</p>
+          <p className="p-3 text-[13px] text-muted">{logs.error.displayMessage}</p>
         ) : logs.initial ? (
           <div className="skeleton-sweep space-y-2 p-3">
             {[0, 1, 2].map((index) => (
@@ -70,7 +70,7 @@ export function ExecutionLog({ queryId, limit = 20 }: { queryId: string; limit?:
             ))}
           </div>
         ) : (logs.data ?? []).length === 0 ? (
-          <p className="p-3 text-[12px] text-muted">This query has not run yet.</p>
+          <p className="p-3 text-[13px] text-muted">This query has not run yet.</p>
         ) : (
           <ul className="divide-y divide-line">
             {logs.data?.map((entry) => (
@@ -80,14 +80,14 @@ export function ExecutionLog({ queryId, limit = 20 }: { queryId: string; limit?:
                   className={`h-1.5 w-1.5 shrink-0 ${entry.success ? "bg-live" : "bg-change"}`}
                   style={entry.success ? undefined : { clipPath: "polygon(50% 0,100% 100%,0 100%)" }}
                 />
-                <span className="tnum text-[11px]">{formatClock(entry.executed_at)}</span>
+                <span className="tnum text-[12.5px]">{formatClock(entry.executed_at)}</span>
                 {entry.success ? (
-                  <span className="tnum ml-auto text-[11px] text-muted">
+                  <span className="tnum ml-auto text-[12.5px] text-muted">
                     {formatInteger(entry.row_count ?? 0)} rows · {formatDuration(entry.duration_ms)}
                   </span>
                 ) : (
                   <span
-                    className="ml-auto truncate text-[11px] text-change"
+                    className="ml-auto truncate text-[12.5px] text-change"
                     title={entry.error_message ?? undefined}
                   >
                     {entry.error_code ?? "failed"}

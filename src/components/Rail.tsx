@@ -10,6 +10,7 @@ import { useAuth } from "@/services/auth/AuthContext";
 import { AccountChip } from "./auth/AccountChip";
 import { FlaggedBadge } from "./FlaggedBadge";
 import { StatusDot } from "./StatusDot";
+import { Wordmark as Brand } from "./Logo";
 
 /**
  * The persistent left rail.
@@ -50,14 +51,40 @@ export function Rail({
   const liveCount = connections.filter((connection) => connection.status === "ok").length;
 
   return (
-    <nav aria-label="Primary" className="flex h-full min-h-0 flex-col bg-sunken">
+    <nav aria-label="Primary" className="flex h-full min-h-0 flex-col bg-[var(--sidebar-bg)]">
       <Wordmark
         collapsed={collapsed}
         onNavigate={onNavigate}
         onToggleCollapse={onToggleCollapse}
       />
 
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1 py-2">
+        <ul className="pb-1">
+          <li>
+            <RailLink
+              href="/"
+              active={pathname === "/"}
+              onNavigate={onNavigate}
+              collapsed={collapsed}
+              title="Overview"
+            >
+              <NavGlyph kind="overview" />
+              {collapsed ? null : <span className="truncate">Overview</span>}
+            </RailLink>
+          </li>
+          <li>
+            <RailLink
+              href="/lists"
+              active={pathname.startsWith("/lists")}
+              onNavigate={onNavigate}
+              collapsed={collapsed}
+              title="Lists"
+            >
+              <NavGlyph kind="lists" />
+              {collapsed ? null : <span className="truncate">Lists</span>}
+            </RailLink>
+          </li>
+        </ul>
         <Section
           title="Connections"
           /* The count is the reason to look here at all: how many of the
@@ -102,9 +129,6 @@ export function Rail({
                             count={flagged.countForConnection(connection.id)}
                             severity={flagged.severityForConnection(connection.id)}
                           />
-                          <span className="tnum ml-auto shrink-0 text-[9px] tracking-wider text-muted/70 uppercase">
-                            {connection.db_type}
-                          </span>
                         </>
                       )}
                     </RailLink>
@@ -115,10 +139,7 @@ export function Rail({
           )}
         </Section>
 
-        <div className="mx-3 my-2 border-t border-line" />
-
-
-        <Section
+                <Section
           title="Dashboards"
           meta={dashboards.length > 0 ? String(dashboards.length) : null}
           action={{ href: "/dashboards/new", label: "New" }}
@@ -164,15 +185,16 @@ export function Rail({
                            * one line holding both truncates both, and the name
                            * is what you scan for once you know the owner.
                            */}
+                          <NavGlyph kind="overview" />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate">{dashboard.name}</span>
                             {owner ? (
-                              <span className="block truncate text-[10px] leading-tight text-muted/70">
+                              <span className="block truncate text-[11px] leading-tight text-muted">
                                 {owner}
                               </span>
                             ) : null}
                           </span>
-                          <span className="tnum ml-auto shrink-0 text-[10px] text-muted/70">
+                          <span className="tnum ml-auto shrink-0 text-[11px] text-muted">
                             {count}
                           </span>
                         </>
@@ -187,7 +209,7 @@ export function Rail({
 
         {mayAdminister ? (
           <>
-            <div className="mx-3 my-2 border-t border-line" />
+            
             <Section title="Administration" onNavigate={onNavigate} collapsed={collapsed}>
               <ul>
                 <li>
@@ -198,7 +220,7 @@ export function Rail({
                     collapsed={collapsed}
                     title="People"
                   >
-                    <AdminGlyph kind="people" />
+                    <NavGlyph kind="people" />
                     {collapsed ? null : <span className="truncate">People</span>}
                   </RailLink>
                 </li>
@@ -210,7 +232,7 @@ export function Rail({
                     collapsed={collapsed}
                     title="Audit log"
                   >
-                    <AdminGlyph kind="log" />
+                    <NavGlyph kind="log" />
                     {collapsed ? null : <span className="truncate">Audit log</span>}
                   </RailLink>
                 </li>
@@ -226,13 +248,6 @@ export function Rail({
   );
 }
 
-/**
- * The wordmark, set as two stacked words in the display face.
- *
- * Stacked rather than on one line because the rail is a narrow column and the
- * two-line block gives the top of the panel a squarer anchor, which the rules
- * below it then hang off.
- */
 function Wordmark({
   collapsed,
   onNavigate,
@@ -244,32 +259,18 @@ function Wordmark({
 }) {
   return (
     <div
-      className={`flex shrink-0 items-start border-b border-line ${
-        collapsed ? "justify-center px-1 py-3" : "gap-2 px-3 py-3"
+      className={`flex h-16 shrink-0 items-center ${
+        collapsed ? "justify-center px-1" : "gap-2 px-4"
       }`}
     >
       <Link
         href="/"
         onClick={onNavigate}
         title={collapsed ? "Fraud Analyzer" : undefined}
+        aria-label="Fraud Analyzer"
         className="block min-w-0"
       >
-        {collapsed ? (
-          <span className="display text-[13px] font-medium" aria-label="Fraud Analyzer">
-            FA
-          </span>
-        ) : (
-          <>
-            <span className="display block text-[15px] leading-[1.1] font-medium tracking-tight">
-              FRAUD
-              <br />
-              ANALYZER
-            </span>
-            <span className="tnum mt-1 block text-[9px] tracking-[0.18em] text-muted/70 uppercase">
-              instrument panel
-            </span>
-          </>
-        )}
+        <Brand compact={collapsed} />
       </Link>
 
       {onToggleCollapse && !collapsed ? (
@@ -299,17 +300,16 @@ function EngineFoot({
   /* Four states, because "up but cannot serve" needs different people from
      "nothing answered" - see useEngineHealth. */
   const label = ENGINE_LABEL[status];
-  const tone = ENGINE_TONE[status];
 
   if (collapsed) {
     return (
-      <div className="shrink-0 border-t border-line p-1">
+      <div className="shrink-0 space-y-1 p-2">
         <button
           type="button"
           onClick={check}
           title={message ?? `Engine ${label}`}
           aria-label={`Engine ${label}. Check again`}
-          className="mx-auto block p-1"
+          className="mx-auto grid size-9 place-items-center rounded-[var(--radius-sm)] hover:bg-raised"
         >
           <EngineDot status={status} />
         </button>
@@ -321,20 +321,34 @@ function EngineFoot({
   }
 
   return (
-    <div className="shrink-0 border-t border-line px-3 py-2">
+    <div className="shrink-0 px-3 pb-2">
       <button
         type="button"
         onClick={check}
         title={message ?? "Check the engine now"}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-center gap-2.5 rounded-[var(--radius)] border border-line bg-sunken px-3 py-2.5 text-left transition-colors hover:border-line-strong"
       >
         <EngineDot status={status} />
-        <span className="t-eyebrow">Engine</span>
-        <span className={`tnum ml-auto text-[10px] ${tone}`}>{label}</span>
+        <span className="min-w-0">
+          <span className="block text-[12px] font-medium text-ink">Detection engine</span>
+          <span className="block text-[11px] text-muted">Click to re-check</span>
+        </span>
+        <span
+          className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium ${PILL[status]}`}
+        >
+          {label}
+        </span>
       </button>
     </div>
   );
 }
+
+const PILL: Record<EngineStatus, string> = {
+  checking: "bg-raised text-muted",
+  ok: "bg-live/12 text-live",
+  degraded: "bg-change/12 text-change",
+  down: "bg-alert/12 text-alert",
+};
 
 /** One word each. `degraded` is the state the two-probe check exists to name. */
 const ENGINE_LABEL: Record<EngineStatus, string> = {
@@ -344,40 +358,24 @@ const ENGINE_LABEL: Record<EngineStatus, string> = {
   down: "no answer",
 };
 
-const ENGINE_TONE: Record<EngineStatus, string> = {
-  checking: "text-muted",
-  ok: "text-live",
-  degraded: "text-change",
-  down: "text-change",
-};
-
 function EngineDot({ status }: { status: EngineStatus }) {
+  const color =
+    status === "ok"
+      ? "text-live"
+      : status === "degraded"
+        ? "text-change"
+        : status === "down"
+          ? "text-alert"
+          : "text-muted";
   return (
-    <svg viewBox="0 0 10 10" width={8} height={8} aria-hidden="true" className="shrink-0">
-      <circle
-        cx={5}
-        cy={5}
-        r={3.25}
-        fill={status === "ok" ? "var(--signal-live)" : "none"}
-        stroke={
-          status === "ok"
-            ? "var(--signal-live)"
-            : status === "degraded"
-              ? "var(--signal-change)"
-              : "var(--text-muted)"
-        }
-        strokeWidth={1.25}
+    // Status is also in words beside it; the dot only reinforces it. The ring
+    // animates for "live" so a stalled engine is visibly different.
+    <span aria-hidden="true" className={`relative grid size-2.5 shrink-0 place-items-center ${color}`}>
+      <span
+        className={`absolute inset-0 rounded-full ${status === "ok" ? "beacon" : ""}`}
       />
-      {/* Three shapes, not three colours: a hollow ring is "checking", a half-
-          filled ring is "answering but not serving", a cross is "no answer".
-          Reading the state must not depend on telling amber from grey. */}
-      {status === "degraded" ? (
-        <path d="M5 1.75 A3.25 3.25 0 0 1 5 8.25 Z" fill="var(--signal-change)" />
-      ) : null}
-      {status === "down" ? (
-        <line x1={2.2} y1={7.8} x2={7.8} y2={2.2} stroke="var(--signal-change)" strokeWidth={1.25} />
-      ) : null}
-    </svg>
+      <span className="relative size-2.5 rounded-full bg-current" />
+    </span>
   );
 }
 
@@ -397,20 +395,12 @@ function CollapseButton({
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-expanded={!collapsed}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      className={`block shrink-0 p-1 text-muted transition-colors hover:text-live ${className ?? ""}`}
+      className={`grid size-8 shrink-0 place-items-center rounded-[var(--radius-sm)] text-muted transition-colors hover:bg-raised hover:text-ink ${className ?? ""}`}
     >
-      <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
-        <rect
-          x={1.5}
-          y={2}
-          width={11}
-          height={10}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.25}
-        />
-        {/* The filled column shows which side the panel is on. */}
-        <rect x={1.5} y={2} width={3.5} height={10} fill="currentColor" opacity={collapsed ? 0.35 : 1} />
+      <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round">
+        <rect x={2} y={2.5} width={12} height={11} rx={2.5} />
+        <path d="M6.2 2.8v10.4" />
+        {collapsed ? <path d="m9.4 6.4 1.6 1.6-1.6 1.6" strokeLinecap="round" /> : <path d="M10.8 6.4 9.2 8l1.6 1.6" strokeLinecap="round" />}
       </svg>
     </button>
   );
@@ -433,7 +423,7 @@ function Section({
   collapsed: boolean;
 }) {
   return (
-    <section className="py-1.5">
+    <section className="py-2">
       {collapsed ? (
         action ? (
           <div className="flex justify-center pb-1">
@@ -442,7 +432,7 @@ function Section({
               onClick={onNavigate}
               title={`${title}: ${action.label}`}
               aria-label={`${title}: ${action.label}`}
-              className="text-[13px] leading-none text-muted transition-colors hover:text-live"
+              className="grid size-6 place-items-center rounded-md text-[14px] leading-none text-muted transition-colors hover:bg-raised hover:text-ink"
             >
               +
             </Link>
@@ -451,12 +441,16 @@ function Section({
       ) : (
         <div className="flex items-center gap-2 px-3 pb-1.5">
           <h2 className="t-eyebrow">{title}</h2>
-          {meta ? <span className="tnum text-[10px] text-muted/60">{meta}</span> : null}
+          {meta ? (
+            <span className="tnum rounded-full bg-raised px-1.5 text-[10.5px] font-medium text-muted">
+              {meta}
+            </span>
+          ) : null}
           {action ? (
             <Link
               href={action.href}
               onClick={onNavigate}
-              className="ml-auto text-[10px] text-muted transition-colors hover:text-live"
+              className="ml-auto rounded-md px-1.5 py-0.5 text-[12px] font-medium text-accent transition-colors hover:bg-accent-soft"
             >
               + {action.label}
             </Link>
@@ -469,22 +463,34 @@ function Section({
 }
 
 /**
- * A glyph per admin destination, so the collapsed rail keeps two distinguishable
- * rows instead of two identical dots.
+ * Glyphs for the nav, so the collapsed rail keeps distinguishable rows instead
+ * of identical dots. 16px, 1.5 stroke, currentColor.
  */
-function AdminGlyph({ kind }: { kind: "people" | "log" }) {
+function NavGlyph({ kind }: { kind: "overview" | "lists" | "people" | "log" }) {
   return (
-    <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden="true" className="shrink-0">
-      {kind === "people" ? (
+    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className="shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      {kind === "overview" ? (
         <>
-          <circle cx={4.5} cy={4} r={2} fill="none" stroke="currentColor" strokeWidth={1.1} />
-          <path d="M1.5 10c0-1.7 1.3-2.8 3-2.8s3 1.1 3 2.8" fill="none" stroke="currentColor" strokeWidth={1.1} />
-          <path d="M8.5 10c0-1.4-.5-2.3-1.3-2.8" fill="none" stroke="currentColor" strokeWidth={1.1} opacity={0.55} />
+          <rect x={2} y={2} width={5} height={6} rx={1.4} />
+          <rect x={9} y={2} width={5} height={3.5} rx={1.4} />
+          <rect x={9} y={7.5} width={5} height={6.5} rx={1.4} />
+          <rect x={2} y={10} width={5} height={4} rx={1.4} />
+        </>
+      ) : kind === "lists" ? (
+        <>
+          <path d="M6 4h7.5M6 8h7.5M6 12h7.5" />
+          <path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
+        </>
+      ) : kind === "people" ? (
+        <>
+          <circle cx={6} cy={5.5} r={2.4} />
+          <path d="M1.8 13.5c.2-2.3 1.9-3.6 4.2-3.6s4 1.3 4.2 3.6" />
+          <path d="M10.8 3.4a2.3 2.3 0 0 1 0 4.2M12.6 10.3c1 .6 1.6 1.6 1.7 3.2" />
         </>
       ) : (
         <>
-          <rect x={2} y={1.5} width={8} height={9} rx={1} fill="none" stroke="currentColor" strokeWidth={1.1} />
-          <path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="currentColor" strokeWidth={1.1} />
+          <rect x={3} y={1.8} width={10} height={12.4} rx={2} />
+          <path d="M5.6 5.6h4.8M5.6 8h4.8M5.6 10.4h2.8" />
         </>
       )}
     </svg>
@@ -508,13 +514,13 @@ function RailNote({
 }) {
   if (collapsed) return null;
   if (!href) {
-    return <p className="px-3 py-1.5 text-[11px] text-muted">{children}</p>;
+    return <p className="px-4 py-1.5 text-[12px] text-muted">{children}</p>;
   }
   return (
     <Link
       href={href}
       onClick={onNavigate}
-      className="block px-3 py-1.5 text-[11px] text-muted transition-colors hover:text-live"
+      className="mx-2 block rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[12px] text-accent transition-colors hover:bg-accent-soft"
     >
       {children}
     </Link>
@@ -545,12 +551,12 @@ function RailLink({
       /* A filled pill rather than a left rule: the accent marks "you are here",
          which is interaction, and must not borrow the signal vocabulary that
          means "this data is alive". */
-      className={`mx-2 flex items-center gap-2 rounded-[var(--radius-sm)] py-[7px] text-[12.5px] transition-all duration-[var(--tween-fast)] ${
+      className={`mx-2 flex items-center gap-2.5 rounded-[var(--radius-sm)] py-2 text-[13px] transition-colors duration-[var(--tween-fast)] ${
         collapsed ? "justify-center px-0" : "px-2.5"
       } ${
         active
-          ? "bg-accent/12 font-medium text-ink shadow-sm ring-1 ring-accent/25"
-          : "text-secondary hover:bg-raised hover:text-ink"
+          ? "bg-accent-soft font-semibold text-accent"
+          : "font-medium text-secondary hover:bg-raised hover:text-ink"
       }`}
     >
       {children}
@@ -564,7 +570,7 @@ function RailSkeleton({ rows, collapsed }: { rows: number; collapsed: boolean })
       {Array.from({ length: rows }, (_, index) => (
         <li
           key={index}
-          className="h-2.5 bg-line"
+          className="h-3 rounded-md bg-raised"
           style={{ width: collapsed ? "100%" : `${80 - index * 12}%` }}
         />
       ))}

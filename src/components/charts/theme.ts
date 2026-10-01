@@ -7,24 +7,17 @@
  * colour would destroy that meaning. So the categorical ramp is cool and
  * neutral hues only.
  *
- * The order below is not cosmetic - it was chosen by running the palette
- * validator against the card surface (#1A1F29) and keeping an ordering that
- * passes every gate:
- *
- *   lightness band      all 5 inside L 0.48-0.67
- *   chroma floor        all 5 >= 0.1
- *   CVD separation      worst adjacent dE 13.0 (deutan)
- *   normal-vision floor worst adjacent dE 19.7
- *   contrast vs surface all 5 >= 3:1
- *
- * Re-run the validator before changing or extending this list.
+ * Mid-tone hues that hold 3:1 against both the white and the dark card
+ * surface, so one ramp serves both themes and a chart does not shift colour
+ * when the theme flips. Indigo leads because it is the brand accent; the rest
+ * are spaced around the wheel for separation.
  */
 export const SERIES_COLORS = [
-  "#3987e5", // blue
-  "#199e70", // aqua
-  "#9085e9", // violet
-  "#d55181", // magenta
-  "#008300", // green
+  "#6366f1", // indigo
+  "#0891b2", // cyan
+  "#a855f7", // violet
+  "#db2777", // magenta
+  "#059669", // emerald
 ] as const;
 
 /**
@@ -32,7 +25,7 @@ export const SERIES_COLORS = [
  * folded into one "Other" bucket rather than cycling hues back to the start.
  */
 export const MAX_SERIES = SERIES_COLORS.length;
-export const OTHER_COLOR = "#6b7488"; // slate, clearly outside the ramp
+export const OTHER_COLOR = "#94a3b8"; // slate, clearly outside the ramp
 
 export const OTHER_LABEL = "Other";
 
@@ -43,12 +36,12 @@ export function seriesColor(index: number): string {
 
 export const AXIS_TICK = {
   fill: "var(--text-muted)",
-  fontSize: 11,
-  fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
+  fontSize: 11.5,
+  fontFamily: "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
 } as const;
 
 export const GRID_STROKE = "var(--border)";
-export const CURSOR_STROKE = "var(--signal-live)";
+export const CURSOR_STROKE = "var(--border-strong)";
 export const ALERT_COLOR = "var(--signal-alert)";
 
 /** Short enough that the panel still feels fast, per the brief. */
@@ -66,4 +59,4 @@ export const DATA_TWEEN_MS = 360;
  */
 export const ANIMATION_MARK_BUDGET = 400;
 
-export const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: 0 } as const;
+export const CHART_MARGIN = { top: 12, right: 26, bottom: 0, left: 4 } as const;

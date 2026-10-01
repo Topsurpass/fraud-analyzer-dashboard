@@ -54,12 +54,12 @@ export default function NewDashboardPage() {
             />
           </Field>
 
-          <p className="text-[11px] text-muted">
+          <p className="text-[12.5px] text-muted">
             Dashboards live on the engine, so the same boards appear on every machine.
           </p>
 
           {error ? (
-            <p className="border border-change/40 bg-change/5 px-2.5 py-1.5 text-[11px] text-change">
+            <p className="border border-change/40 bg-change/5 px-2.5 py-1.5 text-[12.5px] text-change">
               {error}
             </p>
           ) : null}

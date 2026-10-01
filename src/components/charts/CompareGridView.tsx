@@ -213,7 +213,7 @@ function SmallPanel({
                 style={{ backgroundColor: ALERT_COLOR }}
               />
             )}
-            <span className="truncate text-[11px] text-strong" title={panel.category}>
+            <span className="truncate text-[12.5px] text-ink" title={panel.category}>
               {panel.category}
             </span>
           </span>
@@ -227,7 +227,7 @@ function SmallPanel({
              */}
             {panel.surges.length > 0 && (
               <span
-                className="tnum shrink-0 rounded-[3px] px-1 py-px text-[10px] font-medium leading-tight"
+                className="tnum shrink-0 rounded-[3px] px-1 py-px text-[11.5px] font-medium leading-tight"
                 style={{ border: `1px solid ${CHANGE_COLOR}`, color: CHANGE_COLOR }}
                 title={`${panel.surges.length} hour${panel.surges.length === 1 ? "" : "s"} crossed the threshold against the hour before`}
               >
@@ -252,13 +252,13 @@ function SmallPanel({
           <PanelLines panel={panel} width={PANEL_W} height={PANEL_H} />
         </svg>
 
-        <div className="tnum mt-0.5 flex items-baseline justify-between gap-1 text-[10px] text-muted">
+        <div className="tnum mt-0.5 flex items-baseline justify-between gap-1 text-[11.5px] text-muted">
           <span>
             <span className="sr-only">previous total </span>
             {formatAxisValue(panel.previousTotal)}
             <span aria-hidden="true"> → </span>
             <span className="sr-only">current total </span>
-            <span className="text-strong">{formatAxisValue(panel.currentTotal)}</span>
+            <span className="text-ink">{formatAxisValue(panel.currentTotal)}</span>
           </span>
           {/*
            * Each panel is scaled to its own peak, so the peak has to be
@@ -298,7 +298,7 @@ function MaximisedPanel({
   const labelEvery = Math.max(1, Math.ceil(panel.points.length / 8));
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col px-5 pb-4">
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
           {panel.alert && (
@@ -308,22 +308,22 @@ function MaximisedPanel({
               style={{ backgroundColor: ALERT_COLOR }}
             />
           )}
-          <span className="truncate text-sm text-strong">{panel.category}</span>
+          <span className="truncate text-sm text-ink">{panel.category}</span>
           <ChangeBadge verdict={panel.verdict} subject={panel.category} />
         </span>
         <button
           type="button"
           onClick={onBack}
-          className="shrink-0 text-[11px] text-muted underline decoration-dotted underline-offset-2 hover:text-strong"
+          className="shrink-0 text-[12.5px] text-muted underline decoration-dotted underline-offset-2 hover:text-ink"
         >
           ← All terminals
         </button>
       </div>
 
-      <div className="tnum mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted">
+      <div className="tnum mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12.5px] text-muted">
         <span>
           {formatAxisValue(panel.previousTotal)} <span aria-hidden="true">→</span>{" "}
-          <span className="text-strong">{formatAxisValue(panel.currentTotal)}</span>
+          <span className="text-ink">{formatAxisValue(panel.currentTotal)}</span>
         </span>
         <span>peak {formatAxisValue(panel.peak)}</span>
         <span>
@@ -381,7 +381,7 @@ function MaximisedPanel({
         </svg>
       </div>
 
-      <div className="mt-1 flex justify-between text-[10px] text-muted">
+      <div className="mt-1 flex justify-between text-[11.5px] text-muted">
         {panel.points.map((entry, index) =>
           index % labelEvery === 0 ? (
             <span key={entry.bucket || index} className="tnum truncate">
@@ -392,14 +392,14 @@ function MaximisedPanel({
       </div>
 
       {/* A fixed-height readout, so the plot never jumps as the pointer moves. */}
-      <div className="tnum mt-1 h-4 text-[11px] leading-4 text-muted">
+      <div className="tnum mt-1 h-4 text-[12.5px] leading-4 text-muted">
         {point ? (
           <span>
             {point.bucket}:{" "}
             {point.current === null ? (
               "no rows"
             ) : (
-              <span className="text-strong">{formatAxisValue(point.current)}</span>
+              <span className="text-ink">{formatAxisValue(point.current)}</span>
             )}
             {point.previous !== null && (
               <>
@@ -478,8 +478,8 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
   const hidden = focused.length - shown.length;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+    <div className="flex h-full flex-col px-5 pb-4">
+      <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-muted">
         <span className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
@@ -506,7 +506,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
         <button
           type="button"
           onClick={() => setPicking((isOpen) => !isOpen)}
-          className="ml-auto shrink-0 underline decoration-dotted underline-offset-2 hover:text-strong"
+          className="ml-auto shrink-0 rounded-full border border-line px-3 py-1 text-[12px] font-medium text-secondary transition-colors hover:border-line-strong hover:text-ink"
           aria-expanded={picking}
         >
           {focus.selected.size > 0 ? `${focus.selected.size} chosen` : "Choose terminals"}
@@ -516,7 +516,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
       {picking && (
         <div className="mb-1.5 max-h-32 overflow-auto border border-line/60 p-1.5">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[11px] text-muted">
+            <span className="text-[12.5px] text-muted">
               Showing {focus.selected.size === 0 ? "all" : focus.selected.size} of{" "}
               {data.panels.length}
             </span>
@@ -524,7 +524,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
               <button
                 type="button"
                 onClick={focus.clear}
-                className="text-[11px] text-muted underline decoration-dotted underline-offset-2 hover:text-strong"
+                className="text-[12.5px] text-muted underline decoration-dotted underline-offset-2 hover:text-ink"
               >
                 Show all
               </button>
@@ -533,7 +533,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
           <ul className="grid gap-x-2 [grid-template-columns:repeat(auto-fill,minmax(8rem,1fr))]">
             {data.panels.map((panel) => (
               <li key={panel.category}>
-                <label className="flex cursor-pointer items-center gap-1.5 py-px text-[11px] text-muted hover:text-strong">
+                <label className="flex cursor-pointer items-center gap-1.5 py-px text-[12.5px] text-muted hover:text-ink">
                   <input
                     type="checkbox"
                     checked={focus.isSelected(panel.category)}
@@ -557,7 +557,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
 
       <div className="min-h-0 flex-1 overflow-auto">
         {shown.length === 0 ? (
-          <p className="py-4 text-center text-[11px] text-muted">
+          <p className="py-4 text-center text-[12.5px] text-muted">
             No chosen terminal appears in this result.
           </p>
         ) : (
@@ -581,7 +581,7 @@ export function CompareGridView({ data, title, chartId }: CompareGridViewProps) 
           <button
             type="button"
             onClick={() => setExpanded((isOpen) => !isOpen)}
-            className="mt-1.5 text-[11px] text-muted underline decoration-dotted underline-offset-2 hover:text-strong"
+            className="mt-1.5 text-[12.5px] text-muted underline decoration-dotted underline-offset-2 hover:text-ink"
           >
             {expanded ? "Show fewer" : `Show ${hidden} quieter`}
           </button>

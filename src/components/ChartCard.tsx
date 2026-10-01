@@ -3,6 +3,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import type { ChartType, RunResponse, SavedQueryRead } from "@/contracts/api";
 import {
+  buildBiaxial,
   buildCartesian,
   buildCompare,
   buildHeatmap,
@@ -16,12 +17,21 @@ import Link from "next/link";
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { FlaggedBadge } from "./FlaggedBadge";
-import { formatDuration, formatHash, formatInteger, formatRelative } from "@/services/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatHash,
+  formatInteger,
+  formatInterval,
+  formatRelative,
+  formatUntil,
+} from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
-import { PulseLine } from "./PulseLine";
+import { BiaxialBarChartView } from "./charts/BiaxialBarChartView";
 import { CartesianChartView } from "./charts/CartesianChartView";
+import { FlagStrip } from "./charts/FlagStrip";
 import { ChartSkeleton } from "./charts/ChartSkeleton";
 import { NumberCardView } from "./charts/NumberCardView";
 import { PieChartView } from "./charts/PieChartView";
@@ -35,7 +45,7 @@ import { TableView } from "./charts/TableView";
  * One live reading on the grid.
  *
  * The card owns its own poll loop, so a failing query degrades alone instead of
- * taking the dashboard with it, and the pulse line in its header is wired
+ * taking the dashboard with it, and the live indicator in its header is wired
  * straight to that loop's real state.
  */
 
@@ -72,6 +82,22 @@ export interface ChartCardProps {
   title?: string;
   className?: string;
   style?: React.CSSProperties;
+}
+
+/**
+ * What a payload asks the card to draw: the rows' hash plus every chart's type
+ * and field mapping. Two payloads with the same key render identically, so the
+ * second can be skipped; a different key must be re-shaped.
+ */
+function drawingKey(response: RunResponse | null): string | null {
+  if (!response) return null;
+  const charts = response.charts
+    .map(
+      (chart) =>
+        `${chart.id}:${chart.type}:${chart.x_field ?? ""}:${chart.y_field ?? ""}:${chart.series_field ?? ""}:${chart.surge_threshold_pct ?? ""}`,
+    )
+    .join("|");
+  return `${response.data_hash}#${charts}`;
 }
 
 export function ChartCard({
@@ -111,12 +137,17 @@ export function ChartCard({
    * every card on the board; keying it on the hash means the work happens when
    * the data moved and not otherwise.
    *
+   * "Differed" means the rows OR how they are drawn. Changing a chart's type
+   * re-runs the query and comes back with the same rows, so the same hash, but
+   * a different `charts` mapping. Keyed on the hash alone that answer was
+   * thrown away and the card kept drawing the old type until a full reload.
+   *
    * Adjusting state during render is React's documented way to derive from a
    * changing prop without an extra pass, and it is the pattern the poll loop
    * itself uses to reset when the query id changes.
    */
   const [shaped, setShaped] = useState<RunResponse | null>(snapshot);
-  if (snapshot?.data_hash !== shaped?.data_hash) setShaped(snapshot);
+  if (drawingKey(snapshot) !== drawingKey(shaped)) setShaped(snapshot);
 
   /*
    * Hand the shaping to React at transition priority.
@@ -162,6 +193,10 @@ export function ChartCard({
       columns: source.columns,
       rows: source.rows,
       chart: spec,
+      // The engine's verdict on which rows the query's flag rules caught. Left
+      // out, every builder sees "no rules" and no chart can mark, or name, a
+      // single flagged point.
+      flags: source.flags,
     };
 
     switch (spec.type) {
@@ -173,6 +208,11 @@ export function ChartCard({
         return { kind: "table" as const, data: buildTable(result) };
       case "bar":
         return { kind: "bar" as const, data: buildCartesian(result) };
+      // Same shaping as a bar: a stack is a bar whose series share a column.
+      case "stacked_bar":
+        return { kind: "stacked_bar" as const, data: buildCartesian(result) };
+      case "biaxial_bar":
+        return { kind: "biaxial_bar" as const, data: buildBiaxial(result) };
       case "compare":
         return { kind: "compare" as const, data: buildCompare(result) };
       case "compare_grid":
@@ -205,30 +245,12 @@ export function ChartCard({
          off screen. A board of twenty charts otherwise pays for all twenty on
          every render even though four are visible - the single cheapest thing
          that makes a long dashboard feel immediate. */
-      className={`defer-paint group flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-sm transition-all duration-[var(--tween-fast)] hover:border-line-strong hover:shadow ${className ?? ""}`}
+      className={`defer-paint group flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border bg-surface shadow-sm transition-[border-color,box-shadow] duration-[var(--tween-fast)] hover:shadow ${
+        justChanged ? "border-change/40" : "border-line hover:border-line-strong"
+      } ${className ?? ""}`}
     >
       <header className="shrink-0">
-        {/*
-         * One hairline at the top of the card, coloured by the poll's own
-         * state. It is the pulse line's reading at a glance: from across the
-         * room a grid of cards shows which ones just moved without any of their
-         * text being legible. Live and change only - the alert colour stays
-         * inside chart data.
-         */}
-        <div
-          aria-hidden="true"
-          className="h-px w-full transition-colors duration-300"
-          style={{
-            background:
-              poll.phase === "error"
-                ? "var(--border)"
-                : justChanged
-                  ? "var(--signal-change)"
-                  : "var(--signal-live-dim)",
-          }}
-        />
-
-        <div className="flex items-start gap-2 px-3 pt-2 pb-1">
+        <div className="flex items-start gap-2 px-5 pt-4 pb-2">
           <div className="min-w-0 flex-1">
             {/* The chart's own name, not the query's. Four charts of one query
                 all headed "Transaction Summary" are four cards nobody can tell
@@ -237,9 +259,6 @@ export function ChartCard({
               <h3 className="t-card truncate" title={cardTitle}>
                 {cardTitle}
               </h3>
-              {/* Beside the name, not below it: "who can see this" belongs to
-                  the chart's identity, and a reader scanning a board should
-                  not have to look in a second place for it. */}
               {publishedChart ? <PublishedBadge chart={publishedChart} /> : null}
             </div>
             {/* The query underneath, so a card still says where its data came
@@ -252,62 +271,49 @@ export function ChartCard({
               <p className="t-sub mt-0.5 truncate">{query.description}</p>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-2">
             {/* Findings waiting on this query. Links into the review queue,
-                  because seeing the count is only useful if the next step is
-                  one click away. */}
+                because seeing the count is only useful if the next step is
+                one click away. */}
             {flaggedCount > 0 ? (
               <Link
                 href={`/connections/${query.connection_id}/flagged`}
                 aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
-               >
+              >
                 <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
               </Link>
             ) : null}
-            {/* Colour plus a word: the change state is never colour alone. */}
-            {justChanged ? (
-              <span className="tnum text-[9px] tracking-widest text-change uppercase">
-                changed
-              </span>
-            ) : null}
+            <LivePill phase={poll.phase} justChanged={justChanged} />
             {actions}
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
             {published ? null : (
-            <CardMenu
-              query={query}
-              chartId={chartId}
-              currentChartType={chartType}
-              isPublished={publishedChart?.is_public ?? false}
-              onMutated={() => {
-                // Re-poll immediately so a new chart type is drawn now rather
-                // than at the end of this card's interval.
-                poll.refresh();
-                onChanged?.();
-              }}
-              onDeleted={onDeleted}
-              extra={menuExtra}
-            />
+              <CardMenu
+                query={query}
+                chartId={chartId}
+                currentChartType={chartType}
+                isPublished={publishedChart?.is_public ?? false}
+                onMutated={() => {
+                  // Re-read the result now so a new chart type, or the run
+                  // that was just asked for, is drawn at once rather than at
+                  // the end of this card's interval. A re-read, not a forced
+                  // poll: the engine's cache is already right, and forcing
+                  // would run the query on the database a second time for a
+                  // change that does not need it.
+                  poll.resync();
+                  onChanged?.();
+                }}
+                onDeleted={onDeleted}
+                extra={menuExtra}
+              />
             )}
           </div>
         </div>
-
-        <PulseLine
-          className="block w-full"
-          phase={poll.phase}
-          changeSeq={poll.changeSeq}
-          pollSeq={poll.pollSeq}
-          lastPolledAt={poll.lastPolledAt}
-          lastChangedAt={poll.lastChangedAt}
-        />
-
-        <StatusLine
-          poll={poll}
-          now={now}
-          chartType={chartType}
-        />
       </header>
+
+      {/* The rules behind the marks below. A table lists its own in its footer. */}
+      {chartType !== "table" ? <FlagStrip flags={source?.flags} /> : null}
 
       <div className="min-h-0 flex-1">
         {poll.phase === "error" && !snapshot ? (
@@ -322,6 +328,8 @@ export function ChartCard({
           <CompareGridView data={view.data} title={cardTitle} chartId={spec?.id} />
         ) : view.kind === "movers" ? (
           <MoversView data={view.data} title={cardTitle} />
+        ) : view.kind === "biaxial_bar" ? (
+          <BiaxialBarChartView data={view.data} title={cardTitle} />
         ) : view.kind === "heatmap" ? (
           <HeatmapView data={view.data} title={cardTitle} />
         ) : view.kind === "pie" ? (
@@ -333,6 +341,8 @@ export function ChartCard({
         )}
       </div>
 
+      <StatusLine poll={poll} now={now} chartType={chartType} />
+
       {/* A stale card must say so even while it still shows its last good data. */}
       {poll.phase === "error" && snapshot ? (
         <CardErrorBanner
@@ -343,7 +353,7 @@ export function ChartCard({
       ) : null}
 
       {warnings.length > 0 ? (
-        <ul className="border-t border-line px-3 py-1.5 text-[10px] text-change">
+        <ul className="border-t border-line px-5 py-2 text-[12px] text-change">
           {warnings.slice(0, 2).map((warning) => (
             <li key={warning} className="truncate" title={warning}>
               {warning}
@@ -352,6 +362,50 @@ export function ChartCard({
         </ul>
       ) : null}
     </article>
+  );
+}
+
+/**
+ * The card's pulse, in one glance: a beating dot while polling is healthy, an
+ * amber "changed" when the last poll brought new data, grey when paused and a
+ * rose dot on failure. The word always comes with the colour.
+ */
+function LivePill({
+  phase,
+  justChanged,
+}: {
+  phase: ReturnType<typeof useQueryPolling>["phase"];
+  justChanged: boolean;
+}) {
+  if (justChanged) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-change/12 px-2 py-0.5 text-[11px] font-medium text-change">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+        changed
+      </span>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <span
+        className="size-2 rounded-full bg-alert"
+        title="Polling is failing"
+        role="img"
+        aria-label="Polling is failing"
+      />
+    );
+  }
+  if (phase === "paused") return null;
+  return (
+    <span
+      className="relative inline-grid size-2 place-items-center text-live"
+      title="Live: polling"
+      role="img"
+      aria-label="Live"
+    >
+      <span className="beacon absolute inset-0 rounded-full" aria-hidden="true" />
+      <span className="relative size-2 rounded-full bg-current" aria-hidden="true" />
+    </span>
   );
 }
 
@@ -367,32 +421,62 @@ function StatusLine({
   const snapshot = poll.snapshot;
 
   return (
-    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-b border-line px-3 pt-0.5 pb-1.5 text-[10px] text-muted">
+    <div className="flex min-w-0 items-center gap-2 overflow-hidden border-t border-line px-5 py-2.5 text-[11.5px] text-muted">
       <span className="tnum shrink-0">
-        {snapshot ? `${formatInteger(snapshot.row_count)} rows` : "-- rows"}
+        {snapshot
+          ? `${formatInteger(snapshot.row_count)} ${snapshot.row_count === 1 ? "row" : "rows"}`
+          : "-- rows"}
       </span>
       <span aria-hidden="true" className="text-line-strong">
-        |
+        ·
       </span>
       <span className="tnum shrink-0">{formatDuration(snapshot?.duration_ms ?? null)}</span>
       <span aria-hidden="true" className="text-line-strong">
-        |
+        ·
       </span>
-      <span className="tnum truncate" title={poll.dataHash ?? undefined}>
+      <span className="mono truncate opacity-80" title={poll.dataHash ?? undefined}>
         {formatHash(poll.dataHash)}
       </span>
-      <span className="tnum ml-auto shrink-0 whitespace-nowrap">
-        {poll.phase === "paused"
-          ? "paused"
-          : formatRelative(
-              poll.lastPolledAt ? new Date(poll.lastPolledAt).toISOString() : null,
-              now,
-            )}
+      <span
+        className="tnum ml-auto shrink-0 whitespace-nowrap"
+        title={scheduleTitle(poll)}
+      >
+        {poll.phase === "paused" ? "paused" : scheduleText(poll, now)}
       </span>
       <span className="sr-only">{chartType} chart</span>
     </div>
   );
 }
+
+/**
+ * When the query last *ran*, and when it runs next.
+ *
+ * Not "when did I last ask": a poll inside the interval is answered from the
+ * engine's cache and runs nothing, so that time moves every visit and says
+ * nothing about the data. The execution time only moves when the database was
+ * actually queried, and the next run is counted from it, so leaving the page and
+ * coming back changes neither. "Next" is left out for short intervals, where a
+ * countdown would only tick.
+ */
+function scheduleText(poll: ReturnType<typeof useQueryPolling>, now: number): string {
+  const ran = poll.executedAt;
+  if (ran === null) {
+    // An engine that does not report it: the last time we heard from it.
+    return formatRelative(poll.lastPolledAt ? new Date(poll.lastPolledAt).toISOString() : null, now);
+  }
+  const text = `ran ${formatRelative(new Date(ran).toISOString(), now)}`;
+  if (poll.pollIntervalMs < NEXT_RUN_FROM_MS || poll.nextPollAt === null) return text;
+  // Counted from the run, not from our own next poll, which sits a moment past it.
+  return `${text} · next ${formatUntil(ran + poll.pollIntervalMs - now)}`;
+}
+
+function scheduleTitle(poll: ReturnType<typeof useQueryPolling>): string | undefined {
+  if (poll.executedAt === null) return undefined;
+  return `Last run ${formatDateTime(new Date(poll.executedAt).toISOString())}. The query runs at most once every ${formatInterval(poll.pollIntervalMs)}, however often this page is opened.`;
+}
+
+/** Below this the "next run" countdown only ticks and is left out. */
+const NEXT_RUN_FROM_MS = 30_000;
 
 function CardError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -401,7 +485,7 @@ function CardError({ message, onRetry }: { message: string; onRetry: () => void 
       <button
         type="button"
         onClick={onRetry}
-        className="border border-line-strong px-2.5 py-1 text-[11px] text-muted transition-colors hover:border-live hover:text-live"
+        className="rounded-[var(--radius-sm)] border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
       >
         Retry
       </button>
@@ -419,8 +503,8 @@ function CardErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 border-t border-line bg-sunken px-3 py-1.5">
-      <span className="text-[10px] text-muted">
+    <div className="flex items-center gap-2 border-t border-change/25 bg-change/8 px-5 py-2">
+      <span className="text-[12px] text-change">
         Stale · {message}
         {attempts > 1 ? (
           <span className="tnum"> ({attempts} attempts)</span>
@@ -429,7 +513,7 @@ function CardErrorBanner({
       <button
         type="button"
         onClick={onRetry}
-        className="ml-auto text-[10px] text-live underline-offset-2 hover:underline"
+        className="ml-auto text-[12px] font-medium text-accent underline-offset-2 hover:underline"
       >
         Retry
       </button>
@@ -460,9 +544,9 @@ function ExpandButton({
       aria-pressed={expanded}
       aria-label={expanded ? `Shrink ${name}` : `Expand ${name}`}
       title={expanded ? "Shrink" : "Expand"}
-      className="shrink-0 px-1 text-muted transition-colors hover:text-live"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-raised hover:text-ink"
     >
-      <svg width={11} height={11} viewBox="0 0 12 12" aria-hidden="true">
+      <svg width={13} height={13} viewBox="0 0 12 12" aria-hidden="true">
         {expanded ? (
           <>
             <path d="M5 1v4H1" fill="none" stroke="currentColor" strokeWidth={1.25} />

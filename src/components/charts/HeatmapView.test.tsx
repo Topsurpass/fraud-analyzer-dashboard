@@ -93,7 +93,8 @@ describe("HeatmapView", () => {
     );
     render(<HeatmapView data={data} title="By terminal" />);
 
-    expect(screen.getByTitle("T1 · 10 · 90")).toHaveStyle({
+    // The title names the rule that flagged it, not just that it was flagged.
+    expect(screen.getByTitle("T1 · 10 · 90 · flagged by Spike")).toHaveStyle({
       outline: "1.5px solid var(--signal-alert)",
     });
     // And the legend explains what the outline means.
@@ -135,7 +136,9 @@ describe("HeatmapView", () => {
     );
     render(<HeatmapView data={data} title="By terminal" />);
 
-    expect(screen.getByTitle("T1 · 10 · 90")).toHaveTextContent("flagged");
+    expect(screen.getByTitle("T1 · 10 · 90 · flagged by Spike")).toHaveTextContent(
+      "flagged by Spike",
+    );
   });
 
   it("emits the exact selector the browser smoke lane counts", () => {

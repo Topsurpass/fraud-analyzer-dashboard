@@ -157,3 +157,99 @@ describe("Popover", () => {
     expect(screen.getByText("second panel")).toBeInTheDocument();
   });
 });
+
+/**
+ * The bug: the card menu is 15 items and about 570px tall, and drawn inside its
+ * card it was clipped by the card's `overflow-hidden` (and by the paint
+ * containment `defer-paint` adds, which clips even `position: fixed`). Five
+ * items were reachable on a number card, nine on the rest. jsdom has no layout,
+ * so what is asserted is the structure that fixes it: the panel is not inside
+ * the card at all. `scripts/check-layout.mjs` measures the real thing.
+ */
+describe("Popover panel placement", () => {
+  function InCard() {
+    return (
+      <div data-testid="card" className="overflow-hidden">
+        <Popover label="Actions for card" trigger={<span aria-hidden="true">⋯</span>}>
+          <Item label="First" keepOpen />
+          <Item label="Last" keepOpen />
+        </Popover>
+      </div>
+    );
+  }
+
+  it("draws the panel outside the card that opened it", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    await open(user);
+    const item = screen.getByRole("button", { name: "First" });
+    expect(item.closest('[data-testid="card"]')).toBeNull();
+    const panel = item.parentElement as HTMLElement;
+    expect(panel.parentElement).toBe(document.body);
+    expect(panel.style.position).toBe("fixed");
+  });
+
+  it("is placed, and visible, once it has been measured", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    await open(user);
+    const panel = screen.getByRole("button", { name: "First" }).parentElement as HTMLElement;
+    expect(panel.style.visibility).not.toBe("hidden");
+    expect(panel.style.maxHeight).not.toBe("");
+    expect(panel.className).toContain("overflow-y-auto");
+  });
+
+  it("keeps the panel open when the click lands inside it", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "First" }));
+    expect(screen.getByRole("button", { name: "First" })).toBeInTheDocument();
+  });
+
+  it("still closes on a click anywhere else", async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <p>elsewhere</p>
+        <InCard />
+      </div>,
+    );
+    await open(user);
+    await user.click(screen.getByText("elsewhere"));
+    expect(screen.queryByRole("button", { name: "First" })).not.toBeInTheDocument();
+  });
+
+  it("is reachable from the keyboard although it moved in the DOM", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    // jsdom does not toggle a <details> on Enter; a real browser does, and
+    // `scripts/check-layout.mjs` drives that. Open it by click, then use keys.
+    await open(user);
+    screen.getByLabelText("Actions for card").focus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Last" })).toHaveFocus();
+  });
+
+  it("returns to the trigger, and closes, when tabbing past the last item", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    await open(user);
+    screen.getByRole("button", { name: "Last" }).focus();
+    await user.tab();
+    expect(screen.queryByRole("button", { name: "Last" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Actions for card")).toHaveFocus();
+  });
+
+  it("returns to the trigger, still open, on Shift+Tab from the first item", async () => {
+    const user = userEvent.setup();
+    render(<InCard />);
+    await open(user);
+    screen.getByRole("button", { name: "First" }).focus();
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "First" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Actions for card")).toHaveFocus();
+  });
+});

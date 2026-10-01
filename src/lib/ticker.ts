@@ -3,8 +3,8 @@
 /**
  * One requestAnimationFrame loop for every animated readout on the page.
  *
- * A dashboard can hold twenty pulse lines and a dozen counting numbers. Twenty
- * independent rAF loops all doing trivial work is how a "calm" panel starts
+ * A dashboard can hold a dozen counting numbers. Independent rAF loops, each
+ * doing trivial work, are how a "calm" panel starts
  * dropping frames, so everything shares this ticker and the loop stops entirely
  * when the last subscriber leaves.
  */

@@ -103,7 +103,10 @@ export function FlaggedBell() {
 			: `${total} flagged ${total === 1 ? "row" : "rows"}${unseen ? ", new since you last looked" : ""}`;
 
 	return (
-		<div className="relative" ref={containerRef}>
+		// `sm:relative`: on a phone the bell sits mid-header, and a panel hung from it
+		// ran 17-47px off the left edge. Below `sm` the panel hangs from the header
+		// (which is `relative`) and spans it instead.
+		<div className="sm:relative" ref={containerRef}>
 			<button
 				type="button"
 				aria-label={label}
@@ -115,15 +118,13 @@ export function FlaggedBell() {
 					// Opening it is the act of looking, so it stops being new.
 					if (!open) acknowledge();
 				}}
-				className="relative flex items-center p-1 text-muted transition-colors hover:text-ink"
+				className="relative grid size-9 place-items-center rounded-[var(--radius-sm)] border border-line bg-surface text-secondary shadow-sm transition-colors hover:border-line-strong hover:text-ink"
 			>
 				<BellGlyph ringing={unseen} />
 				{total > 0 ? (
 					<span
-						className={`tnum absolute -top-0.5 -right-0.5 min-w-[14px] border px-[3px] text-center text-[9px] leading-[13px] ${
-							unseen
-								? "border-alert bg-alert font-semibold text-bg"
-								: "border-line bg-surface text-muted"
+						className={`tnum absolute -top-1.5 -right-1.5 min-w-[18px] rounded-full border-2 border-[var(--bg)] px-1 text-center text-[10px] leading-[14px] font-semibold ${
+							unseen ? "bg-alert text-white" : "bg-raised text-secondary"
 						}`}
 					>
 						{total > 99 ? "99+" : formatInteger(total)}
@@ -134,9 +135,9 @@ export function FlaggedBell() {
 			{open ? (
 				<div
 					role="menu"
-					className="absolute top-full right-0 z-50 mt-1 w-64 border border-line bg-surface shadow-lg"
+					className="absolute inset-x-3 top-full z-50 mt-2 overflow-hidden sm:inset-x-auto sm:right-0 sm:w-72 rounded-[var(--radius)] border border-line bg-surface shadow-lg"
 				>
-					<p className="border-b border-line px-3 py-2 text-[11px] text-muted">
+					<p className="border-b border-line px-3 py-2.5 text-[12px] text-muted">
 						{total === 0 ? (
 							"Nothing is flagged right now."
 						) : (
@@ -160,7 +161,7 @@ export function FlaggedBell() {
 									<Link
 										href={`/connections/${entry.connection_id}/flagged`}
 										onClick={() => setOpen(false)}
-										className="flex items-center gap-2 px-3 py-2 text-[12px] transition-colors hover:bg-sunken"
+										className="flex items-center gap-2 px-3 py-2.5 text-[13px] transition-colors hover:bg-raised"
 									>
 										<span className="truncate text-ink">
 											{entry.connection_name}
@@ -183,8 +184,8 @@ export function FlaggedBell() {
 function BellGlyph({ ringing }: { ringing: boolean }) {
 	return (
 		<svg
-			width={15}
-			height={15}
+			width={16}
+			height={16}
 			viewBox="0 0 16 16"
 			aria-hidden="true"
 			className={`shrink-0 ${ringing ? "-rotate-12" : ""}`}
