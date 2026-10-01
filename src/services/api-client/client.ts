@@ -21,6 +21,8 @@ import type {
 	PollResponse,
 	PreviewRequest,
 	PreviewResponse,
+	ChartDefinitionRead,
+	PublishRequestRead,
 	QueryChartInput,
 	QueryChart,
 	QueryChartSet,
@@ -620,6 +622,64 @@ export const unpublishChart = (chartId: string, options?: RequestOptions) =>
 	request<QueryChart>({
 		method: "POST",
 		path: `/queries/charts/${encodeURIComponent(chartId)}/unpublish`,
+		...options,
+	});
+
+/**
+ * Withdraw a request that is waiting, or dismiss the notice of a rejection.
+ *
+ * The author's way out: a pending request freezes the query, and this unfreezes
+ * it. Does nothing to a chart that is already published (use `unpublishChart`).
+ */
+export const cancelPublishRequest = (chartId: string, options?: RequestOptions) =>
+	request<QueryChart>({
+		method: "POST",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/publish/cancel`,
+		...options,
+	});
+
+/** Every request waiting for a decision, oldest first. Administrators only. */
+export const listPublishRequests = (options?: RequestOptions) =>
+	request<PublishRequestRead[]>({
+		method: "GET",
+		path: "/queries/charts/publish-requests",
+		...options,
+	});
+
+/** Publish a chart somebody asked to publish. Administrators only. */
+export const approvePublishRequest = (chartId: string, options?: RequestOptions) =>
+	request<QueryChart>({
+		method: "POST",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/publish/approve`,
+		...options,
+	});
+
+/**
+ * Decline a request. The chart goes back to private and the author sees the
+ * reason, if one is given. Administrators only.
+ */
+export const rejectPublishRequest = (
+	chartId: string,
+	reason: string | null,
+	options?: RequestOptions,
+) =>
+	request<QueryChart>({
+		method: "POST",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/publish/reject`,
+		body: { reason: reason && reason.trim() ? reason.trim() : null },
+		...options,
+	});
+
+/**
+ * The query and configuration behind a chart, read only.
+ *
+ * Anyone signed in may read a published chart's. The author and administrators
+ * may read it in any state, which is how an administrator reviews a request.
+ */
+export const getChartDefinition = (chartId: string, options?: RequestOptions) =>
+	request<ChartDefinitionRead>({
+		method: "GET",
+		path: `/queries/charts/${encodeURIComponent(chartId)}/definition`,
 		...options,
 	});
 
