@@ -63,6 +63,27 @@ describe("FlaggedProvider", () => {
     expect(screen.getByTestId("q1")).toHaveTextContent("5");
   });
 
+  it("names the connection a query's findings are on, and none for a query with none", async () => {
+    // A published chart seen by somebody else carries no connection of its own;
+    // this is what lets its flagged link point somewhere real.
+    function ConnectionProbe() {
+      const flagged = useFlagged();
+      return (
+        <div>
+          <span data-testid="conn">{flagged.connectionForQuery("q1") ?? "none"}</span>
+          <span data-testid="noconn">{flagged.connectionForQuery("nope") ?? "none"}</span>
+        </div>
+      );
+    }
+    render(
+      <FlaggedProvider>
+        <ConnectionProbe />
+      </FlaggedProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("conn")).toHaveTextContent("c1"));
+    expect(screen.getByTestId("noconn")).toHaveTextContent("none");
+  });
+
   it("reports zero for anything the summary does not mention", async () => {
     // Most connections have nothing flagged and are simply absent from the
     // payload; that must read as zero, not as undefined.

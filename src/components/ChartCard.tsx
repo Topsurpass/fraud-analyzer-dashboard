@@ -119,6 +119,10 @@ export function ChartCard({
   const flagged = useFlagged();
   const flaggedCount = flagged.countForQuery(query.id);
   const flaggedSeverity = flagged.severityForQuery(query.id);
+  // A published chart seen by somebody else has no connection id of its own, so
+  // the link used to point at /connections/undefined/flagged. The summary knows
+  // which connection holds the findings.
+  const flaggedConnectionId = query.connection_id ?? flagged.connectionForQuery(query.id);
   const poll = useQueryPolling(published && chartId ? chartId : query.id, {
     enabled,
     published,
@@ -277,12 +281,16 @@ export function ChartCard({
                 because seeing the count is only useful if the next step is
                 one click away. */}
             {flaggedCount > 0 ? (
-              <Link
-                href={`/connections/${query.connection_id}/flagged`}
-                aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
-              >
+              flaggedConnectionId ? (
+                <Link
+                  href={`/connections/${flaggedConnectionId}/flagged`}
+                  aria-label={`Review ${flaggedCount} flagged rows from ${query.name}`}
+                >
+                  <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
+                </Link>
+              ) : (
                 <FlaggedBadge count={flaggedCount} severity={flaggedSeverity} />
-              </Link>
+              )
             ) : null}
             <LivePill phase={poll.phase} justChanged={justChanged} />
             {actions}
