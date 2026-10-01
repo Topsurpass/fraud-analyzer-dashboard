@@ -682,6 +682,16 @@ Two causes, and the message tells them apart:
   project's engine. `curl -X POST <engine>/auth/login` with a real account and compare the
   `user` it returns with `UserRead` in `src/contracts/api.ts`.
 
+### Which build is live
+
+`GET /version` answers without a sign-in: the commit and branch Vercel built, the
+environment, and two booleans, `engineConfigured` (is `ENGINE_BASE_URL` set) and
+`apiBaseUrlOverrideSet` (was `NEXT_PUBLIC_API_BASE_URL` present at build time; it should be
+`false`). Values are never printed. `curl https://<your-site>/version` settles whether a fix you
+pushed is the one being served: Vercel's "Redeploy" on an older deployment rebuilds that older
+commit, so the site can keep showing a bug that is already fixed. Compare `commit` with
+`git log -1 --format=%h` on the branch Vercel is set to deploy.
+
 ### The app icon
 
 The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon
