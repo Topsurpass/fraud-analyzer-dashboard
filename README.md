@@ -589,6 +589,38 @@ node scripts/shoot.mjs ./shots --chrome --theme=light --base=http://localhost:31
 fighting over `.next`. Use `localhost`, not `127.0.0.1`: Next blocks dev
 resources requested from the latter.
 
+### Flagged cards rise
+
+On a board of a dozen charts the one that has just been flagged should not be the
+one you scroll to find. Every grid (the connection page, each dashboard, the
+published section) puts cards that have flagged rows first, and when a poll flags a
+card it **glides** to the top over about 0.4 s while the card gets a brief amber
+ring. The order is:
+
+1. flagged before unflagged;
+2. the card flagged most recently first (the poll on which its count last went up);
+3. then the worse severity, then the larger count;
+4. then the order the page gave it. The sort is stable, so ties never shuffle.
+
+A card that arrives already flagged at page load is not "just flagged": it sorts by
+severity and count, and the first two seconds after a grid mounts apply the order
+without motion, so a page does not shuffle itself every time it opens. Dismissing a
+card's last flagged row sends it back to its place, smoothly. The animation is
+skipped under `prefers-reduced-motion`.
+
+**Cards never move out from under you.** The order is held, and applied the moment
+the hold ends, while a card menu or a dialog is open, a card is expanded, or the
+pointer is pressed. The DOM order is the visual order, deliberately (CSS `order`
+would leave keyboard and screen-reader order different from what is on screen).
+
+How it is built: `flagRanking.ts` is the arithmetic (comparator, "newly flagged"
+bookkeeping, the FLIP shifts) and is tested without a browser; `FlagOrder.tsx` is the
+provider and the grid hook (cards report through `useReportFlags`, the grid sorts and
+animates with the Web Animations API); `flagOrderHold.ts` is the hold. A new menu or
+dialog that should hold the board calls `useHoldFlagOrder(open)`; `Popover` and `Modal`
+already do. `npm run check:reorder` drives all of it in a real browser against the mock
+engine (`POST /__flag?query=<id>&rows=<n>` flags a query from its next poll).
+
 ### Working the grid
 
 The grid is for scanning; reading one chart properly needs more room. Both are

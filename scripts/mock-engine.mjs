@@ -231,6 +231,14 @@ function lastRun(queryId, { force = false } = {}) {
   return ranAt.get(queryId);
 }
 
+/*
+ * Make a query flag N rows from its next poll on: `POST /__flag?query=q_biaxial&rows=3`,
+ * and `POST /__flag?reset=1` to put everything back. This is what lets a browser
+ * check watch a card become flagged mid-session, which is the moment the board
+ * rearranges itself.
+ */
+const flagOverride = new Map();
+
 function runFor(queryId, options) {
   const defs = chartDefs.filter((c) => c[1] === queryId);
   const data = runs[defs[0][7]];
@@ -239,8 +247,11 @@ function runFor(queryId, options) {
     data.rows
       .map((row, index) => (predicate(row, index) ? { index, rule_ids: ruleIds(index), fingerprint: `f${queryId}${index}` } : null))
       .filter(Boolean);
+  const overridden = flagOverride.get(queryId);
   const flagRows =
-    queryId === "q_table"
+    overridden !== undefined
+      ? hit((_r, i) => i < overridden)
+      : queryId === "q_table"
       ? hit((r) => r[4] > 80)
       : queryId === "q_flagged"
         ? hit((_r, i) => i >= 18, (i) => (i >= 21 ? ["r1", "r2"] : ["r2"]))
@@ -254,6 +265,7 @@ function runFor(queryId, options) {
             ? hit((r) => r[1] === "NG" && r[0] >= "12")
             : [];
   const RULES = {
+    q_kpi: [{ id: "r1", name: "Any flagged", severity: "high" }],
     q_table: [{ id: "r1", name: "Risk over 80", severity: "high" }],
     q_flagged: [
       { id: "r1", name: "Velocity spike", severity: "high" },
@@ -270,7 +282,8 @@ function runFor(queryId, options) {
     duration_ms: 18 + (queryId.length % 7) * 11,
     row_count: data.rows.length,
     truncated: false,
-    data_hash: createHash("sha1").update(queryId).digest("hex"),
+    // The override is part of the hash, so a poll sees the flags change.
+    data_hash: createHash("sha1").update(`${queryId}${overridden ?? ""}`).digest("hex"),
     columns: data.columns,
     rows: data.rows,
     charts: defs.map(([id, , name, type, x, y, s]) => ({
@@ -484,6 +497,14 @@ createServer((req, res) => {
   req.on("end", () => {
     if (path === "/health") return send(res, 200, { status: "ok" });
     if (path === "/__executions") return send(res, 200, Object.fromEntries(executions));
+    if (path === "/__flag" && req.method === "POST") {
+      const params = new URL(req.url, "http://x").searchParams;
+      if (params.get("reset")) flagOverride.clear();
+      else flagOverride.set(params.get("query"), Number(params.get("rows") ?? 0));
+      // Drop the cached run so the very next poll reflects it.
+      ranAt.clear();
+      return send(res, 200, Object.fromEntries(flagOverride));
+    }
     if (path === "/ready") return send(res, 200, { status: "ready" });
     if (path === "/auth/login") {
       const creds = JSON.parse(body || "{}");

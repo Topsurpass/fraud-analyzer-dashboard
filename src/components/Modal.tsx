@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useHoldFlagOrder } from "./flagOrderHold";
 
 /**
  * A modal dialog on the platform's own `<dialog>` element.
@@ -43,6 +44,8 @@ export function Modal({
   const titleId = useId();
   const descriptionId = useId();
   const pressedOnBackdrop = useRef(false);
+  // A dialog is open: nothing behind it should rearrange.
+  useHoldFlagOrder(open);
 
   useEffect(() => {
     const dialog = ref.current;

@@ -29,6 +29,9 @@ import {
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
+import { useReportFlags } from "./FlagOrder";
+import { useHoldFlagOrder } from "./flagOrderHold";
+import { worstSeverity } from "./flagRanking";
 import { BiaxialBarChartView } from "./charts/BiaxialBarChartView";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { FlagStrip } from "./charts/FlagStrip";
@@ -126,6 +129,20 @@ export function ChartCard({
   const now = useNow();
 
   const snapshot = poll.snapshot;
+
+  /*
+   * Tell the grid how many rows this poll flagged, so a card that has just been
+   * flagged can rise to the top. From the poll payload itself rather than the
+   * summary the rail reads: the summary lags the poll, and "flagged after the
+   * poll" is the moment that should move the card.
+   */
+  useReportFlags(
+    chartId ?? query.id,
+    snapshot?.flags?.flagged_count ?? 0,
+    worstSeverity(snapshot?.flags),
+  );
+  // An expanded card is being read; do not slide the board around it.
+  useHoldFlagOrder(expanded);
 
   /*
    * The last payload whose data actually differed.

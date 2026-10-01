@@ -15,6 +15,7 @@
     "smoke:dashboards": "node scripts/smoke-dashboards.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
     "check:layout": "node scripts/check-layout.mjs",
+    "check:reorder": "node scripts/check-reorder.mjs",
     "bench": "vitest run --config bench/vitest.bench.config.mts"
   },
   "dependencies": {

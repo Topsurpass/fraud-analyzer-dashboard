@@ -1,4 +1,7 @@
+"use client";
+
 import type { ChartType } from "@/contracts/api";
+import { FlagOrderProvider, useOrderedGrid } from "./FlagOrder";
 
 /**
  * The card grid.
@@ -14,7 +17,22 @@ import type { ChartType } from "@/contracts/api";
  */
 export function ChartGrid({ children }: { children: React.ReactNode }) {
   return (
+    <FlagOrderProvider>
+      <OrderedGrid>{children}</OrderedGrid>
+    </FlagOrderProvider>
+  );
+}
+
+/**
+ * The grid itself. Cards that report flagged rows are sorted to the front (see
+ * `FlagOrder.tsx`); a card that has not reported, or is not flagged, keeps the
+ * place the page gave it.
+ */
+function OrderedGrid({ children }: { children: React.ReactNode }) {
+  const { containerRef, children: ordered } = useOrderedGrid(children);
+  return (
     <div
+      ref={containerRef}
       // `minmax(0,1fr)` rather than the default `1fr`: an auto-sized track lets
       // a wide child push the whole grid past the viewport on a phone.
       className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 xl:grid-cols-3"
@@ -27,7 +45,7 @@ export function ChartGrid({ children }: { children: React.ReactNode }) {
        */
       style={{ gridAutoRows: `${ROW_HEIGHT_REM}rem` }}
     >
-      {children}
+      {ordered}
     </div>
   );
 }
