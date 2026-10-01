@@ -692,6 +692,43 @@ pushed is the one being served: Vercel's "Redeploy" on an older deployment rebui
 commit, so the site can keep showing a bug that is already fixed. Compare `commit` with
 `git log -1 --format=%h` on the branch Vercel is set to deploy.
 
+### Sharing a chart: approval, shared alerts, and reading how it was made
+
+The contract is `docs/shared-publishing.md`; this is what the dashboard does with it.
+
+- **An analyst's publish is a request.** The card menu says *Request publishing*, the
+  card shows **Awaiting approval**, and the menu offers *Withdraw publish request*
+  (the query is frozen while it waits). An administrator's menu still says *Publish to
+  the team* and publishes at once. Which of these a click is comes from one function,
+  `publishActionFor` in `src/services/publishing/state.ts`, so an analyst is never
+  offered a plain Publish.
+- **`/approvals`, administrators only.** Lists each waiting request (who asked, the chart,
+  its query and connection), opens the read-only definition so the SQL is read first,
+  and approves or rejects with an optional reason. The author then sees **Not approved**
+  and the reason on the card, with *Request publishing again* in the menu. The rail's
+  Approvals link carries the waiting count and the bell has a line for it. Both come from
+  `PublishRequestsProvider`, which fetches the queue only for an administrator: for
+  anyone else the dashboard asks the engine nothing and shows nothing. A decision is
+  confirmed on the page, so losing a race (the engine answers 409) still explains itself
+  after its row leaves the list.
+- **Shared alerts.** A query with a published chart has its findings in everyone's bell,
+  rail and flagged page. A section someone else shares is labelled **Shared by <owner>**,
+  keeps *Dismiss* and *Restore* (dismissals are personal: hiding a row hides it for you
+  only), and drops *Clear*, *Delete rules* and *Edit rules*. An administrator keeps
+  everything. A published card's flagged link takes its connection from the flagged
+  summary, because a viewer's copy of a chart carries none (it used to point at
+  `/connections/undefined/flagged`).
+- **View definition.** A viewer's published card has a small menu with one item. It opens
+  `DefinitionDialog`: SQL in monospace with *Copy*, how often it runs, the row limit, the
+  chart's field mapping, the rules in plain words (a list is named, never its items), the
+  owner and a read-only note. There is nothing in it to type into, and Escape closes it
+  and returns focus to the menu. The same dialog is how an administrator reads a request.
+
+Checked three ways: unit and component tests, `npm run check:sharing` (two people in a real
+browser against the mock engine, which signs in an email starting with `analyst` as an
+analyst and takes `POST /__reset`), and mutation runs of both, with each old behaviour put
+back to confirm something goes red.
+
 ### The app icon
 
 The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon
