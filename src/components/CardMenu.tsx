@@ -35,7 +35,7 @@ import { Popover, usePopoverClose } from "./Popover";
  * the menu getting in the way of its own result.
  */
 
-const CHART_LABELS: Record<ChartType, string> = {
+export const CHART_LABELS: Record<ChartType, string> = {
   line: "Line",
   bar: "Bar",
   pie: "Pie",

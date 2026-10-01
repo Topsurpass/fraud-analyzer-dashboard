@@ -29,6 +29,7 @@ import {
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge, PublishRejectionNote } from "./PublishedBadge";
+import { ViewerCardMenu } from "./ViewerCardMenu";
 import { BiaxialBarChartView } from "./charts/BiaxialBarChartView";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { FlagStrip } from "./charts/FlagStrip";
@@ -288,7 +289,11 @@ export function ChartCard({
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}
-            {published ? null : (
+            {published ? (
+              chartId ? (
+                <ViewerCardMenu chartId={chartId} name={cardTitle} />
+              ) : null
+            ) : (
               <CardMenu
                 query={query}
                 chartId={chartId}
