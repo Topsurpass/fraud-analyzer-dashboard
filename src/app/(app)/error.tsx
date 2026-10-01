@@ -17,11 +17,18 @@ import { Button } from "@/components/ui";
  */
 export default function SegmentError({
   error,
+  retry,
   reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  /** Re-fetches from the server, then re-renders. Next's recommended recovery. */
+  retry?: () => void;
+  /** Re-renders without re-fetching: only what an older Next passes. */
+  reset?: () => void;
 }) {
+  // `reset` alone re-draws the same server payload, so a failure that came from
+  // the server would simply happen again.
+  const again = retry ?? reset;
   useEffect(() => {
     console.error("Page failed to render:", error);
   }, [error]);
@@ -41,9 +48,11 @@ export default function SegmentError({
           </p>
         ) : null}
         <div className="mt-4 flex items-center gap-2">
-          <Button type="button" tone="primary" onClick={reset}>
-            Try again
-          </Button>
+          {again ? (
+            <Button type="button" tone="primary" onClick={() => again()}>
+              Try again
+            </Button>
+          ) : null}
           <Button type="button" onClick={() => window.location.reload()}>
             Reload the page
           </Button>
