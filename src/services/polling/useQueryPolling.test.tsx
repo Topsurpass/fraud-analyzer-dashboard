@@ -489,10 +489,20 @@ describe("nextPollDelay", () => {
     expect(nextPollDelay(NOW, NOW + 600_000, INTERVAL, 0)).toBe(INTERVAL + STALE_GRACE_MS);
   });
 
-  it("retries a stale answer soon, then backs off, then once per interval", () => {
+  it("retries a stale answer soon, then backs off, then keeps to the last retry", () => {
     const stale = NOW - 10 * INTERVAL;
     const delays = [0, 1, 2, 3, 4, 5].map((streak) => nextPollDelay(NOW, stale, 120_000, streak));
-    expect(delays).toEqual([...STALE_RETRY_MS, 120_000, 120_000]);
+    expect(delays).toEqual([...STALE_RETRY_MS, 60_000, 60_000]);
+  });
+
+  it("never goes quiet for a whole hour on a result that is hours overdue", () => {
+    // The reported case: an hourly query whose refresh never landed. After the
+    // retries are used up the card used to wait another hour.
+    const HOUR = 3_600_000;
+    const stale = NOW - 6 * HOUR;
+    for (const streak of [0, 1, 4, 5, 20, 1000]) {
+      expect(nextPollDelay(NOW, stale, HOUR, streak)).toBeLessThanOrEqual(60_000);
+    }
   });
 
   it("never retries a stale answer more often than the interval itself", () => {
@@ -617,7 +627,7 @@ describe("the timer follows the engine's last run, not the card", () => {
     spy.mockRestore();
   });
 
-  it("asks again soon when an answer is already stale, then backs off to the interval", async () => {
+  it("asks again soon when an answer is already stale, then keeps to the last retry", async () => {
     // The engine is refreshing behind a stale answer: look again shortly.
     const stale = at(-200_000);
     pollQuery
@@ -634,7 +644,7 @@ describe("the timer follows the engine's last run, not the card", () => {
     const advanceTo = (elapsedMs: number) => advance(elapsedMs - (Date.now() - started));
     let due = 0;
     let expected = 1;
-    for (const wait of [...STALE_RETRY_MS, 120_000]) {
+    for (const wait of [...STALE_RETRY_MS, 60_000, 60_000]) {
       due += wait;
       await advanceTo(due - 500);
       expect(pollQuery).toHaveBeenCalledTimes(expected);

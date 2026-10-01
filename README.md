@@ -376,8 +376,10 @@ The dashboard keeps its side of that bargain in `useQueryPolling`:
   affects drawing.
 - **A stale answer is retried gently.** If an answer arrives already past its
   interval (the engine is refreshing behind it, or clocks differ), the card asks
-  again after 3 s, 10 s, 30 s and 60 s, then once per interval. Each retry is a
-  cache read.
+  again after 3 s, 10 s, 30 s and 60 s, then every 60 s until the new result
+  lands. Each retry is a cache read. (After the 60 s it used to wait a whole
+  interval, which for an hourly query left the card on old data for another
+  hour whenever the refresh had not landed within about 100 seconds.)
 
 The engine's half (fraud-analyzer-engine): editing a chart, or publishing it,
 redraws the cached result in place instead of discarding it, so it costs no run;
@@ -389,6 +391,20 @@ SQL, a flag rule or a list still re-runs it, because those change what the resul
 says. The engine must be rebuilt for these to take effect; until then the
 dashboard still works, with `executed_at` missing from unchanged answers (the
 status line then falls back to when the card last heard from the engine).
+
+**A sleeping laptop used to freeze the engine's cache clock.** Reported as "the
+hourly chart never re-runs": the card's log showed runs at 00:45 and 01:45, then
+nothing until the next morning, and the first poll after waking was answered from
+cache in 45 ms with no run, though the result was six hours old. Docker Desktop
+pauses its VM while the Mac sleeps and the VM's `time.monotonic()` stops with it
+(measured: a Docker backend up 24 hours, a container clock of 12.8), and the
+engine measured result age, the failure cooldown and the scheduler's due-times on
+that clock alone. A result one hour old at bedtime was "47 minutes old" at
+breakfast. The engine now takes the larger of the monotonic and wall-clock
+readings (`app/clock.py`), so a paused clock cannot make anything look fresher
+than it is, and a wall clock stepped backwards cannot either. This only bites
+where the engine runs on a machine that sleeps, which is a developer laptop; a
+server never notices.
 
 The interval is set per query (`Poll interval (ms)` in the query editor, which
 now states the value back in words and offers 1 min, 5 min, 15 min, 1 hour and

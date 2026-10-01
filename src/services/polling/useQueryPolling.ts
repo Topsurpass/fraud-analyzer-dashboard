@@ -138,9 +138,16 @@ export const STALE_GRACE_MS = 1_500;
 /**
  * After a poll that came back already past its interval (the engine is
  * refreshing behind the answer, or our clock runs ahead of its), ask again
- * after these delays, then once per interval. Each retry is a cache read; the
- * engine runs the query once however many times it is asked, and leaves a query
- * whose refresh failed alone for a full interval.
+ * after these delays, then keep asking at the last one. Each retry is a cache
+ * read; the engine runs the query once however many times it is asked, and
+ * leaves a query whose refresh failed alone for a full interval.
+ *
+ * It used to fall back to one ask per interval after the last rung. For an
+ * hourly query that meant a card whose refresh had not landed within about
+ * 100 seconds (a slow target, or an engine whose clock had been paused by a
+ * sleeping laptop and so still called the result fresh) stayed on old data for
+ * another hour. Asking a cache once a minute costs the database nothing and
+ * bounds that wait to a minute.
  */
 export const STALE_RETRY_MS = [3_000, 10_000, 30_000, 60_000] as const;
 
@@ -168,7 +175,7 @@ export function nextPollDelay(
   if (untilStale > 0) {
     return Math.min(untilStale + STALE_GRACE_MS, intervalMs + STALE_GRACE_MS, MAX_TIMER_MS);
   }
-  const retry = STALE_RETRY_MS[staleStreak] ?? intervalMs;
+  const retry = STALE_RETRY_MS[Math.min(staleStreak, STALE_RETRY_MS.length - 1)];
   return Math.min(retry, intervalMs, MAX_TIMER_MS);
 }
 
