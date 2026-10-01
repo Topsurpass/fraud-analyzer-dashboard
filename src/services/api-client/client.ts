@@ -44,6 +44,7 @@ import type {
 	UserUpdate,
 } from "@/contracts/api";
 import { ApiError, messageFromBody } from "./errors";
+import { assertUserRead } from "./user";
 
 /** Ceiling on any single request. Poll callers pass something tighter. */
 export const DEFAULT_TIMEOUT_MS = 15_000;
@@ -688,13 +689,13 @@ export const reconnectConnection = (connectionId: string, options?: RequestOptio
  * body, so there is nothing for this function, or its caller, to store.
  */
 export const login = (body: LoginRequest, options?: RequestOptions) =>
-	request<LoginResponse>({
+	request<unknown>({
 		method: "POST",
 		path: "/auth/login",
 		body,
 		timeoutMs: 30_000,
 		...options,
-	});
+	}).then((user): LoginResponse => assertUserRead(user, "/auth/login"));
 
 /** End this session on the engine. Succeeds even if the session already expired. */
 export const logout = (options?: RequestOptions) =>
@@ -702,7 +703,9 @@ export const logout = (options?: RequestOptions) =>
 
 /** Who the current session cookie belongs to. 401 when it belongs to nobody. */
 export const me = (options?: RequestOptions) =>
-	request<UserRead>({ method: "GET", path: "/auth/me", ...options });
+	request<unknown>({ method: "GET", path: "/auth/me", ...options }).then(
+		(user): UserRead => assertUserRead(user, "/auth/me"),
+	);
 
 /**
  * Change your own password.
