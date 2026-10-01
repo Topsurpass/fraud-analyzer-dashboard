@@ -668,10 +668,19 @@ If `id`, `email`, `full_name` or `role` is missing the sign-in form says so:
 engine than this dashboard expects (it sent: id, email, role, ...)."* The list of
 fields it did send is there so the mismatch can be identified from the screen alone.
 
-The usual cause is `ENGINE_BASE_URL` pointing at an engine that is not this project's
-current build, or at some other service that also answers `/auth/login`. Check the
-URL, then `curl <engine>/auth/login` with a real account and compare the `user` it
-returns with `UserRead` in `src/contracts/api.ts`.
+Two causes, and the message tells them apart:
+
+- **`(it sent: token, user)`** means the browser reached the engine directly. The engine's
+  own login answer is `{token, user}`; this app's `/api/auth/login` route turns that into the
+  user plus an httpOnly cookie, and it never ran. The cause is `NEXT_PUBLIC_API_BASE_URL`
+  set to the engine's URL (Vercel inlines `NEXT_PUBLIC_*` at build time, so removing it needs
+  a **redeploy**, ideally with the build cache cleared). The engine and the account were fine.
+  `ENGINE_BASE_URL` is the only variable that should name the engine, and it is read by the
+  server, never the browser. An absolute `NEXT_PUBLIC_API_BASE_URL` is now ignored, because
+  no value of it can work: the browser holds no token to send.
+- **Any other list of fields** means `ENGINE_BASE_URL` points at something that is not this
+  project's engine. `curl -X POST <engine>/auth/login` with a real account and compare the
+  `user` it returns with `UserRead` in `src/contracts/api.ts`.
 
 ### The app icon
 

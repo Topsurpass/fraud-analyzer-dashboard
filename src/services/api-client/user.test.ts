@@ -52,6 +52,19 @@ describe("assertUserRead", () => {
     );
   });
 
+  it("recognises the engine's raw login answer and says what to remove", () => {
+    const error = (() => {
+      try {
+        assertUserRead({ token: "t", user: GOOD }, "/auth/login");
+      } catch (cause) {
+        return cause as ApiError;
+      }
+    })();
+    expect(error!.errorCode).toBe("BYPASSED_PROXY");
+    expect(error!.message).toContain("NEXT_PUBLIC_API_BASE_URL");
+    expect(error!.message).toContain("ENGINE_BASE_URL");
+  });
+
   it.each([null, undefined, "ok", 7, []])("rejects %j as not an account", (value) => {
     expect(() => assertUserRead(value, "/auth/me")).toThrow(ApiError);
   });

@@ -62,21 +62,28 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 /**
  * Where the browser sends its requests.
  *
- * Defaults to `/api` - the BFF proxy, not the engine. The browser holds no
- * session token of its own any more (it lives in an httpOnly cookie Next.js
- * holds) and has no CORS story to configure, because every request this
- * function issues is same-origin against Next.js, which forwards to the
- * engine with a bearer header attached server-side.
+ * Always `/api` in the app: the BFF proxy, not the engine. The browser holds no
+ * session token (it lives in an httpOnly cookie that only Next.js's server side
+ * reads and sets) and has no CORS story, because every request is same-origin
+ * against Next.js, which forwards to the engine with a bearer header attached.
  *
- * `NEXT_PUBLIC_API_BASE_URL` still overrides this for the rare caller that
- * needs somewhere else (tests pass an absolute `baseUrl` for exactly that
- * reason), but its absence is no longer a misconfiguration to fail loudly
- * over - a relative default is the normal, expected shape of this app now.
+ * `NEXT_PUBLIC_API_BASE_URL` may still move the proxy to another *path* on this
+ * origin, but an absolute URL from it is ignored. It used to be honoured, and a
+ * leftover value on a deployment (Vercel inlines it at build time) sent the
+ * browser straight to the engine: the engine's raw `{token, user}` came back,
+ * the BFF that turns it into a cookie never ran, and sign-in either crashed or
+ * failed with a message about the engine. No setting can make that work, since
+ * the browser sends no token, so it is not an option to offer. An explicit
+ * `raw` argument is still honoured as given: that is how tests and the mock
+ * runner point somewhere else on purpose.
  */
 export function resolveBaseUrl(raw?: string | undefined): string {
-	const value = (raw ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
-	if (!value) return "/api";
-	return value.replace(/\/+$/, "");
+	if (raw !== undefined && raw.trim()) return raw.trim().replace(/\/+$/, "");
+	const fromEnv = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
+	if (!fromEnv || /^[a-z][a-z0-9+.-]*:\/\//i.test(fromEnv) || fromEnv.startsWith("//")) {
+		return "/api";
+	}
+	return fromEnv.replace(/\/+$/, "") || "/api";
 }
 
 export interface RequestOptions {
