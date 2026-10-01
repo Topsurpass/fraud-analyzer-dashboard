@@ -55,13 +55,12 @@ describe("login", () => {
 		 * the shape that broke sign-in: the old contract, {token, user}, is not
 		 * what a real request against the route returns.
 		 */
-		fetchMock.mockResolvedValue(
-			jsonResponse({ id: "u1", email: "a@b.test", role: "analyst" }),
-		);
+		const account = { id: "u1", email: "a@b.test", full_name: "Ada Test", role: "analyst" };
+		fetchMock.mockResolvedValue(jsonResponse(account));
 
 		const result = await login({ email: "a@b.test", password: "x" }, { baseUrl: BASE });
 
-		expect(result).toEqual({ id: "u1", email: "a@b.test", role: "analyst" });
+		expect(result).toEqual(account);
 		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe("http://engine.test/auth/login");
 		expect(init.method).toBe("POST");
@@ -71,7 +70,9 @@ describe("login", () => {
 		// A regression guard, not a live behaviour: nothing in `request()` reads
 		// a token store any more, so this would only start failing if that
 		// plumbing came back.
-		fetchMock.mockResolvedValue(jsonResponse({ id: "u1" }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ id: "u1", email: "a@b.test", full_name: "Ada Test", role: "analyst" }),
+		);
 
 		await login({ email: "a@b.test", password: "x" }, { baseUrl: BASE });
 

@@ -656,6 +656,23 @@ report. Failures of the *engine* never reach either screen: an engine that is do
 answers 404, 500 or 502 after sign-in, shows "Engine unreachable" in the rail and the page
 stays usable (tested in a production build against all three).
 
+### An engine that sends a different account
+
+Reported from a Vercel deployment: sign-in succeeded and the app then crashed with
+`Cannot read properties of undefined (reading 'trim')`. The account the engine
+returned had no `full_name`, and the rail's account chip calls `full_name.trim()`.
+The account object comes from the engine as untyped JSON, so `login()` and `me()`
+now check it at the one place it enters the app (`src/services/api-client/user.ts`).
+If `id`, `email`, `full_name` or `role` is missing the sign-in form says so:
+*"The engine sent an account without full_name. It is probably a different build of the
+engine than this dashboard expects (it sent: id, email, role, ...)."* The list of
+fields it did send is there so the mismatch can be identified from the screen alone.
+
+The usual cause is `ENGINE_BASE_URL` pointing at an engine that is not this project's
+current build, or at some other service that also answers `/auth/login`. Check the
+URL, then `curl <engine>/auth/login` with a real account and compare the `user` it
+returns with `UserRead` in `src/contracts/api.ts`.
+
 ### The app icon
 
 The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon
