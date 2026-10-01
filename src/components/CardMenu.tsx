@@ -76,7 +76,7 @@ export function CardMenu({
       title="Chart actions"
       trigger={<span aria-hidden="true">⋯</span>}
       triggerClassName="grid size-7 cursor-pointer list-none place-items-center rounded-md text-[15px] leading-none text-muted transition-colors hover:bg-raised hover:text-ink"
-      panelClassName="absolute top-full right-0 z-30 mt-1.5 w-56 rounded-[var(--radius)] border border-line bg-surface py-1.5 shadow-lg"
+      panelClassName="w-56 rounded-[var(--radius)] border border-line bg-surface py-1.5 shadow-lg"
     >
       <CardMenuPanel
         query={query}

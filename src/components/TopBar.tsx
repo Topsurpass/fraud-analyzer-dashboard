@@ -37,7 +37,16 @@ export function TopBar({
      * hiding some would put "Settings" nowhere and a horizontal scroll would
      * put it somewhere nobody looks.
      */
-    <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-bg/75 px-4 py-2 backdrop-blur-xl sm:flex-nowrap sm:px-6 sm:py-0">
+    /*
+     * `relative z-40`: the bell's panel hangs below the header, over the page.
+     * `backdrop-blur` makes the header its own stacking context at the bottom
+     * of the order, and the cards after it (each one a stacking context of its
+     * own: `defer-paint`, the `rise` animation) painted over the panel and took
+     * its clicks. Raised, the whole header and what it opens sit above the page.
+     * Still under the mobile drawer (z-50) and the modals, which are in the top
+     * layer.
+     */
+    <header className="relative z-40 flex min-h-16 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-bg/75 px-4 py-2 backdrop-blur-xl sm:flex-nowrap sm:px-6 sm:py-0">
       <button
         type="button"
         onClick={onOpenNav}

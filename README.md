@@ -110,6 +110,7 @@ npm run smoke -- --password=...            # every chart type puts marks on scre
 npm run smoke:dashboards -- --password=...  # a board is really server-owned
 npm run smoke:auth -- --password=...        # roles hold on both sides
 npm run check:endpoints                    # every documented operation is used
+npm run check:layout                       # bell, sidebar and card menus, measured (mock engine)
 ```
 
 The smoke lane exists because the gate lane structurally cannot catch this
@@ -590,14 +591,27 @@ available without leaving the page.
   of them.
 - **Collapse the rail** with the toggle beside the app name. It becomes a 68px
   strip that still shows every connection's status light. See "The sidebar" above.
-- **Both popovers dismiss properly.** `src/components/Popover.tsx` is the one
-  implementation: it closes on a choice, on a pointer down anywhere outside it,
-  and on Escape, which also hands focus back to the trigger. Opening one closes
-  any other. The panel is unmounted while shut, so a half-finished delete
-  confirmation is never waiting on the next open. Async items keep the menu open
-  until the write lands, because the panel is where the failure is reported -
-  closing on click would report "could not change the chart type" to an element
-  that is no longer on the page.
+- **Both popovers dismiss properly, and are never clipped.**
+  `src/components/Popover.tsx` is the one implementation: it closes on a choice,
+  on a pointer down anywhere outside it, and on Escape, which also hands focus
+  back to the trigger. Opening one closes any other. The panel is unmounted
+  while shut, so a half-finished delete confirmation is never waiting on the
+  next open. Async items keep the menu open until the write lands, because the
+  panel is where the failure is reported - closing on click would report "could
+  not change the chart type" to an element that is no longer on the page.
+
+  The panel is drawn in a portal on `document.body` with `position: fixed`,
+  placed by `src/components/popoverPlacement.ts`. It has to be: a card clips its
+  contents, and the card menu is 15 items and about 570px tall, so drawn inside
+  its card only five items were reachable on a number card and nine on the rest.
+  Now it opens below the trigger, flips above when that side has more room,
+  is capped to the room it has and scrolls inside itself past that, stays inside
+  the viewport, and follows the trigger while the page scrolls. A caller passes
+  `panelClassName` for looks only (width, border, shadow); `shell-layout.test.ts`
+  fails any caller that tries to position its own panel. Because a portal moves
+  the panel in the tab order, the keyboard is bridged by hand: Tab from the
+  trigger enters the panel, Tab past its last item closes it and returns to the
+  trigger, Shift+Tab before its first returns without closing, and Escape returns.
 - **Each card's `⋯` menu** carries the actions for the query behind it: pick how
   it is drawn (line, bar, pie, number, table), run it now, edit it, or delete
   it. Chart type is a property of the saved query rather than a view preference,
@@ -622,6 +636,33 @@ asked", which no individual card can tell you.
 
 Collapsed it becomes a 68px strip of icons and status dots. Below `md` it is a
 drawer behind the menu button in the top bar.
+
+**It does not scroll with the page.** `AppShell` is exactly the viewport
+(`h-dvh overflow-hidden`), the rail is `h-full overflow-hidden`, and the only
+scroll region is the `main` inside `PageBody`. The document itself can never
+scroll, so nothing can carry the rail along with a long page. This was reported
+for `connections/:id` and could not be reproduced in Chrome at 450 to 1080px of
+height (the rail's top stayed at 0 under wheel, End, Tab and `scrollIntoView`),
+so the clip is a structural guarantee rather than a fix for a measured fault. If
+you still see it, tell us the browser and whether the rail's own list or the whole
+rail moves; `npm run check:layout` is where a reproduction belongs.
+
+### Layers
+
+Three levels, and nothing else should invent one.
+
+| Layer | `z-index` | What |
+| --- | --- | --- |
+| Page cards | none | Each card is its own stacking context (`defer-paint`, `rise`) |
+| Top bar | 40 | `relative z-40`. The bell's panel hangs from it over the cards |
+| Drawer, popovers | 50 | The mobile navigation, and every `Popover` panel |
+| Modals | top layer | `<dialog>.showModal()`, above all of the above |
+
+The header needs its own level because `backdrop-blur` makes it a stacking
+context at the bottom of the order, and the cards after it in the document
+painted over its dropdown and took the clicks. On a phone the bell's panel spans
+the header (`inset-x-3`) instead of hanging from the bell, which sits mid-header
+and put the panel 17 to 47px off the left edge.
 
 ### What `--signal-alert` means
 

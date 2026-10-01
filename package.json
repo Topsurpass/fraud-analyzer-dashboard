@@ -14,6 +14,7 @@
     "check:endpoints": "node scripts/check-endpoints.mjs",
     "smoke:dashboards": "node scripts/smoke-dashboards.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
+    "check:layout": "node scripts/check-layout.mjs",
     "bench": "vitest run --config bench/vitest.bench.config.mts"
   },
   "dependencies": {

@@ -103,7 +103,10 @@ export function FlaggedBell() {
 			: `${total} flagged ${total === 1 ? "row" : "rows"}${unseen ? ", new since you last looked" : ""}`;
 
 	return (
-		<div className="relative" ref={containerRef}>
+		// `sm:relative`: on a phone the bell sits mid-header, and a panel hung from it
+		// ran 17-47px off the left edge. Below `sm` the panel hangs from the header
+		// (which is `relative`) and spans it instead.
+		<div className="sm:relative" ref={containerRef}>
 			<button
 				type="button"
 				aria-label={label}
@@ -132,7 +135,7 @@ export function FlaggedBell() {
 			{open ? (
 				<div
 					role="menu"
-					className="absolute top-full right-0 z-50 mt-2 w-72 overflow-hidden rounded-[var(--radius)] border border-line bg-surface shadow-lg"
+					className="absolute inset-x-3 top-full z-50 mt-2 overflow-hidden sm:inset-x-auto sm:right-0 sm:w-72 rounded-[var(--radius)] border border-line bg-surface shadow-lg"
 				>
 					<p className="border-b border-line px-3 py-2.5 text-[12px] text-muted">
 						{total === 0 ? (

@@ -59,9 +59,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <DashboardsProvider>
         <FlaggedProvider>
         <ListsProvider>
-      <div className="flex h-dvh min-h-0 w-full">
+      {/* The shell is exactly the viewport and clips what it cannot fit: the
+          page scrolls inside `main`, never as a document. `overflow-hidden`
+          makes that structural rather than a habit of whatever is inside, and
+          `h-full overflow-hidden` on the rail keeps the sidebar a fixed column
+          that cannot be carried along with the content. */}
+      <div className="flex h-dvh min-h-0 w-full overflow-hidden">
         <aside
-          className="hidden shrink-0 border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
+          className="hidden h-full shrink-0 overflow-hidden border-r border-line bg-[var(--sidebar-bg)] transition-[width] duration-200 [transition-timing-function:var(--ease-out)] md:block"
           style={{ width: collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH }}
         >
           <Rail
