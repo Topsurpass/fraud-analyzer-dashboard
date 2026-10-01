@@ -28,7 +28,7 @@ import {
 } from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
-import { PublishedBadge } from "./PublishedBadge";
+import { PublishedBadge, PublishRejectionNote } from "./PublishedBadge";
 import { BiaxialBarChartView } from "./charts/BiaxialBarChartView";
 import { CartesianChartView } from "./charts/CartesianChartView";
 import { FlagStrip } from "./charts/FlagStrip";
@@ -294,6 +294,7 @@ export function ChartCard({
                 chartId={chartId}
                 currentChartType={chartType}
                 isPublished={publishedChart?.is_public ?? false}
+                chart={publishedChart}
                 onMutated={() => {
                   // Re-read the result now so a new chart type, or the run
                   // that was just asked for, is drawn at once rather than at
@@ -311,6 +312,8 @@ export function ChartCard({
           </div>
         </div>
       </header>
+
+      {publishedChart && !published ? <PublishRejectionNote chart={publishedChart} /> : null}
 
       {/* The rules behind the marks below. A table lists its own in its footer. */}
       {chartType !== "table" ? <FlagStrip flags={source?.flags} /> : null}

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { PublishedBadge } from "./PublishedBadge";
+import { PublishedBadge, PublishRejectionNote } from "./PublishedBadge";
 
 describe("PublishedBadge", () => {
   it("says nothing for a private chart", () => {
@@ -29,5 +29,76 @@ describe("PublishedBadge", () => {
     render(<PublishedBadge chart={{ is_public: true }} />);
 
     expect(screen.getByText(/Visible to everyone signed in/)).toBeInTheDocument();
+  });
+
+  it("says a request is waiting, and that nobody else can see the chart yet", () => {
+    render(<PublishedBadge chart={{ is_public: false, publish_status: "pending" }} />);
+
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(screen.getByTitle(/Nobody else can see this chart yet/)).toBeInTheDocument();
+    // A waiting request must never read as published.
+    expect(screen.queryByText("Published")).not.toBeInTheDocument();
+  });
+
+  it("marks a rejected chart, and names who declined in the tooltip", () => {
+    render(
+      <PublishedBadge
+        chart={{
+          is_public: false,
+          publish_status: "private",
+          publish_rejection: { reason: "Too broad", rejected_at: "2026-10-01T10:00:00Z", rejected_by_name: "Ada" },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Not approved")).toBeInTheDocument();
+    expect(screen.getByTitle(/Ada declined the request/)).toBeInTheDocument();
+  });
+
+  it("stays silent for a private chart that was never asked about", () => {
+    const { container } = render(
+      <PublishedBadge chart={{ is_public: false, publish_status: "private" }} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("PublishRejectionNote", () => {
+  const rejected = {
+    is_public: false,
+    publish_status: "private" as const,
+    publish_rejection: { reason: "Remove the card number column", rejected_at: "2026-10-01T10:00:00Z", rejected_by_name: "Ada" },
+  };
+
+  it("shows the administrator's reason to the author, with the way forward", () => {
+    render(<PublishRejectionNote chart={rejected} />);
+
+    const note = screen.getByRole("status");
+    expect(note).toHaveTextContent("Ada declined the request.");
+    expect(note).toHaveTextContent("Remove the card number column");
+    expect(note).toHaveTextContent("ask again");
+  });
+
+  it("still says it was declined when no reason was given", () => {
+    render(
+      <PublishRejectionNote
+        chart={{ ...rejected, publish_rejection: { ...rejected.publish_rejection, reason: null } }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("declined the request");
+  });
+
+  it("is absent on a chart with no rejection", () => {
+    const { container } = render(<PublishRejectionNote chart={{ is_public: false, publish_status: "private" }} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("is absent once the chart is waiting or published, even if a stale rejection is attached", () => {
+    for (const status of ["pending", "published"] as const) {
+      const { container } = render(
+        <PublishRejectionNote chart={{ ...rejected, is_public: status === "published", publish_status: status }} />,
+      );
+      expect(container).toBeEmptyDOMElement();
+    }
   });
 });

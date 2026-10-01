@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { ChartType, SavedQueryRead } from "@/contracts/api";
+import type { ChartType, QueryChart, SavedQueryRead } from "@/contracts/api";
 import { CHART_TYPES } from "@/contracts/api";
 import {
   ApiError,
+  cancelPublishRequest,
   deleteQuery,
   getQueryCharts,
   publishChart,
@@ -13,8 +14,11 @@ import {
   runQuery,
   unpublishChart,
 } from "@/services/api-client";
+import { useOptionalUser } from "@/services/auth/AuthContext";
+import { isAdmin } from "@/services/auth/permissions";
 import { invalidateCoalesced } from "@/services/polling/coalesce";
 import { useDashboards } from "@/services/dashboards";
+import { publishActionFor } from "@/services/publishing/state";
 import { Popover, usePopoverClose } from "./Popover";
 
 /**
@@ -53,6 +57,12 @@ export interface CardMenuProps {
   currentChartType?: ChartType;
   /** Whether this chart is shared with the team, for the publish toggle. */
   isPublished?: boolean;
+  /**
+   * The chart itself, so the publish control can say the right thing for its
+   * state (private, waiting for approval, rejected, published). Without it the
+   * control falls back to `isPublished`, which can only tell two states apart.
+   */
+  chart?: Pick<QueryChart, "is_public" | "publish_status" | "publish_rejection">;
   /** Called after the query is changed on the engine. */
   onMutated?: () => void;
   /** Called after the query is deleted. */
@@ -66,6 +76,7 @@ export function CardMenu({
   chartId,
   currentChartType,
   isPublished,
+  chart,
   onMutated,
   onDeleted,
   extra,
@@ -82,6 +93,7 @@ export function CardMenu({
         query={query}
         chartId={chartId}
         isPublished={isPublished}
+        chart={chart}
         currentChartType={currentChartType}
         onMutated={onMutated}
         onDeleted={onDeleted}
@@ -100,11 +112,16 @@ function CardMenuPanel({
   chartId,
   currentChartType,
   isPublished = false,
+  chart,
   onMutated,
   onDeleted,
   extra,
 }: CardMenuProps) {
   const close = usePopoverClose();
+  const admin = isAdmin(useOptionalUser());
+  // What this control says and does depends on the chart's state and on who is
+  // asking: an analyst's click asks an administrator, it does not publish.
+  const publication = publishActionFor(chart ?? { is_public: isPublished }, admin);
   const { reload: reloadDashboards } = useDashboards();
   const [busy, setBusy] = useState<null | "chart" | "run" | "delete" | "publish">(null);
   const [error, setError] = useState<string | null>(null);
@@ -203,19 +220,22 @@ function CardMenuPanel({
    * opens.
    */
   /**
-   * Publish or retract this chart.
+   * Publish, ask to publish, withdraw a request, or retract a publication.
    *
-   * Publishing freezes the query behind it, which is the part a person is most
-   * likely to be surprised by, so the button says so before the click rather
+   * Which of those a click does is `publication.kind`, decided from the chart's
+   * state and the person's role. Publishing and waiting for approval both
+   * freeze the query behind the chart, which is the part a person is most
+   * likely to be surprised by, so the label says so before the click rather
    * than letting them discover it the next time they try to edit the SQL.
    */
-  const togglePublished = async () => {
+  const changePublication = async () => {
     if (!chartId) return;
     setBusy("publish");
     setError(null);
     let ok = false;
     try {
-      if (isPublished) await unpublishChart(chartId);
+      if (publication.kind === "unpublish") await unpublishChart(chartId);
+      else if (publication.kind === "withdraw") await cancelPublishRequest(chartId);
       else await publishChart(chartId);
       invalidateCoalesced(query.id);
       onMutated?.();
@@ -223,7 +243,7 @@ function CardMenuPanel({
     } catch (cause) {
       // The engine refuses an analyst unpublishing what an admin published,
       // and that message explains the rule better than anything generic here.
-      fail(cause, isPublished ? "Could not unpublish" : "Could not publish");
+      fail(cause, `Could not ${publication.label.split(" (")[0].toLowerCase()}`);
     } finally {
       setBusy(null);
     }
@@ -266,15 +286,26 @@ function CardMenuPanel({
             {busy === "run" ? "Running…" : "Run now"}
           </MenuButton>
 
-          {chartId ? (
-            <MenuButton onClick={togglePublished} disabled={busy !== null} keepOpen>
-              {busy === "publish"
-                ? isPublished
-                  ? "Unpublishing…"
-                  : "Publishing…"
-                : isPublished
-                  ? "Unpublish (unfreezes the query)"
-                  : "Publish to the team (freezes the query)"}
+          {chartId && publication.kind === "review" ? (
+            // An administrator looking at somebody's waiting request is sent to
+            // the queue, where the SQL can be read before deciding. Approving
+            // from a card menu would be approving without looking.
+            <Link
+              href="/approvals"
+              onClick={close}
+              title={publication.hint}
+              className="block w-full px-3 py-1.5 text-left text-[13px] text-secondary transition-colors hover:bg-raised hover:text-ink"
+            >
+              {publication.label}
+            </Link>
+          ) : chartId ? (
+            <MenuButton
+              onClick={changePublication}
+              disabled={busy !== null}
+              title={publication.hint}
+              keepOpen
+            >
+              {busy === "publish" ? publication.busyLabel : publication.label}
             </MenuButton>
           ) : null}
 
@@ -327,11 +358,14 @@ export function MenuButton({
   disabled,
   tone,
   keepOpen,
+  title,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
   tone?: "danger";
+  /** The consequence of the item, as a tooltip. */
+  title?: string;
   /**
    * Leave the menu open after this item. For the two steps of a confirmation,
    * where closing would throw away the question, and for repeatable actions
@@ -350,6 +384,7 @@ export function MenuButton({
         if (!keepOpen) close();
       }}
       disabled={disabled}
+      title={title}
       className={`block w-full px-3 py-1.5 text-left text-[13px] transition-colors disabled:opacity-40 ${
         tone === "danger"
           ? "text-alert hover:bg-alert/8"
