@@ -641,6 +641,17 @@ available without leaving the page.
   "earlier/later" stays true in the single-column mobile layout where
   "left/right" would not.
 
+### The app icon
+
+The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon
+(`src/app/apple-icon.tsx`, 180px on the dark theme's ground) are the shield logo,
+rendered to PNG by Next's `ImageResponse` from the same `LogoMark` component the
+sidebar draws. Change the logo in `src/components/Logo.tsx` and every icon follows;
+there is no image file to re-export, and no binary in the repo. The default
+`favicon.ico` was removed: left in place it would add a second icon link beside
+these. Browsers cache favicons hard, so after deploying, hard-reload or open the
+site in a private window to see the new one.
+
 ### The sidebar
 
 264px, and wide enough to be a status panel rather than a list of links: an
