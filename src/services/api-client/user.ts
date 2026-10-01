@@ -22,6 +22,22 @@ export function assertUserRead(raw: unknown, url: string): UserRead {
   if (received && missing.length === 0) return received as unknown as UserRead;
 
   const sent = received ? Object.keys(received) : [typeof raw];
+  // `{token, user}` is the engine's own login answer. This app's `/api/auth/login`
+  // route unwraps it into the user and a cookie, so seeing it here means the
+  // request never went through that route.
+  if (received && "token" in received && "user" in received) {
+    throw new ApiError({
+      kind: "http",
+      status: 502,
+      errorCode: "BYPASSED_PROXY",
+      url,
+      message:
+        "The browser reached the engine directly instead of going through this dashboard's /api route. " +
+        "Remove NEXT_PUBLIC_API_BASE_URL from the deployment's environment variables and redeploy; " +
+        "ENGINE_BASE_URL is the only variable that should point at the engine.",
+      detail: { missing, sent },
+    });
+  }
   throw new ApiError({
     kind: "http",
     status: 502,

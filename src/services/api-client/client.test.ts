@@ -59,9 +59,31 @@ describe("resolveBaseUrl", () => {
     expect(resolveBaseUrl(undefined)).toBe("/api");
   });
 
-  it("falls back to the environment variable", () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://from-env.test");
-    expect(resolveBaseUrl()).toBe("http://from-env.test");
+  it("ignores an absolute URL in the environment: it would bypass the proxy", () => {
+    // The reported bug: NEXT_PUBLIC_API_BASE_URL set to the engine's URL on a
+    // deployment sent the browser straight to the engine, so the cookie-setting
+    // login route never ran. No absolute value can work, so none is honoured.
+    for (const value of [
+      "https://engine.example.com",
+      "http://from-env.test/",
+      "HTTPS://ENGINE.EXAMPLE.COM",
+      "//engine.example.com",
+    ]) {
+      vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", value);
+      expect(resolveBaseUrl(), value).toBe("/api");
+    }
+    vi.unstubAllEnvs();
+  });
+
+  it("still lets the environment move the proxy to another path on this origin", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "/bff/");
+    expect(resolveBaseUrl()).toBe("/bff");
+    vi.unstubAllEnvs();
+  });
+
+  it("still honours an explicit argument, which is how tests and the mock runner aim elsewhere", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://engine.example.com");
+    expect(resolveBaseUrl("http://mock.test")).toBe("http://mock.test");
     vi.unstubAllEnvs();
   });
 });
