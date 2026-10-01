@@ -595,7 +595,19 @@ the query named a column `failed`.
 
 ## Polling
 
-Saved queries run on a schedule (`poll_interval_ms`; the examples use 30 s). Each
-poll is a real query against the target database, so choose the slowest interval
-that still answers the question, especially against a serverless database that
-would otherwise never sleep.
+`poll_interval_ms` (the examples use 30 s) is **the most often the query runs on
+your database**, however many people or tabs have it open. The engine runs it at
+most once per interval and serves every other poll from a cache that lasts that
+long, so opening a page, leaving it, switching tabs and coming back never run it.
+The card's footer says when it last ran and when it runs next (`ran 12m ago ·
+next in 48m`), counted from the run and not from your visit.
+
+Only explicit actions run it early: **Run now** (once) and **Retry** on a failed
+card. Changing a chart's type, publishing a chart and reopening a page do not.
+Editing the SQL, a flag rule or a list does re-run it, because the result changes.
+A refresh that fails is not retried until a further interval has passed.
+
+Choose the slowest interval that still answers the question, especially against a
+serverless database that would otherwise never sleep. Set it in the query editor
+in milliseconds (the field states the value back in words and has presets:
+3,600,000 is one hour).

@@ -17,7 +17,15 @@ import Link from "next/link";
 import { useQueryPolling } from "@/services/polling/useQueryPolling";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { FlaggedBadge } from "./FlaggedBadge";
-import { formatDuration, formatHash, formatInteger, formatRelative } from "@/services/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatHash,
+  formatInteger,
+  formatInterval,
+  formatRelative,
+  formatUntil,
+} from "@/services/format";
 import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge } from "./PublishedBadge";
@@ -287,9 +295,13 @@ export function ChartCard({
                 currentChartType={chartType}
                 isPublished={publishedChart?.is_public ?? false}
                 onMutated={() => {
-                  // Re-poll immediately so a new chart type is drawn now rather
-                  // than at the end of this card's interval.
-                  poll.refresh();
+                  // Re-read the result now so a new chart type, or the run
+                  // that was just asked for, is drawn at once rather than at
+                  // the end of this card's interval. A re-read, not a forced
+                  // poll: the engine's cache is already right, and forcing
+                  // would run the query on the database a second time for a
+                  // change that does not need it.
+                  poll.resync();
                   onChanged?.();
                 }}
                 onDeleted={onDeleted}
@@ -425,18 +437,46 @@ function StatusLine({
       <span className="mono truncate opacity-80" title={poll.dataHash ?? undefined}>
         {formatHash(poll.dataHash)}
       </span>
-      <span className="tnum ml-auto shrink-0 whitespace-nowrap">
-        {poll.phase === "paused"
-          ? "paused"
-          : formatRelative(
-              poll.lastPolledAt ? new Date(poll.lastPolledAt).toISOString() : null,
-              now,
-            )}
+      <span
+        className="tnum ml-auto shrink-0 whitespace-nowrap"
+        title={scheduleTitle(poll)}
+      >
+        {poll.phase === "paused" ? "paused" : scheduleText(poll, now)}
       </span>
       <span className="sr-only">{chartType} chart</span>
     </div>
   );
 }
+
+/**
+ * When the query last *ran*, and when it runs next.
+ *
+ * Not "when did I last ask": a poll inside the interval is answered from the
+ * engine's cache and runs nothing, so that time moves every visit and says
+ * nothing about the data. The execution time only moves when the database was
+ * actually queried, and the next run is counted from it, so leaving the page and
+ * coming back changes neither. "Next" is left out for short intervals, where a
+ * countdown would only tick.
+ */
+function scheduleText(poll: ReturnType<typeof useQueryPolling>, now: number): string {
+  const ran = poll.executedAt;
+  if (ran === null) {
+    // An engine that does not report it: the last time we heard from it.
+    return formatRelative(poll.lastPolledAt ? new Date(poll.lastPolledAt).toISOString() : null, now);
+  }
+  const text = `ran ${formatRelative(new Date(ran).toISOString(), now)}`;
+  if (poll.pollIntervalMs < NEXT_RUN_FROM_MS || poll.nextPollAt === null) return text;
+  // Counted from the run, not from our own next poll, which sits a moment past it.
+  return `${text} · next ${formatUntil(ran + poll.pollIntervalMs - now)}`;
+}
+
+function scheduleTitle(poll: ReturnType<typeof useQueryPolling>): string | undefined {
+  if (poll.executedAt === null) return undefined;
+  return `Last run ${formatDateTime(new Date(poll.executedAt).toISOString())}. The query runs at most once every ${formatInterval(poll.pollIntervalMs)}, however often this page is opened.`;
+}
+
+/** Below this the "next run" countdown only ticks and is left out. */
+const NEXT_RUN_FROM_MS = 30_000;
 
 function CardError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (

@@ -16,6 +16,7 @@ import { buildTable } from "@/services/charts/shape";
 import { SchemaBrowser } from "./SchemaBrowser";
 import { FlagRuleEditor } from "./FlagRuleEditor";
 import { queryErrorMessage } from "./lists/items";
+import { PollIntervalField } from "./PollIntervalField";
 import {
   ChartSetEditor,
   emptyChart,
@@ -299,20 +300,7 @@ export function QueryEditor({
               />
             </Field>
 
-            <Field
-              label="Poll interval (ms)"
-              htmlFor="query-poll"
-              hint="How often the card re-checks. Blank uses the engine default."
-            >
-              <Input
-                id="query-poll"
-                value={pollInterval}
-                inputMode="numeric"
-                onChange={(event) => setPollInterval(event.target.value.replace(/[^\d]/g, ""))}
-                placeholder="5000"
-                className="tnum"
-              />
-            </Field>
+            <PollIntervalField value={pollInterval} onChange={setPollInterval} />
           </div>
         </Panel>
 

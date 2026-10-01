@@ -346,6 +346,54 @@ The word always accompanies the colour, so it survives colour blindness. The
 old oscilloscope trace (`PulseLine`) is gone; `src/lib/ticker.ts` remains because
 the number cards' count-up still uses it.
 
+### The poll interval, and what reaches your database
+
+A query's **poll interval is the most often it runs on the database**, however
+many people or tabs have it open. The engine runs it at most once per interval
+and answers every other poll from a cache that lasts exactly that long, so
+opening a page, leaving it, switching tabs and coming back never run the query.
+Each card's status line shows the facts about the data rather than about the
+visit: **`ran 12m ago · next in 48m`**. (It used to show how long ago the card
+last *asked*, which reads "0s ago" after every visit and looked as though the
+query had just run.) The "next" half is left out under 30 seconds, where it
+would only tick.
+
+The dashboard keeps its side of that bargain in `useQueryPolling`:
+
+- **The timer follows the run, not the card.** Every answer says when the result
+  was produced (`executed_at`, on the lean "unchanged" answer too), and the next
+  poll is aimed just past `executed_at + interval`, when the cached result goes
+  stale. A hidden tab pauses; on return it polls only if the next run is
+  actually due, and otherwise waits out what is left. A card that remounts
+  (navigating away and back) has no data and fetches once, from the cache, then
+  lines up with the run.
+- **Only an explicit request runs the query early.** `Run now` runs it once, and
+  Retry on a failed card forces a run. Everything else re-reads: after `Run now`
+  or a chart-type change the card asks the engine for the whole current result
+  (`resync`), which is free. Both used to finish with a forced poll, so `Run now`
+  ran the query twice and a chart-type switch re-ran it for a change that only
+  affects drawing.
+- **A stale answer is retried gently.** If an answer arrives already past its
+  interval (the engine is refreshing behind it, or clocks differ), the card asks
+  again after 3 s, 10 s, 30 s and 60 s, then once per interval. Each retry is a
+  cache read.
+
+The engine's half (fraud-analyzer-engine): editing a chart, or publishing it,
+redraws the cached result in place instead of discarding it, so it costs no run;
+a background refresh that **fails** is not retried until a further interval has
+passed, so a client polling a database that is down cannot hammer it; and the
+scheduler skips a query whose result somebody just ran, so a poll's refresh and
+the scheduler's run cannot both happen at the same boundary. Editing a query's
+SQL, a flag rule or a list still re-runs it, because those change what the result
+says. The engine must be rebuilt for these to take effect; until then the
+dashboard still works, with `executed_at` missing from unchanged answers (the
+status line then falls back to when the card last heard from the engine).
+
+The interval is set per query (`Poll interval (ms)` in the query editor, which
+now states the value back in words and offers 1 min, 5 min, 15 min, 1 hour and
+1 day presets). Saved queries that have flag rules also run on a scheduler with
+nobody watching, at the same interval with a one-minute floor.
+
 ### Design system
 
 A fintech SaaS surface: cool off-white ground, white cards with a hairline and a
@@ -697,10 +745,11 @@ trips against a browser that opens six connections at a time.
 
 The batch keeps paying off rather than only helping on first paint, and nothing
 has to align the cards on a grid for that: every card in a batch is answered at
-the same instant, so every card in it schedules its next poll from the same
-moment. Cards sharing an interval stay in phase; cards on different intervals
-drift apart, which is correct, because they are not asking at the same time. No
-poll is ever delayed to make a batch bigger.
+the same instant, so every card in it learns the same run time and aims its next
+poll at the same moment (see "The poll interval", above). Cards of one query stay
+in phase; cards on different intervals drift apart, which is correct, because
+they are not asking at the same time. No poll is ever delayed to make a batch
+bigger.
 
 Results are matched back to their waiters by `query_id`, never by position. A
 batch is the one place an off-by-one shows up as a card rendering another card's

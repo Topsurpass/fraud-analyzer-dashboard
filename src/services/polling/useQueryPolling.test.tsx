@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PollResponse } from "@/contracts/api";
 import { EMPTY_FLAGS } from "@/contracts/api";
 import { ApiError } from "@/services/api-client";
-import { backoffFor, useQueryPolling } from "./useQueryPolling";
+import { resetCoalesced } from "./coalesce";
+import {
+  STALE_GRACE_MS,
+  STALE_RETRY_MS,
+  backoffFor,
+  nextPollDelay,
+  useQueryPolling,
+} from "./useQueryPolling";
 
 const pollQuery = vi.hoisted(() => vi.fn());
 
@@ -17,11 +24,28 @@ vi.mock("@/services/api-client", async () => {
   };
 });
 
-/** A full payload, the shape the engine returns on a changed poll. */
-function changed(hash: string, rows: unknown[][] = [[1]], intervalMs = 3000): PollResponse {
+/** An ISO time this many ms from the (fake) clock's now: negative is the past. */
+const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+
+/**
+ * A full payload, the shape the engine returns on a changed poll.
+ *
+ * `executedAt` is when the engine ran the query, which the hook schedules
+ * against. The default is one grace period ago, which puts the next poll
+ * exactly one interval away (the hook aims a grace period *past* the end of the
+ * interval), so the many tests here about hashes, errors and backoff can step
+ * the clock by the interval, as they always have. Tests about the schedule
+ * itself pass their own.
+ */
+function changed(
+  hash: string,
+  rows: unknown[][] = [[1]],
+  intervalMs = 3000,
+  executedAt: string = at(-STALE_GRACE_MS),
+): PollResponse {
   return {
     query_id: "q1",
-    executed_at: "2026-08-22T12:00:00",
+    executed_at: executedAt,
     duration_ms: 4,
     row_count: rows.length,
     truncated: false,
@@ -37,13 +61,14 @@ function changed(hash: string, rows: unknown[][] = [[1]], intervalMs = 3000): Po
 }
 
 /** The lean payload the engine returns when since_hash still matches. */
-function unchanged(hash: string, intervalMs = 3000): PollResponse {
+function unchanged(hash: string, intervalMs = 3000, executedAt?: string): PollResponse {
   return {
     query_id: "q1",
     changed: false,
     data_hash: `sha256:${hash}`,
     poll_interval_ms: intervalMs,
     from_cache: true,
+    ...(executedAt ? { executed_at: executedAt } : {}),
   };
 }
 
@@ -184,7 +209,9 @@ describe("useQueryPolling", () => {
     const afterFirst = pollQuery.mock.calls.length;
     await advance(7000);
     expect(pollQuery).toHaveBeenCalledTimes(afterFirst);
-    await advance(1500);
+    // Aimed just past the interval (a moment after the engine's cache goes
+    // stale), not at it, so the poll finds something to refresh.
+    await advance(1000 + STALE_GRACE_MS + 100);
     await settle();
     expect(pollQuery.mock.calls.length).toBeGreaterThan(afterFirst);
   });
@@ -440,5 +467,260 @@ describe("remounting while a poll is in flight", () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.snapshot?.data_hash).toBe("sha256:aaa");
+  });
+});
+
+
+describe("nextPollDelay", () => {
+  const INTERVAL = 60_000;
+  const NOW = 1_000_000_000_000;
+
+  it("is a plain interval when the engine reported no execution time", () => {
+    expect(nextPollDelay(NOW, null, INTERVAL, 0)).toBe(INTERVAL);
+  });
+
+  it("aims just past the end of the interval counted from the run", () => {
+    // Ran 40s ago: stale in 20s, polled a grace period after.
+    expect(nextPollDelay(NOW, NOW - 40_000, INTERVAL, 0)).toBe(20_000 + STALE_GRACE_MS);
+  });
+
+  it("never waits longer than one interval, even if the engine's clock runs ahead", () => {
+    // "Ran" ten minutes in our future: must not stretch the wait to eleven minutes.
+    expect(nextPollDelay(NOW, NOW + 600_000, INTERVAL, 0)).toBe(INTERVAL + STALE_GRACE_MS);
+  });
+
+  it("retries a stale answer soon, then backs off, then once per interval", () => {
+    const stale = NOW - 10 * INTERVAL;
+    const delays = [0, 1, 2, 3, 4, 5].map((streak) => nextPollDelay(NOW, stale, 120_000, streak));
+    expect(delays).toEqual([...STALE_RETRY_MS, 120_000, 120_000]);
+  });
+
+  it("never retries a stale answer more often than the interval itself", () => {
+    expect(nextPollDelay(NOW, NOW - 100_000, 2_000, 0)).toBe(2_000);
+  });
+
+  it("stays inside what a timer can hold", () => {
+    expect(nextPollDelay(NOW, NOW, 10 ** 12, 0)).toBe(2_147_483_647);
+  });
+});
+
+describe("the timer follows the engine's last run, not the card", () => {
+  const INTERVAL = 60_000;
+
+  function visibility(state: "visible" | "hidden") {
+    const spy = vi.spyOn(document, "visibilityState", "get");
+    spy.mockReturnValue(state);
+    return spy;
+  }
+  async function toggleTab(spy: ReturnType<typeof visibility>, state: "visible" | "hidden") {
+    spy.mockReturnValue(state);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  it("aims the next poll at the end of the interval counted from the run", async () => {
+    // Ran 40s ago, so the result goes stale in 20s: not a full minute from now.
+    pollQuery
+      .mockResolvedValueOnce(changed("aaa", [[1]], INTERVAL, at(-40_000)))
+      .mockResolvedValue(unchanged("aaa", INTERVAL));
+    renderHook(() => useQueryPolling("q1"));
+    await flush();
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+
+    await advance(20_000);
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+    await advance(STALE_GRACE_MS + 100);
+    await settle();
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes when the query ran and when the next poll is aimed", async () => {
+    const ran = at(-40_000);
+    pollQuery.mockResolvedValue(changed("aaa", [[1]], INTERVAL, ran));
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+
+    expect(result.current.executedAt).toBe(Date.parse(ran));
+    expect(result.current.nextPollAt).toBeGreaterThan(Date.now());
+    expect(result.current.nextPollAt! - Date.now()).toBeLessThanOrEqual(20_000 + STALE_GRACE_MS);
+  });
+
+  it("learns a new run time from an unchanged answer, and aims at that", async () => {
+    // The data did not change, but the engine ran again: only executed_at says so.
+    pollQuery
+      .mockResolvedValueOnce(changed("aaa", [[1]], INTERVAL, at(-59_000)))
+      .mockResolvedValueOnce(unchanged("aaa", INTERVAL, at(0)))
+      .mockResolvedValue(unchanged("aaa", INTERVAL));
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    await advance(1_000 + STALE_GRACE_MS + 100);
+    await settle();
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+
+    // Ran just now, so a full interval to wait, not the 1s the first answer implied.
+    expect(result.current.executedAt).toBeGreaterThan(Date.now() - 5_000);
+    await advance(30_000);
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll when the tab returns inside the interval", async () => {
+    pollQuery.mockResolvedValue(changed("aaa", [[1]], INTERVAL));
+    const spy = visibility("visible");
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    const scheduled = result.current.nextPollAt;
+
+    await toggleTab(spy, "hidden");
+    await advance(10_000);
+    await toggleTab(spy, "visible");
+    await flush();
+
+    // The clock was not restarted, and nothing was asked of the engine.
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe("live");
+    expect(Math.abs(result.current.nextPollAt! - scheduled!)).toBeLessThan(50);
+    spy.mockRestore();
+  });
+
+  it("still polls on schedule after the tab came back early", async () => {
+    pollQuery.mockResolvedValueOnce(changed("aaa", [[1]], INTERVAL)).mockResolvedValue(unchanged("aaa", INTERVAL));
+    const spy = visibility("visible");
+    renderHook(() => useQueryPolling("q1"));
+    await flush();
+    await toggleTab(spy, "hidden");
+    await advance(10_000);
+    await toggleTab(spy, "visible");
+
+    await advance(INTERVAL - 10_000 + STALE_GRACE_MS + 100);
+    await settle();
+
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+    // And with the hash it learned, so the answer is the cheap one.
+    expect(pollQuery.mock.calls[1][1]).toEqual({ sinceHash: "sha256:aaa" });
+    spy.mockRestore();
+  });
+
+  it("polls at once when the tab returns after the next run was due", async () => {
+    pollQuery.mockResolvedValue(changed("aaa", [[1]], INTERVAL));
+    const spy = visibility("visible");
+    renderHook(() => useQueryPolling("q1"));
+    await flush();
+    await toggleTab(spy, "hidden");
+    await advance(INTERVAL * 2);
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+
+    await toggleTab(spy, "visible");
+    await flush();
+
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+
+  it("asks again soon when an answer is already stale, then backs off to the interval", async () => {
+    // The engine is refreshing behind a stale answer: look again shortly.
+    const stale = at(-200_000);
+    pollQuery
+      .mockResolvedValueOnce(changed("aaa", [[1]], 120_000, stale))
+      .mockResolvedValue(unchanged("aaa", 120_000, stale));
+    const started = Date.now();
+    renderHook(() => useQueryPolling("q1"));
+    await flush();
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+
+    // Stepped to absolute times, so no drift builds up from one wait to the
+    // next: each retry is checked half a second before it is due (not yet) and
+    // half a second after (there, the coalescer's frame included).
+    const advanceTo = (elapsedMs: number) => advance(elapsedMs - (Date.now() - started));
+    let due = 0;
+    let expected = 1;
+    for (const wait of [...STALE_RETRY_MS, 120_000]) {
+      due += wait;
+      await advanceTo(due - 500);
+      expect(pollQuery).toHaveBeenCalledTimes(expected);
+      await advanceTo(due + 500);
+      await settle();
+      expected += 1;
+      expect(pollQuery).toHaveBeenCalledTimes(expected);
+    }
+  });
+
+  it("caps the wait at one interval when the engine's clock runs ahead of ours", async () => {
+    pollQuery.mockResolvedValue(changed("aaa", [[1]], 30_000, at(10 * 60_000)));
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    expect(result.current.nextPollAt! - Date.now()).toBeLessThanOrEqual(30_000 + STALE_GRACE_MS);
+  });
+
+  it("keeps a plain interval for an engine that reports no execution time", async () => {
+    const legacy = changed("aaa", [[1]], 10_000);
+    delete (legacy as { executed_at?: string }).executed_at;
+    pollQuery.mockResolvedValueOnce(legacy).mockResolvedValue(unchanged("aaa", 10_000));
+    renderHook(() => useQueryPolling("q1"));
+    await flush();
+
+    await advance(9_900);
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+    await advance(200);
+    await settle();
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes a remounted card fetch once and then line up with the run", async () => {
+    // Navigating away and back loses the card's state, so it must ask once (the
+    // engine answers from its cache) and then wait for the run, not a fresh interval.
+    pollQuery
+      .mockResolvedValue(changed("aaa", [[1]], INTERVAL, at(-40_000)));
+    const first = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    first.unmount();
+    pollQuery.mockClear();
+    // A real navigation takes longer than the coalescer's memory of an answer.
+    resetCoalesced();
+
+    const second = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    expect(pollQuery).toHaveBeenCalledTimes(1);
+    expect(pollQuery.mock.calls[0][1]).toEqual({ sinceHash: null });
+    expect(second.result.current.nextPollAt! - Date.now()).toBeLessThan(INTERVAL / 2);
+  });
+});
+
+describe("resync", () => {
+  it("asks for the whole payload without forcing a run", async () => {
+    pollQuery.mockResolvedValue(changed("aaa"));
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+
+    await act(async () => {
+      result.current.resync();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(pollQuery).toHaveBeenCalledTimes(2);
+    // No force (the engine answers from its cache, running nothing) and no
+    // since_hash (so it sends the whole payload, mapping included).
+    expect(pollQuery.mock.calls[1][1]).toEqual({ sinceHash: null });
+    expect(pollQuery.mock.calls[1][1]).not.toHaveProperty("force");
+  });
+
+  it("is a no-op while the card is paused", async () => {
+    const { result } = renderHook(() => useQueryPolling("q1", { enabled: false }));
+    await flush();
+    await act(async () => result.current.resync());
+    expect(pollQuery).not.toHaveBeenCalled();
+  });
+
+  it("leaves refresh as the one that runs the query", async () => {
+    pollQuery.mockResolvedValue(changed("aaa"));
+    const { result } = renderHook(() => useQueryPolling("q1"));
+    await flush();
+    await act(async () => {
+      result.current.refresh();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(pollQuery.mock.calls[1][1]).toEqual({ force: true });
   });
 });

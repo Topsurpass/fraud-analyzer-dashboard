@@ -19,6 +19,9 @@ const port = Number(
   process.argv.find((a) => a.startsWith("--port="))?.split("=")[1] ?? 8100,
 );
 
+/** How long the mock keeps a result before "running" the query again. */
+const POLL_MS = Number(process.env.MOCK_POLL_MS ?? 5000);
+
 const NOW = Date.now();
 const iso = (msAgo) => new Date(NOW - msAgo).toISOString();
 
@@ -196,7 +199,7 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   sql_text: "select 1",
   table_hint: null,
   row_limit: 1000,
-  poll_interval_ms: 5000,
+  poll_interval_ms: POLL_MS,
   // Three queries are the signed-in user's; the rest belong to somebody else,
   // so an analyst sees the difference between rules they can and cannot name.
   owner_id: ["q_table", "q_flagged", "q_mix"].includes(id) ? "u1" : "u2",
@@ -207,7 +210,28 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
 
 const FLAG_ROWS = tx.filter((r) => r[4] > 80).map((_, i) => i);
 
-function runFor(queryId) {
+/*
+ * A stand-in for the engine's result cache, enough to test a client's timer.
+ *
+ * Like the real engine it runs a query at most once per interval and answers
+ * every other poll from its cache, and it reports when the result was produced
+ * (`executed_at`) on every answer. `GET /__executions` says how many times each
+ * query "ran", which is the number a poll timer must not inflate.
+ *   MOCK_POLL_MS=300000 node scripts/mock-engine.mjs   # a five-minute interval
+ */
+const ranAt = new Map();
+const executions = new Map();
+function lastRun(queryId, { force = false } = {}) {
+  const now = Date.now();
+  const last = ranAt.get(queryId);
+  if (force || last === undefined || now - last >= POLL_MS) {
+    ranAt.set(queryId, now);
+    executions.set(queryId, (executions.get(queryId) ?? 0) + 1);
+  }
+  return ranAt.get(queryId);
+}
+
+function runFor(queryId, options) {
   const defs = chartDefs.filter((c) => c[1] === queryId);
   const data = runs[defs[0][7]];
   // Which rows each query's rules flag, so every chart type has marks to show.
@@ -242,7 +266,7 @@ function runFor(queryId) {
   };
   return {
     query_id: queryId,
-    executed_at: iso(2000),
+    executed_at: new Date(lastRun(queryId, options)).toISOString(),
     duration_ms: 18 + (queryId.length % 7) * 11,
     row_count: data.rows.length,
     truncated: false,
@@ -269,7 +293,7 @@ function runFor(queryId) {
       warnings: [],
       dismissed_count: 0,
     },
-    poll_interval_ms: 5000,
+    poll_interval_ms: POLL_MS,
     changed: true,
   };
 }
@@ -459,6 +483,7 @@ createServer((req, res) => {
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
     if (path === "/health") return send(res, 200, { status: "ok" });
+    if (path === "/__executions") return send(res, 200, Object.fromEntries(executions));
     if (path === "/ready") return send(res, 200, { status: "ready" });
     if (path === "/auth/login") {
       const creds = JSON.parse(body || "{}");
@@ -483,10 +508,17 @@ createServer((req, res) => {
     }
     // Honour since_hash like the real engine, so a repeat poll is "unchanged"
     // and cards sit in their calm state instead of flashing "changed".
-    const answer = (queryId) => {
-      const run = runFor(queryId);
+    const answer = (queryId, force = url.searchParams.get("force") === "true") => {
+      const run = runFor(queryId, { force });
       if (url.searchParams.get("since_hash") === run.data_hash) {
-        return { query_id: queryId, changed: false, data_hash: run.data_hash, poll_interval_ms: 5000, from_cache: true };
+        return {
+          query_id: queryId,
+          changed: false,
+          data_hash: run.data_hash,
+          poll_interval_ms: POLL_MS,
+          from_cache: true,
+          executed_at: run.executed_at,
+        };
       }
       return run;
     };
@@ -496,7 +528,7 @@ createServer((req, res) => {
       return chart ? send(res, 200, answer(chart.query_id)) : send(res, 404, { message: "no chart" });
     }
     m = path.match(/^\/queries\/([^/]+)\/(poll|run)$/);
-    if (m) return send(res, 200, answer(m[1]));
+    if (m) return send(res, 200, answer(m[1], m[2] === "run" || url.searchParams.get("force") === "true"));
     m = path.match(/^\/connections\/([^/]+)\/queries$/);
     if (m) return send(res, 200, queries.filter((q) => q.connection_id === m[1]));
     m = path.match(/^\/connections\/([^/]+)$/);

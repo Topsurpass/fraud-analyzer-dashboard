@@ -584,6 +584,12 @@ export interface PollUnchanged {
 	data_hash: string;
 	poll_interval_ms: number;
 	from_cache: boolean;
+	/**
+	 * When the result being confirmed was produced. A run that returns the same
+	 * rows leaves the hash alone but moves this, so it is what tells a client
+	 * when the query last actually ran. Absent from an engine that predates it.
+	 */
+	executed_at?: string | null;
 }
 
 export type PollResponse = PollChanged | PollUnchanged;

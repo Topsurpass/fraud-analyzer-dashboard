@@ -6,7 +6,9 @@ import {
   formatDuration,
   formatHash,
   formatInteger,
+  describeDuration,
   formatInterval,
+  formatUntil,
   formatMetric,
   formatRelative,
   humanizeColumn,
@@ -204,5 +206,47 @@ describe("humanizeColumn", () => {
   it("returns the input when there is nothing to split", () => {
     expect(humanizeColumn("")).toBe("");
     expect(humanizeColumn("__")).toBe("__");
+  });
+});
+
+
+describe("describeDuration", () => {
+  it("states a setting back in words", () => {
+    expect(describeDuration(5000)).toBe("5 seconds");
+    expect(describeDuration(1000)).toBe("1 second");
+    expect(describeDuration(60_000)).toBe("1 minute");
+    expect(describeDuration(3_600_000)).toBe("1 hour");
+    expect(describeDuration(86_400_000)).toBe("1 day");
+  });
+
+  it("is exact rather than rounded, and stops at two units", () => {
+    expect(describeDuration(90_000)).toBe("1 minute 30 seconds");
+    expect(describeDuration(5_400_000)).toBe("1 hour 30 minutes");
+    expect(describeDuration(93_784_000)).toBe("1 day 2 hours");
+  });
+
+  it("handles the edges", () => {
+    expect(describeDuration(250)).toBe("250 ms");
+    expect(describeDuration(0)).toBe("0 seconds");
+    expect(describeDuration(-5)).toBe("0 seconds");
+    expect(describeDuration(Number.NaN)).toBe("0 seconds");
+  });
+});
+
+describe("formatUntil", () => {
+  it("reads like a countdown, coarse past a minute", () => {
+    expect(formatUntil(4_200)).toBe("in 5s");
+    expect(formatUntil(59_000)).toBe("in 59s");
+    expect(formatUntil(61_000)).toBe("in 1m");
+    expect(formatUntil(48 * 60_000)).toBe("in 48m");
+    expect(formatUntil(3_600_000)).toBe("in 1h");
+    expect(formatUntil(5_100_000)).toBe("in 1h 25m");
+    expect(formatUntil(3 * 86_400_000)).toBe("in 3d");
+  });
+
+  it("says due now at or past the moment, never a negative duration", () => {
+    expect(formatUntil(0)).toBe("due now");
+    expect(formatUntil(-5_000)).toBe("due now");
+    expect(formatUntil(Number.NaN)).toBe("due now");
   });
 });

@@ -167,6 +167,10 @@ function CardMenuPanel({
     let ok = false;
     try {
       await runQuery(query.id);
+      // The run refreshed the engine's cache; the card re-reads it (it does not
+      // run the query a second time), so a window of remembered answers from
+      // before the run must not be reused.
+      invalidateCoalesced(query.id);
       onMutated?.();
       ok = true;
     } catch (cause) {
