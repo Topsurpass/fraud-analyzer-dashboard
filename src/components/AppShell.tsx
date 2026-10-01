@@ -6,6 +6,7 @@ import { ListsProvider } from "@/lib/ListsContext";
 import { ConnectionsProvider } from "@/services/connections/ConnectionsContext";
 import { DashboardsProvider } from "@/services/dashboards";
 import { FlaggedProvider } from "@/services/flagged/FlaggedContext";
+import { PublishRequestsProvider } from "@/services/publishing/PublishRequestsContext";
 import { Rail } from "./Rail";
 
 /** Lets a page's own TopBar open the mobile drawer that the shell owns. */
@@ -58,6 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ConnectionsProvider>
       <DashboardsProvider>
         <FlaggedProvider>
+        <PublishRequestsProvider>
         <ListsProvider>
       {/* The shell is exactly the viewport and clips what it cannot fit: the
           page scrolls inside `main`, never as a document. `overflow-hidden`
@@ -104,6 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
         </ListsProvider>
+        </PublishRequestsProvider>
         </FlaggedProvider>
       </DashboardsProvider>
     </ConnectionsProvider>
