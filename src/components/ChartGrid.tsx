@@ -10,10 +10,18 @@ import { FlagOrderProvider, useOrderedGrid } from "./FlagOrder";
  * the grid reads as an instrument panel rather than a feed. External gaps stay
  * tight; the padding lives inside each card.
  *
- * Three columns at the top end rather than four. At four, a card on a 1600px
- * screen is about 325px wide, which is not enough for a plot plus its legend -
- * the axis labels start colliding and the legend wraps to three lines. Fewer,
- * wider cards read better than more, narrower ones.
+ * Three columns up to a 1920px screen rather than four. At four, a card on a
+ * 1600px screen is about 325px wide, which is not enough for a plot plus its
+ * legend - the axis labels start colliding and the legend wraps to three lines.
+ * Fewer, wider cards read better than more, narrower ones.
+ *
+ * Past that the page has room for more of them, so columns are added at the
+ * widths where a card stays about 430px or wider (4 from 2100px, 5 from 2900px,
+ * 6 from 3600px, measured with the sidebar open). They are written in
+ * `globals.css` (`.chart-grid`) and not as utilities here: Tailwind orders its
+ * `min-[...]` variants before `xl:`, so `xl:grid-cols-3` won every tie. Capping
+ * the page instead left empty bands on both sides, doubling when the sidebar
+ * collapsed.
  */
 export function ChartGrid({ children }: { children: React.ReactNode }) {
   return (

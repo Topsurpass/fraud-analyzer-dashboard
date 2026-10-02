@@ -634,6 +634,14 @@ available without leaving the page.
   unfilled, which reads as broken rather than as sparse. Three columns at the
   top end rather than four: at four, a card on a 1600px screen is about 325px
   wide, and a plot plus its legend does not fit in that.
+- **The page fills the width the sidebar leaves.** There is no width cap, so a wide
+  screen has no empty bands at the sides and collapsing the sidebar hands its width to
+  the content. (A 1600px cap, centred, used to leave up to 414px empty on each side at
+  2560px, and 854px at 3440px.) To keep cards from becoming huge, the grid adds columns
+  on wide screens: 4 from 2100px, 5 from 2900px, 6 from 3600px, so a card stays about
+  430px or wider. They live in `globals.css` (`.chart-grid`) because Tailwind orders
+  its `min-[...]` variants before `xl:` and the three-column rule would win every tie.
+  Forms cap themselves (`max-w-2xl` and so on) and are unaffected.
 - **A card's border turns amber for a beat** when its last poll brought new
   data, so across a full grid you can see which cards moved without reading any
   of them.

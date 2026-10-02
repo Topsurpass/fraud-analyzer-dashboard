@@ -335,6 +335,32 @@ html.theme-switching *::after {
   grid-auto-flow: dense;
 }
 
+/*
+ * More columns when the page is wider than a 1920px screen can use. The page has
+ * no width cap, so the grid takes what the sidebar leaves; at three columns that
+ * would be cards of 800px and more. Steps are chosen so a card stays about 430px
+ * or wider with the sidebar open (and wider still collapsed). Unlayered on
+ * purpose: it must beat the `xl:grid-cols-3` utility, whatever order Tailwind
+ * emits them in.
+ */
+@media (min-width: 2100px) {
+  .chart-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 2900px) {
+  .chart-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 3600px) {
+  .chart-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 .card-cell {
   grid-row: span 3;
 }
