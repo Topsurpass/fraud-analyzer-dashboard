@@ -93,6 +93,14 @@ function ruleSet(value: string): FlagRuleSetRead {
   };
 }
 
+/**
+ * A saved rule is one collapsed line until it is opened, so a test that wants its
+ * fields opens it the way a person does.
+ */
+async function openFirstRule() {
+  await userEvent.click(await screen.findByRole("button", { name: /^Edit rule / }));
+}
+
 // `params` is a promise the page unwraps with `use`, so the first commit
 // suspends. The render has to happen inside the act scope for that to settle.
 async function renderPage() {
@@ -125,9 +133,12 @@ describe("saved flag rules on reopen", () => {
     getFlagRules.mockResolvedValue(ruleSet("500"));
     await renderPage();
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Rule name")).toHaveValue("Large"),
-    );
+    // Collapsed, it already says what it catches: no need to open it to know.
+    const line = await screen.findByRole("button", { name: /^Edit rule Large$/ });
+    expect(line).toHaveTextContent("amount is greater than 500");
+
+    await userEvent.click(line);
+    expect(screen.getByLabelText("Rule name")).toHaveValue("Large");
     expect(screen.getByLabelText("Value")).toHaveValue("500");
   });
 
@@ -168,6 +179,7 @@ describe("saved flag rules on reopen", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("smoke"));
     // Seeded with the rules on its first and only mount.
+    await openFirstRule();
     expect(screen.getByLabelText("Value")).toHaveValue("500");
   });
 
@@ -188,6 +200,7 @@ describe("saved flag rules on reopen", () => {
     );
 
     await renderPage();
+    await openFirstRule();
     await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("500"));
 
     await userEvent.clear(screen.getByLabelText("Value"));
@@ -228,6 +241,7 @@ describe("saved flag rules on reopen", () => {
     getFlagRules.mockResolvedValue(listRules);
 
     await renderPage();
+    await openFirstRule();
     await waitFor(() => expect(screen.getByLabelText("List")).toHaveValue("l1"));
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
@@ -249,6 +263,7 @@ describe("saved flag rules on reopen", () => {
     );
 
     await renderPage();
+    await openFirstRule();
     await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("500"));
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 

@@ -269,6 +269,7 @@ export function QueryEditor({
           columns={columns}
           matchCounts={previewMatchCounts}
           disabled={busy}
+          savedRules={initialRules ?? []}
         />
       </div>
 
