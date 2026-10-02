@@ -586,6 +586,15 @@ savedRules.set("q_table", [
   },
 ]);
 
+// What `POST /__reset` puts back. A check that saves rules (the rules view check
+// does) must not leave them for the next one: the sharing check reads this exact
+// pair, and ran against four leftover rules until the reset restored these.
+const seededRules = structuredClone([...savedRules]);
+function restoreRules() {
+  savedRules.clear();
+  for (const [queryId, rules] of structuredClone(seededRules)) savedRules.set(queryId, rules);
+}
+
 /*
  * The engine keys items with Python's Decimal: decimal literals only (no hex,
  * no "Infinity"), compared by value. Same rule as `itemKey` in
@@ -726,6 +735,7 @@ createServer((req, res) => {
     if (path === "/auth/me") return send(res, 200, user);
     if (path === "/__reset") {
       resetPublication();
+      restoreRules();
       return send(res, 200, { reset: true });
     }
 

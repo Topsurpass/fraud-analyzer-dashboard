@@ -70,6 +70,11 @@ const pinButton = (page, title) => page.locator("article", { has: page.getByRole
 
 /* 1. pinning on a connection board ------------------------------------------ */
 {
+  // Start from a quiet board. The mock flags some cards by default, and "flag the
+  // first card with 2 rows" would then LOWER its count and reshuffle the cards that
+  // were already flagged, which is a different thing from what is being checked.
+  const quiet = await (await fetch(`${engine}/connections/c1/queries`, { headers: { authorization: `Bearer ${admin}` } })).json();
+  for (const q of quiet) await flag(q.id, 0);
   const { context, page } = await open(admin, "/connections/c1");
   const before = await titles(page);
   const target = before.at(-1);
