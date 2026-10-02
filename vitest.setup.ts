@@ -69,3 +69,9 @@ if (
     this.dispatchEvent(new Event("close"));
   };
 }
+
+// jsdom has no layout, so it has no scrolling either. The query builder jumps to
+// the part that needs attention; here that is a no-op rather than a crash.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}

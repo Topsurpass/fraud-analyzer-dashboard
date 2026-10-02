@@ -94,10 +94,15 @@ function ruleSet(value: string): FlagRuleSetRead {
 }
 
 /**
- * A saved rule is one collapsed line until it is opened, so a test that wants its
- * fields opens it the way a person does.
+ * Rules are written in a dialog now, not on the page, and a saved rule is one
+ * collapsed line in it until it is opened. A test that wants the fields opens the
+ * dialog and then the rule, the way a person does.
  */
+async function openRulesDialog() {
+  await userEvent.click(await screen.findByRole("button", { name: "Edit rules" }));
+}
 async function openFirstRule() {
+  await openRulesDialog();
   await userEvent.click(await screen.findByRole("button", { name: /^Edit rule / }));
 }
 
@@ -133,11 +138,13 @@ describe("saved flag rules on reopen", () => {
     getFlagRules.mockResolvedValue(ruleSet("500"));
     await renderPage();
 
-    // Collapsed, it already says what it catches: no need to open it to know.
-    const line = await screen.findByRole("button", { name: /^Edit rule Large$/ });
+    // On the page it is one line that says what it catches: no need to open it to know.
+    const line = (await screen.findByText("Large")).closest("li");
     expect(line).toHaveTextContent("amount is greater than 500");
 
-    await userEvent.click(line);
+    // Opening the dialog and then the rule shows the fields, with the saved values.
+    await openRulesDialog();
+    await userEvent.click(await screen.findByRole("button", { name: /^Edit rule Large$/ }));
     expect(screen.getByLabelText("Rule name")).toHaveValue("Large");
     expect(screen.getByLabelText("Value")).toHaveValue("500");
   });
@@ -186,7 +193,9 @@ describe("saved flag rules on reopen", () => {
   it("keeps an edited rule on screen after saving it", async () => {
     // The reported bug. The editor seeds rule state at mount, so a remount that
     // lands between the save and the rules reload restores the pre-save value
-    // and the analyst watches their edit revert.
+    // and the analyst watches their edit revert. Rules are edited in a dialog and
+    // applied to the page, so what must hold is that the rule's line on the page
+    // keeps the edited value through the reload.
     getFlagRules.mockResolvedValueOnce(ruleSet("500"));
     // Saving bumps updated_at, which is what the page keyed the editor on.
     getQuery.mockResolvedValueOnce(savedQuery());
@@ -205,6 +214,7 @@ describe("saved flag rules on reopen", () => {
 
     await userEvent.clear(screen.getByLabelText("Value"));
     await userEvent.type(screen.getByLabelText("Value"), "999");
+    await userEvent.click(screen.getByRole("button", { name: "Use these rules" }));
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(putFlagRules).toHaveBeenCalled());
@@ -212,13 +222,14 @@ describe("saved flag rules on reopen", () => {
 
     // The query reloads first; the rules are still in flight.
     await waitFor(() => expect(getQuery).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("Value")).toHaveValue("999");
+    const ruleLine = () => screen.getByText("Large").closest("li");
+    expect(ruleLine()).toHaveTextContent("amount is greater than 999");
 
     await act(async () => {
       releaseReload?.();
       await Promise.resolve();
     });
-    await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("999"));
+    await waitFor(() => expect(ruleLine()).toHaveTextContent("amount is greater than 999"));
   });
 
   it("sends a list condition's list_id back on save, so saving never unlinks it", async () => {
@@ -241,9 +252,8 @@ describe("saved flag rules on reopen", () => {
     getFlagRules.mockResolvedValue(listRules);
 
     await renderPage();
-    await openFirstRule();
-    await waitFor(() => expect(screen.getByLabelText("List")).toHaveValue("l1"));
-    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    // Saved without touching the rule: the stored condition has to round-trip.
+    await userEvent.click(await screen.findByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(putFlagRules).toHaveBeenCalled());
     const [condition] = putFlagRules.mock.calls[0][1].rules[0].conditions;
@@ -263,9 +273,7 @@ describe("saved flag rules on reopen", () => {
     );
 
     await renderPage();
-    await openFirstRule();
-    await waitFor(() => expect(screen.getByLabelText("Value")).toHaveValue("500"));
-    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /save changes/i }));
 
     expect(
       await screen.findByText("A rule uses a list that no longer exists. Pick another list."),

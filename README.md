@@ -406,9 +406,8 @@ than it is, and a wall clock stepped backwards cannot either. This only bites
 where the engine runs on a machine that sleeps, which is a developer laptop; a
 server never notices.
 
-The interval is set per query (`Poll interval (ms)` in the query editor, which
-now states the value back in words and offers 1 min, 5 min, 15 min, 1 hour and
-1 day presets). Saved queries that have flag rules also run on a scheduler with
+The interval is set per query (`Run every` in the query editor: a number and a unit, seconds to days,
+stored as milliseconds, with 1 min, 5 min, 15 min, 1 hour and 1 day presets). Saved queries that have flag rules also run on a scheduler with
 nobody watching, at the same interval with a one-minute floor.
 
 ### Design system
@@ -450,6 +449,56 @@ pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
 
 The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
 and filtered rows, and flag marks stay with their row through a sort.
+
+### Creating and editing a query
+
+`connections/:id/queries/new` and `queries/:id` are one component, `QueryEditor`, redesigned
+after people kept getting lost in it: they did not know the order of things, could not find
+Preview, added a chart before there were columns to pick from, and lost the preview as the
+rules grew. The design and the bar it was held to are in `docs/query-builder-redesign.md`.
+
+- **Five numbered parts, in the order the work happens**: write the query, check the result,
+  choose how it is drawn, flag what needs a look (optional), set how often it runs. A sticky
+  **outline** lists them with a status for each (to do, needs attention and why, done, optional)
+  and rings the one that is next. Click a part to jump to it. On a phone the outline is one line
+  ("Step 2 of 5", what to do next, five dots) that opens into the full list from "All steps".
+- **Run preview is where you are writing.** A primary button under the SQL and another in the
+  outline, with the shortcut (Cmd or Ctrl plus Enter, in the SQL box). Change the SQL after a
+  preview and the results are marked **out of date**, in the card, in the outline and in the dock,
+  with a one-click re-run. The first preview scrolls the result into view.
+- **The results stay in reach.** When the results card has scrolled out of view a dock appears
+  above the save bar ("Results, 12 rows, 2 columns", Run preview, Show in page) and opens into
+  a tray with the table.
+- **Charts say why they are empty.** The pickers need the query's columns, which only a
+  preview gives, so before one the chart area says so in a sentence and has a button that runs it.
+  After it the pickers fill in and the untouched first chart is **given the type that suits** the data (a line for a time column
+  and a number, a bar for a label and a number, a number for a single figure; codes with a leading
+  zero such as `011` are treated as labels, not quantities). It says what it chose and why, with a
+  "Back to a table" button, and a chart you already set up is never swapped. Editing a saved query does not ask for a preview to show its own charts.
+- **Rules are written in a workspace**, a dialog with the rules on the left (scrolling inside
+  their own pane) and the rows they catch on the right, which never move however many conditions
+  you add. A live count ("Catches 7 of 12 rows") follows every change after a short pause, never
+  stating a number for rules it has not evaluated yet, and an unfinished rule says so. Save and
+  Cancel are fixed in the footer; **Use these rules** applies the whole set. Under a laptop width the
+  two panes are **Rules | Preview** tabs and the count stays in the footer on both. The page shows each
+  rule as one readable line, with how many rows it caught.
+- **Schedule as a sentence**: "Every [5] [minutes]", read back in the step heading as "Runs at most
+  once every 5 minutes", with the presets and the explanation of what the interval controls.
+- **Saving is honest.** A bar at the bottom lists exactly what blocks the save (a name, the SQL,
+  a chart with no name or a duplicate, an unfinished rule, an interval of zero), each one a button
+  that takes you to it, and pressing Save while blocked goes to the first. A chart missing an axis
+  is a warning, not a block (it still saves). Unsaved changes are flagged; Cancel asks before
+  discarding, and a reload or closed tab asks too (the browser offers no hook for in-app links).
+- **The payload is unchanged.** `QueryEditorValues` and the component's props are as they were;
+  no engine change.
+
+How it is built: `src/services/querybuilder/model.ts` is the arithmetic (what blocks a save, the
+outline's statuses, the chart suggestion) and is tested without a browser; `QueryEditor.tsx` composes
+`src/components/querybuilder/` (`steps.tsx` the outline and cards, `results.tsx` the card and dock,
+`RulesDialog.tsx`, `savebar.tsx`, `dialogs.tsx`). The chart and rule editors gained a `bare` option so
+they sit inside these cards without a second frame. `npm run check:builder` walks the whole journey as a
+first-time user in Chrome against the mock engine at 1440 and 390 pixels (it saves screenshots and a
+`journey.json` of clicks per step).
 
 ### Writing your own queries
 

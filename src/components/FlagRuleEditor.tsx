@@ -37,7 +37,8 @@ import {
 } from "@/contracts/api";
 import Link from "next/link";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Button, Field, Input, Panel, Select } from "@/components/ui";
+import { Button, Field, Input, Select } from "@/components/ui";
+import { PanelFrame } from "./PanelFrame";
 import { RuleHeadline } from "@/components/RuleSummary";
 import { useLists } from "@/lib/ListsContext";
 
@@ -167,6 +168,8 @@ export interface FlagRuleEditorProps {
 	 * that rather than guessing.
 	 */
 	savedRules?: FlagRule[] | null;
+	/** Without its own framed panel and title, for a dialog or a card of the page's own. */
+	bare?: boolean;
 }
 
 /** Where focus goes after the next render, because the thing it was on moved. */
@@ -183,6 +186,7 @@ export function FlagRuleEditor({
 	matchCounts,
 	disabled = false,
 	savedRules,
+	bare = false,
 }: FlagRuleEditorProps) {
 	const problems = validateRules(rules);
 	const lists = useLists();
@@ -335,7 +339,8 @@ export function FlagRuleEditor({
 		: false;
 
 	return (
-		<Panel
+		<PanelFrame
+			bare={bare}
 			title="Flag rules"
 			actions={
 				<div className="flex flex-wrap items-center gap-2">
@@ -399,11 +404,14 @@ export function FlagRuleEditor({
 			}
 		>
 			<div className="space-y-3 p-3">
-				<p className="text-[12.5px] leading-relaxed text-text-secondary">
-					A row is flagged when <strong>any</strong> rule matches it. A rule matches
-					when <strong>all</strong> of its conditions hold. Rules run over the rows the
-					query returns, so they see at most the row limit.
-				</p>
+				{/* In the rules dialog the header already says this. */}
+				{bare ? null : (
+					<p className="text-[12.5px] leading-relaxed text-text-secondary">
+						A row is flagged when <strong>any</strong> rule matches it. A rule matches
+						when <strong>all</strong> of its conditions hold. Rules run over the rows the
+						query returns, so they see at most the row limit.
+					</p>
+				)}
 
 				{rules.length === 0 ? (
 					<div className="space-y-3 rounded-[var(--radius-sm)] border border-dashed border-line px-4 py-5">
@@ -850,7 +858,7 @@ export function FlagRuleEditor({
 					</ul>
 				) : null}
 			</div>
-		</Panel>
+		</PanelFrame>
 	);
 }
 

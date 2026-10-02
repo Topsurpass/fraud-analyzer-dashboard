@@ -19,6 +19,19 @@ const updateQuery = vi.hoisted(() => vi.fn());
 const putFlagRules = vi.hoisted(() => vi.fn());
 const putQueryCharts = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+// One list to pick, so a rule that points at a list can be complete: an incomplete
+// rule now stops the save before the engine is asked.
+const WATCHLIST = vi.hoisted(() => ({
+  id: "l1",
+  name: "Watchlist",
+  description: null,
+  item_count: 3,
+  rule_count: 0,
+  created_by: null,
+  created_by_name: null,
+  created_at: "2026-08-24T09:00:00Z",
+  updated_at: "2026-08-24T09:00:00Z",
+}));
 
 vi.mock("@/services/api-client", async () => {
   const actual = await vi.importActual<typeof import("@/services/api-client")>(
@@ -31,7 +44,7 @@ vi.mock("@/services/api-client", async () => {
     putFlagRules,
     putQueryCharts,
     listConnections: vi.fn().mockResolvedValue([]),
-    listLists: vi.fn().mockResolvedValue([]),
+    listLists: vi.fn().mockResolvedValue([WATCHLIST]),
     previewQuery: vi.fn(),
   };
 });
@@ -139,10 +152,16 @@ describe("saving a new query", () => {
         url: "/queries/q1/flag-rules",
       });
 
+    // Rules are written in a dialog and applied to the page. The rule is complete
+    // (a column, a comparison and a list), because an incomplete one is stopped
+    // before the engine is asked, and this case is about the engine's answer.
     async function addListRule() {
-      await userEvent.click(screen.getByRole("button", { name: /add rule/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Add a rule" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Add rule" }));
       await userEvent.type(screen.getByLabelText("Column"), "terminal");
       await userEvent.selectOptions(screen.getByLabelText("Comparison"), "in_list");
+      await userEvent.selectOptions(await screen.findByLabelText("List"), "l1");
+      await userEvent.click(screen.getByRole("button", { name: "Use these rules" }));
     }
 
     it("says what to do rather than printing the engine's id", async () => {

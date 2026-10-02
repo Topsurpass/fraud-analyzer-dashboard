@@ -22,7 +22,12 @@ export function PageBody({
           positioned against, and clipped by, this scroller instead of the body.
           The shell is where the whitespace lives; data surfaces inside stay
           dense. See .data-dense in globals.css. */}
-      <main className="relative min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+      <main
+        // `scroll-pt/pb` on a page with the query builder: its outline sticks to the top
+        // and its save bar to the bottom, and a browser scrolling a focused field into
+        // view does not know they are there, so the field landed underneath one of them.
+        className="relative min-h-0 flex-1 overflow-y-auto p-4 has-[#qb-query]:scroll-pt-28 has-[#qb-query]:scroll-pb-32 sm:p-6 lg:p-8"
+      >
         {/* No width cap: content takes whatever the sidebar leaves. A 1600px cap,
             centred, left empty bands on both sides of a wide screen, and they
             doubled in size when the sidebar collapsed. Pages that should stay

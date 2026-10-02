@@ -98,7 +98,8 @@ async function open(token, path, { width, height, scheme = "light" }) {
 }
 
 const lines = (page) => page.getByRole("button", { name: /^(Edit|Close) rule / });
-const panelOf = (page) => page.locator("section", { has: page.getByRole("heading", { name: "Flag rules", exact: true }) });
+// The rules are written in a workspace dialog now (the page only summarises them).
+const panelOf = (page) => page.getByRole("dialog", { name: "Flag rules" });
 
 /** Contrast ratio of the rules' sentence text against what it sits on. */
 const contrastOf = (page) =>
@@ -151,7 +152,9 @@ for (const [width, height, name] of [
   [390, 900, "390px"],
 ]) {
   const { context, page } = await open(admin, "/queries/q_table", { width, height });
+  await page.getByRole("button", { name: "Edit rules" }).click();
   const panel = panelOf(page);
+  await panel.waitFor();
   const all = lines(page);
 
   /* 1. collapsed by default */
@@ -236,7 +239,7 @@ for (const [width, height, name] of [
 
   /* 2 and 3: unsaved changes, validation, focus */
   await page.getByLabel("Rule name").fill("Very large transfer!");
-  check(await page.getByText("Unsaved changes").isVisible(), `${name}: an edit is marked as unsaved`);
+  check(await page.getByText("Unsaved changes", { exact: true }).isVisible(), `${name}: an edit is marked as unsaved`);
   check((await lines(page).first().textContent()).includes("Edited"), `${name}: and the rule itself says Edited`);
 
   await panel.getByRole("button", { name: "Add condition" }).click();
@@ -273,6 +276,8 @@ for (const scheme of ["light", "dark"]) {
 /* 3. the empty editor ----------------------------------------------------------- */
 {
   const { context, page } = await open(admin, "/connections/c1/queries/new", { width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Add a rule" }).click();
+  await panelOf(page).waitFor();
   check(await page.getByText(/nothing on this query will be flagged/i).isVisible(), "empty: says nothing will be flagged");
   check(await page.getByText(/amount is at least 500000 and response_code equals 00/).isVisible(), "empty: explains a rule with an example");
   await page.getByRole("button", { name: "Add your first rule" }).click();

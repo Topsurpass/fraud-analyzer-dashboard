@@ -240,6 +240,27 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   updated_at: iso(86_400_000),
 }));
 
+/** Replace a query's charts (what PUT /queries/:id/charts does), drawn from the volume fixture. */
+function replaceCharts(query, specs) {
+  for (const old of query.charts) {
+    const at = charts.findIndex((c) => c.id === old.id);
+    if (at >= 0) charts.splice(at, 1);
+    const def = chartDefs.findIndex((d) => d[0] === old.id);
+    if (def >= 0) chartDefs.splice(def, 1);
+  }
+  query.charts = specs.map((spec, position) => {
+    const id = `ch_${query.id}_${position}`;
+    chartDefs.push([id, query.id, spec.name, spec.chart_type, spec.x_field, spec.y_field, spec.series_field, "volume"]);
+    const chart = {
+      id, query_id: query.id, name: spec.name, position, chart_type: spec.chart_type,
+      x_field: spec.x_field ?? null, y_field: spec.y_field ?? null, series_field: spec.series_field ?? null,
+      surge_threshold_pct: null, ...PUBLISH_DEFAULTS, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    charts.push(chart);
+    return chart;
+  });
+}
+
 const FLAG_ROWS = tx.filter((r) => r[4] > 80).map((_, i) => i);
 
 /*
@@ -590,6 +611,18 @@ savedRules.set("q_table", [
 // does) must not leave them for the next one: the sharing check reads this exact
 // pair, and ran against four leftover rules until the reset restored these.
 const seededRules = structuredClone([...savedRules]);
+/** Queries the query builder created, gone again, so the walkthrough can run twice. */
+function dropCreatedQueries() {
+  for (const query of queries.filter((q) => q.id.startsWith("q_new_"))) {
+    for (const chart of query.charts) {
+      const at = charts.findIndex((c) => c.id === chart.id);
+      if (at >= 0) charts.splice(at, 1);
+      const def = chartDefs.findIndex((d) => d[0] === chart.id);
+      if (def >= 0) chartDefs.splice(def, 1);
+    }
+    queries.splice(queries.indexOf(query), 1);
+  }
+}
 function restoreRules() {
   savedRules.clear();
   for (const [queryId, rules] of structuredClone(seededRules)) savedRules.set(queryId, rules);
@@ -736,6 +769,7 @@ createServer((req, res) => {
     if (path === "/__reset") {
       resetPublication();
       restoreRules();
+      dropCreatedQueries();
       return send(res, 200, { reset: true });
     }
 
@@ -928,6 +962,85 @@ createServer((req, res) => {
     if (path.startsWith("/dashboards/")) {
       const found = dashboards.find((d) => d.id === path.split("/")[2]);
       return found ? send(res, 200, found) : send(res, 404, { message: "not found" });
+    }
+    /*
+     * What the query builder needs to be walked through end to end: a preview that
+     * answers from the SQL it was given (and evaluates unsaved rules against the rows),
+     * and create, update and chart replacement that a connection page can then draw.
+     * The preview's data is invented from the SQL's shape, not run.
+     */
+    const previewMatch = path.match(/^\/connections\/([^/]+)\/query\/preview$/);
+    if (previewMatch && req.method === "POST") {
+      const { sql_text: sqlText = "", flag_rules: sentRules = [] } = JSON.parse(body || "{}");
+      if (/\b(insert|update|delete|drop)\b/i.test(sqlText)) {
+        return send(res, 400, { error_code: "SQL_NOT_READ_ONLY", message: "Only SELECT statements are allowed.", detail: null });
+      }
+      const withOutcome = /outcome/i.test(sqlText);
+      const columns = withOutcome ? ["bucket", "outcome", "transactions"] : ["bucket", "transactions"];
+      const rows = [];
+      for (let i = 0; i < 12; i += 1) {
+        const bucket = `${String(7 + Math.floor(i / 6)).padStart(2, "0")}:${String((i % 6) * 10).padStart(2, "0")}`;
+        const n = 80 + ((i * 37) % 90);
+        if (withOutcome) { rows.push([bucket, "approved", n], [bucket, "declined", Math.round(n / 3)]); }
+        else rows.push([bucket, n]);
+      }
+      const compare = { gt: (a, b) => a > b, gte: (a, b) => a >= b, lt: (a, b) => a < b, lte: (a, b) => a <= b, eq: (a, b) => a === b };
+      const flagged = new Map();
+      const hits = sentRules.map((rule, ruleIndex) => {
+        let matched = 0;
+        rows.forEach((row, index) => {
+          const ok = rule.conditions.every((c) => {
+            const at = columns.indexOf(c.column_name);
+            const test = compare[c.operator];
+            return at >= 0 && test && test(Number(row[at]), Number(c.value));
+          });
+          if (!ok) return;
+          matched += 1;
+          const entry = flagged.get(index) ?? { index, rule_ids: [], rule_names: [], fingerprint: `p${index}` };
+          entry.rule_ids.push(String(ruleIndex));
+          entry.rule_names.push(rule.name);
+          flagged.set(index, entry);
+        });
+        return { id: String(ruleIndex), name: rule.name, severity: rule.severity, matched };
+      });
+      return send(res, 200, {
+        connection_id: previewMatch[1],
+        executed_at: new Date().toISOString(),
+        duration_ms: 21,
+        row_count: rows.length,
+        truncated: false,
+        columns,
+        rows,
+        flags: { flagged_count: flagged.size, rows: [...flagged.values()], rules: hits, warnings: [], dismissed_count: 0 },
+      });
+    }
+    const createMatch = path.match(/^\/connections\/([^/]+)\/queries$/);
+    if (createMatch && req.method === "POST") {
+      const sent = JSON.parse(body || "{}");
+      const id = `q_new_${queries.length + 1}`;
+      const made = {
+        id, connection_id: createMatch[1], name: sent.name, description: sent.description ?? null, sql_text: sent.sql_text,
+        table_hint: null, row_limit: sent.row_limit ?? 1000, poll_interval_ms: sent.poll_interval_ms ?? POLL_MS,
+        owner_id: user.id, charts: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      };
+      queries.push(made);
+      replaceCharts(made, [{ name: sent.name, chart_type: "table", x_field: null, y_field: null, series_field: null }]);
+      return send(res, 201, made);
+    }
+    const putQuery = path.match(/^\/queries\/([^/]+)$/);
+    if (putQuery && req.method === "PUT") {
+      const target = queries.find((q) => q.id === putQuery[1]);
+      if (!target) return send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+      const sent = JSON.parse(body || "{}");
+      Object.assign(target, { name: sent.name, description: sent.description ?? null, sql_text: sent.sql_text, row_limit: sent.row_limit ?? null, poll_interval_ms: sent.poll_interval_ms ?? null, updated_at: new Date().toISOString() });
+      return send(res, 200, target);
+    }
+    const putCharts = path.match(/^\/queries\/([^/]+)\/charts$/);
+    if (putCharts && req.method === "PUT") {
+      const target = queries.find((q) => q.id === putCharts[1]);
+      if (!target) return send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+      replaceCharts(target, JSON.parse(body || "{}").charts ?? []);
+      return send(res, 200, { query_id: target.id, charts: target.charts });
     }
     if (path === "/flagged/summary") return send(res, 200, summaryForCaller());
     if (path === "/queries") {

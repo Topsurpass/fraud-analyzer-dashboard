@@ -137,3 +137,16 @@ describe("wide screens", () => {
     expect(read("ChartGrid.tsx")).toContain("sm:grid-cols-2 xl:grid-cols-3");
   });
 });
+
+/*
+ * The query builder sticks an outline to the top and a save bar to the bottom of the
+ * page's scroll area. A browser scrolling a focused field into view ignores sticky
+ * bars, so a field could land underneath one. Scroll padding on that page keeps it clear.
+ */
+describe("sticky bars on the query builder page", () => {
+  it("pads the scroll area so a focused field is never left under them", () => {
+    const main = classesOf(read("PageBody.tsx"), "<main");
+    expect(main).toContain("has-[#qb-query]:scroll-pt-28");
+    expect(main).toContain("has-[#qb-query]:scroll-pb-32");
+  });
+});
