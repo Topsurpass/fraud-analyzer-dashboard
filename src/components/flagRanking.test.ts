@@ -83,6 +83,45 @@ describe("orderKeys", () => {
   });
 });
 
+describe("orderKeys with pins", () => {
+  const pins = (...ids: string[]) => new Map(ids.map((id, index) => [id, index]));
+
+  it("puts pinned cards first, in the order they were pinned", () => {
+    expect(orderKeys(["a", "b", "c", "d"], new Map(), pins("c", "a"))).toEqual(["c", "a", "b", "d"]);
+  });
+
+  it("puts a pinned card ahead of a flagged one", () => {
+    const states = map({ b: flagged(9, "high", 500) });
+    expect(orderKeys(["a", "b", "c"], states, pins("c"))).toEqual(["c", "b", "a"]);
+  });
+
+  it("does not move a pinned card when it is flagged", () => {
+    const states = map({ a: flagged(3, "high", 900), b: flagged(1, "low", 100) });
+    // `a` is pinned second and very freshly flagged; it still sits second.
+    expect(orderKeys(["a", "b", "c"], states, pins("c", "a"))).toEqual(["c", "a", "b"]);
+  });
+
+  it("sorts everything after the pins by the flag rules, as before", () => {
+    const states = map({ d: flagged(2, "high", 300), c: flagged(1, "low", 100) });
+    expect(orderKeys(["a", "b", "c", "d"], states, pins("a"))).toEqual(["a", "d", "c", "b"]);
+  });
+
+  it("returns an unpinned card to the ranking when it is unpinned", () => {
+    const states = map({ c: flagged(2, "high", 300) });
+    expect(orderKeys(["a", "b", "c"], states, pins("b"))).toEqual(["b", "c", "a"]);
+    expect(orderKeys(["a", "b", "c"], states, pins())).toEqual(["c", "a", "b"]);
+  });
+
+  it("ignores pins for cards that are not on the board", () => {
+    expect(orderKeys(["a", "b"], new Map(), pins("ghost", "b"))).toEqual(["b", "a"]);
+  });
+
+  it("is stable and does nothing when nothing is pinned", () => {
+    expect(orderKeys(["a", "b", "c"], new Map(), pins())).toEqual(["a", "b", "c"]);
+    expect(orderKeys(["a", "b", "c"], new Map())).toEqual(["a", "b", "c"]);
+  });
+});
+
 describe("nextFlagState", () => {
   it("is not news when a card is flagged the first time it is seen", () => {
     expect(nextFlagState(undefined, 4, "high", 999)).toEqual(flagged(4, "high", 0));

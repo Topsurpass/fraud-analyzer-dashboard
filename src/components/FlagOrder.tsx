@@ -25,6 +25,7 @@ import {
   type Box,
   type FlagState,
 } from "./flagRanking";
+import { usePins } from "@/services/pins/pinStore";
 import { isFlagOrderHeld, subscribeFlagOrderHold } from "./flagOrderHold";
 
 /**
@@ -164,27 +165,39 @@ export function useOrderedGrid(children: ReactNode) {
   const context = useContext(FlagOrderContext);
   const applied = context?.applied;
   const containerRef = useRef<HTMLDivElement>(null);
+  const pinPositions = usePins().positions;
 
   const ordered = useMemo(() => {
     const elements = Children.toArray(children).filter(isValidElement) as ReactElement[];
     // The full key is unique per element (React guarantees it), so two arrays
     // that reuse an id still make two entries; the id is only for finding state.
     const fullKeys = elements.map((element, index) => (element.key === null ? `.${index}` : String(element.key)));
-    if (!applied || applied.size === 0) return { elements, keys: fullKeys };
+    if ((!applied || applied.size === 0) && pinPositions.size === 0) {
+      return { elements, keys: fullKeys };
+    }
     const states = new Map<string, FlagState>();
+    const pins = new Map<string, number>();
     fullKeys.forEach((key) => {
-      const state = applied.get(idFromKey(key));
+      const id = idFromKey(key);
+      const state = applied?.get(id);
       if (state) states.set(key, state);
+      const pin = pinPositions.get(id);
+      if (pin !== undefined) pins.set(key, pin);
     });
     const byKey = new Map(elements.map((element, index) => [fullKeys[index], element]));
-    const order = orderKeys(fullKeys, states);
+    const order = orderKeys(fullKeys, states, pins);
     return { elements: order.map((key) => byKey.get(key)!), keys: order };
-  }, [children, applied]);
+  }, [children, applied, pinPositions]);
 
   const boxes = useRef<Map<string, Box>>(new Map());
   const signature = useRef("");
   const keysRef = useRef<string[]>([]);
   const lastApplied = useRef<ReadonlyMap<string, FlagState>>(new Map());
+  const pinSignature = useRef("");
+  const nextPinSignature = useMemo(
+    () => [...pinPositions].map(([id, place]) => `${id}:${place}`).join("|"),
+    [pinPositions],
+  );
   const nextSignature = ordered.keys.join("\u0000");
   const isSettled = context?.isSettled;
 
@@ -216,7 +229,11 @@ export function useOrderedGrid(children: ReactNode) {
     const container = containerRef.current;
     const nextBoxes = measure(ordered.keys);
     const reordered = signature.current !== "" && nextSignature !== signature.current;
-    const settled = isSettled ? isSettled() : false;
+    // A pin is the person's own action, so it moves at once and with the same
+    // glide, even in the first moments of a page when polls alone would not.
+    const pinned = nextPinSignature !== pinSignature.current;
+    pinSignature.current = nextPinSignature;
+    const settled = (isSettled ? isSettled() : false) || pinned;
 
     if (reordered && settled && container && nextBoxes.size > 0 && !prefersReducedMotion()) {
       const risen = new Set(

@@ -621,6 +621,35 @@ dialog that should hold the board calls `useHoldFlagOrder(open)`; `Popover` and 
 already do. `npm run check:reorder` drives all of it in a real browser against the mock
 engine (`POST /__flag?query=<id>&rows=<n>` flags a query from its next poll).
 
+### Pinning, and published cards on a board
+
+**Pin a card** with the pin in its header. A pinned card sits at the top of its grid
+in the order you pinned it (first pinned, first place) and does not move for anything
+but being unpinned: a poll that flags it, or flags another card, leaves it where it
+is, and its flag marks keep working. Everything after the pins is ranked as before
+(flagged first, newest flag first). Pinning and unpinning move the card at once with
+the same glide, even while the pointer is down, because it is your own action; reduced
+motion skips the animation.
+
+Pins are kept **in this browser, per signed-in person** (`localStorage`, key
+`fae.pins.v1:<user id>`), so they survive a reload, follow you across tabs, and are not
+shared with another person on the same machine. They do not follow you to another
+browser. If that matters, `src/services/pins/pinStore.tsx` is the one file to swap for
+an engine-backed store; `pins.ts` is the pure part (order, parsing, the cap) and is
+tested on its own. Pins for cards that no longer exist are ignored, damaged storage reads
+as nothing pinned, and a storage that refuses writes falls back to memory for the page.
+
+**Published cards share the board's grid.** On your own board the charts the team has
+published used to sit under a "Published by the team" heading, apart from the ranking,
+so a published chart that had just been flagged stayed at the bottom of the page. They
+are now in the same grid and ranked with the board's own cards: a flagged published card
+rises above quiet cards of your own, and you can pin one. Because a card you did not add
+needs to say why it is there, it carries a **Shared by <name>** badge (with a tooltip
+that says you cannot remove it from the board). Unchanged: they appear only on your own
+boards, never twice (your own placement wins), and never on someone else's board.
+
+`npm run check:pins` drives all of this in a real browser against the mock engine.
+
 ### Working the grid
 
 The grid is for scanning; reading one chart properly needs more room. Both are

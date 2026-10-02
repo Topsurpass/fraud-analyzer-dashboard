@@ -96,14 +96,31 @@ export function compareFlagState(a: FlagState, b: FlagState): number {
 /**
  * `keys` in display order. Stable: `Array.prototype.sort` is, and the index is
  * the explicit last tiebreak so that does not rest on an engine detail.
+ *
+ * `pins` (key to place in the pin order) puts pinned cards first, in the order they
+ * were pinned, ahead of everything the flag rules decide. A pinned card is fixed:
+ * being flagged does not move it, and the cards after the pins sort as before.
  */
 export function orderKeys(
   keys: readonly string[],
   states: ReadonlyMap<string, FlagState>,
+  pins?: ReadonlyMap<string, number>,
 ): string[] {
   return keys
-    .map((key, index) => ({ key, index, state: states.get(key) ?? UNFLAGGED }))
-    .sort((a, b) => compareFlagState(a.state, b.state) || a.index - b.index)
+    .map((key, index) => ({
+      key,
+      index,
+      state: states.get(key) ?? UNFLAGGED,
+      pin: pins?.get(key),
+    }))
+    .sort((a, b) => {
+      if (a.pin !== undefined || b.pin !== undefined) {
+        if (a.pin === undefined) return 1;
+        if (b.pin === undefined) return -1;
+        return a.pin - b.pin || a.index - b.index;
+      }
+      return compareFlagState(a.state, b.state) || a.index - b.index;
+    })
     .map((entry) => entry.key);
 }
 

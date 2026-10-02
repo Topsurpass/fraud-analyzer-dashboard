@@ -314,9 +314,10 @@ const sectionOf = (page, name) =>
 {
   const { page } = analyst;
   await visit(page, "/dashboards/d3", "article");
-  check(await seen(page.getByText("Published by the team")), "viewer: the board lists what the team published");
   const card = cardOf(page, "Highest risk transactions");
-  check(await seen(card), "viewer: the published card is there");
+  check(await seen(card), "viewer: the board carries what the team published");
+  // Shared cards are ranked with the board's own now, so each says why it is there.
+  check(await seen(card.getByText(/^Shared by /)), "viewer: the published card says who shared it");
 
   const link = card.locator('a[aria-label^="Review"]');
   check(await seen(link), "viewer: the published card shows its flagged count as a link");

@@ -18,10 +18,18 @@ import { publishStatusOf, rejectionNote } from "@/services/publishing/state";
 export function PublishedBadge({
   chart,
   className,
+  sharedBy,
 }: {
   chart: Pick<QueryChart, "is_public"> &
     Partial<Pick<QueryChart, "publish_status" | "publish_rejection">>;
   className?: string;
+  /**
+   * Set on a card the viewer did not add: somebody published it and it sits on
+   * their board among their own. It says who, because a card that appears on
+   * its own needs to explain itself, and this is what the separate "Published by
+   * the team" heading used to do before shared cards were ranked with the rest.
+   */
+  sharedBy?: string | null;
 }) {
   const status = publishStatusOf(chart);
 
@@ -55,19 +63,26 @@ export function PublishedBadge({
 
   if (status !== "published") return null;
 
+  const shared = sharedBy !== undefined;
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-line-strong px-1 py-px text-[11.5px] font-medium leading-tight text-muted ${className ?? ""}`}
-      title="Everyone signed in can see this chart. Its query is frozen while it is published."
+      title={
+        shared
+          ? `${sharedBy ?? "A colleague"} published this for the whole team, so it is on your board. You cannot remove it from here; pin it to keep it at the top.`
+          : "Everyone signed in can see this chart. Its query is frozen while it is published."
+      }
     >
       {/*
        * A filled dot rather than an icon font or an SVG: it reads at 10px,
        * costs nothing, and cannot fail to load.
        */}
       <span aria-hidden="true" className="h-1 w-1 rounded-full bg-current" />
-      Published
+      {shared ? `Shared by ${sharedBy ?? "a colleague"}` : "Published"}
       <span className="sr-only">
-        . Visible to everyone signed in, and its query is frozen while published.
+        {shared
+          ? ". Published for the whole team by its author; it is on your board because it is shared."
+          : ". Visible to everyone signed in, and its query is frozen while published."}
       </span>
     </span>
   );

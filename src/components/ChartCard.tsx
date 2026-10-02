@@ -30,6 +30,7 @@ import { useNow } from "@/lib/useNow";
 import { CardMenu } from "./CardMenu";
 import { PublishedBadge, PublishRejectionNote } from "./PublishedBadge";
 import { ViewerCardMenu } from "./ViewerCardMenu";
+import { PinButton } from "./PinButton";
 import { useReportFlags } from "./FlagOrder";
 import { useHoldFlagOrder } from "./flagOrderHold";
 import { worstSeverity } from "./flagRanking";
@@ -281,7 +282,13 @@ export function ChartCard({
               <h3 className="t-card truncate" title={cardTitle}>
                 {cardTitle}
               </h3>
-              {publishedChart ? <PublishedBadge chart={publishedChart} /> : null}
+              {publishedChart ? (
+                <PublishedBadge
+                  chart={publishedChart}
+                  // A card somebody else published says who, since it did not come from this person.
+                  sharedBy={published ? (publishedChart.published_by_name ?? null) : undefined}
+                />
+              ) : null}
             </div>
             {/* The query underneath, so a card still says where its data came
                 from once the heading stops saying so. */}
@@ -311,6 +318,7 @@ export function ChartCard({
             ) : null}
             <LivePill phase={poll.phase} justChanged={justChanged} />
             {actions}
+            <PinButton id={chartId ?? query.id} name={cardTitle} />
             {onToggleExpand ? (
               <ExpandButton expanded={expanded} onClick={onToggleExpand} name={cardTitle} />
             ) : null}

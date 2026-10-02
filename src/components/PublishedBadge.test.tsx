@@ -63,6 +63,40 @@ describe("PublishedBadge", () => {
   });
 });
 
+describe("PublishedBadge on a card somebody else shared", () => {
+  const published = { is_public: true, publish_status: "published" as const };
+
+  it("says who shared it, since the card did not come from the viewer", () => {
+    render(<PublishedBadge chart={published} sharedBy="Grace Hopper" />);
+    expect(screen.getByText("Shared by Grace Hopper")).toBeInTheDocument();
+    expect(screen.queryByText("Published")).not.toBeInTheDocument();
+  });
+
+  it("explains why the card is there and how to keep it in view", () => {
+    render(<PublishedBadge chart={published} sharedBy="Grace Hopper" />);
+    const title = screen.getByText("Shared by Grace Hopper").closest("span")?.getAttribute("title") ?? "";
+    expect(title).toContain("Grace Hopper published this for the whole team");
+    expect(title).toContain("cannot remove it");
+    expect(title).toContain("pin it");
+  });
+
+  it("falls back to a colleague when the name is not known", () => {
+    render(<PublishedBadge chart={published} sharedBy={null} />);
+    expect(screen.getByText("Shared by a colleague")).toBeInTheDocument();
+  });
+
+  it("is still plain Published on the author's own card", () => {
+    render(<PublishedBadge chart={published} />);
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(screen.queryByText(/Shared by/)).not.toBeInTheDocument();
+  });
+
+  it("shows nothing extra for a chart that is not published", () => {
+    const { container } = render(<PublishedBadge chart={{ is_public: false }} sharedBy="Grace" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
 describe("PublishRejectionNote", () => {
   const rejected = {
     is_public: false,
