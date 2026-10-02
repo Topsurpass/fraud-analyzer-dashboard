@@ -21,6 +21,7 @@ vi.mock("@/services/api-client", async () => {
 });
 
 const definition = (over: Partial<ChartDefinitionRead> = {}): ChartDefinitionRead => ({
+  definition_fingerprint: "fp-ch1",
   chart: {
     id: "ch1",
     query_id: "q1",
@@ -155,12 +156,15 @@ describe("DefinitionDialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("uses a quieter note, still read-only, for the author or an administrator", async () => {
-    getChartDefinition.mockResolvedValue(definition({ read_only: false }));
+  it("still names the owner when an administrator reviews someone else's request", async () => {
+    // An administrator approving a request has to see whose it is; the same note
+    // without a name left the person deciding with half the picture.
+    getChartDefinition.mockResolvedValue(definition({ read_only: false, owner_name: "Amara Author" }));
     renderDialog();
     const note = await screen.findByRole("note");
     expect(note).toHaveTextContent("Read-only view.");
-    expect(note).not.toHaveTextContent("belongs to");
+    expect(note).toHaveTextContent("This belongs to Amara Author.");
+    expect(note).toHaveTextContent("Change the query from its own page.");
   });
 
   it("explains a missing definition instead of showing an empty dialog", async () => {

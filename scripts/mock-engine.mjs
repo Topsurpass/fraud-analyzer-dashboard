@@ -271,6 +271,16 @@ function lastRun(queryId, { force = false } = {}) {
  */
 const flagOverride = new Map();
 
+/*
+ * What an approval is bound to. The real engine hashes the SQL, settings, chart
+ * mapping and rules; the mock hashes the SQL and the chart, which is enough for a
+ * browser to watch an approval be refused after the definition moves. `POST
+ * /__edit?query=<id>` rewrites a query's SQL, standing in for an author who
+ * withdraws a request, edits and asks again.
+ */
+const fingerprintOf = (chart, query) =>
+  createHash("sha256").update(JSON.stringify([query.sql_text, query.row_limit, query.poll_interval_ms, chart.chart_type, chart.x_field, chart.y_field])).digest("hex");
+
 function runFor(queryId, options) {
   const defs = chartDefs.filter((c) => c[1] === queryId);
   const data = runs[defs[0][7]];
@@ -689,6 +699,12 @@ createServer((req, res) => {
     user = (req.headers.authorization ?? "").endsWith(ANALYST_TOKEN) ? analystUser : adminUser;
     if (path === "/health") return send(res, 200, { status: "ok" });
     if (path === "/__executions") return send(res, 200, Object.fromEntries(executions));
+    if (path === "/__edit" && req.method === "POST") {
+      const id = new URL(req.url, "http://x").searchParams.get("query");
+      const target = queries.find((q) => q.id === id);
+      if (target) target.sql_text = `${target.sql_text}\n-- edited ${Date.now()}`;
+      return send(res, target ? 200 : 404, { edited: Boolean(target) });
+    }
     if (path === "/__flag" && req.method === "POST") {
       const params = new URL(req.url, "http://x").searchParams;
       if (params.get("reset")) flagOverride.clear();
@@ -773,6 +789,7 @@ createServer((req, res) => {
             connection_name: connections.find((c) => c.id === query.connection_id)?.name ?? query.connection_id,
             requested_by: { id: asker.id, full_name: asker.full_name, email: asker.email },
             requested_at: chart.publish_requested_at,
+            definition_fingerprint: fingerprintOf(chart, query),
           };
         });
       return send(res, 200, waiting);
@@ -790,6 +807,7 @@ createServer((req, res) => {
         const owner = users.find((u) => u.id === query.owner_id);
         return send(res, 200, {
           chart,
+          definition_fingerprint: fingerprintOf(chart, query),
           query: {
             id: query.id,
             name: query.name,
@@ -865,6 +883,17 @@ createServer((req, res) => {
       if (user.role !== "admin") return send(res, 403, notAdmin());
       if (chart.publish_status !== "pending") return notPending();
       if (action === "publish/approve") {
+        const sent = JSON.parse(body || "{}").definition_fingerprint;
+        if (typeof sent !== "string") {
+          return send(res, 422, { error_code: "REQUEST_VALIDATION_ERROR", message: "definition_fingerprint is required.", detail: null });
+        }
+        if (sent !== fingerprintOf(chart, query)) {
+          return send(res, 409, {
+            error_code: "DEFINITION_CHANGED",
+            message: "The definition changed since it was reviewed. Open it again before approving.",
+            detail: null,
+          });
+        }
         Object.assign(chart, {
           is_public: true,
           publish_status: "published",

@@ -134,7 +134,8 @@ function DefinitionView({ data, onClose }: { data: ChartDefinitionRead; onClose:
           </>
         ) : (
           <>
-            <span className="font-medium text-ink">Read-only view.</span> Change the query from its
+            <span className="font-medium text-ink">Read-only view.</span>{" "}
+            {data.owner_name ? `This belongs to ${data.owner_name}. ` : ""}Change the query from its
             own page.
           </>
         )}

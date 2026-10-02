@@ -88,6 +88,16 @@ describe("nextFlagState", () => {
     expect(nextFlagState(undefined, 4, "high", 999)).toEqual(flagged(4, "high", 0));
   });
 
+  it("is news when a card first appears flagged after the page has settled", () => {
+    // Added to the board mid-session, already flagged: it should lead, not sort by
+    // severity alone among cards that were flagged long ago.
+    expect(nextFlagState(undefined, 2, "low", 999, true)).toEqual(flagged(2, "low", 999));
+  });
+
+  it("stays not-news for a card seen flagged during the page's first moments", () => {
+    expect(nextFlagState(undefined, 2, "low", 999, false).since).toBe(0);
+  });
+
   it("stamps the time when an unflagged card becomes flagged", () => {
     expect(nextFlagState(UNFLAGGED, 2, "medium", 999)).toEqual(flagged(2, "medium", 999));
   });

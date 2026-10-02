@@ -42,6 +42,7 @@ const request = (id: string): PublishRequestRead => ({
 	connection_name: "Payments",
 	requested_by: { id: "u2", full_name: "Grace", email: "grace@example.com" },
 	requested_at: "2026-10-01T10:00:00Z",
+	definition_fingerprint: `fp-${id}`,
 });
 
 function Probe() {

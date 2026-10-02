@@ -15,8 +15,12 @@ import { useEffect, useSyncExternalStore } from "react";
  * Module-level and shared by every board: a dialog is not about one grid.
  */
 
+/** How long after the pointer is released the board stays held. */
+export const POINTER_RELEASE_MS = 120;
+
 let holds = 0;
 let pointerDown = false;
+let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 let listening = false;
 const listeners = new Set<() => void>();
 
@@ -46,13 +50,21 @@ function listenForPointer() {
   if (listening || typeof document === "undefined") return;
   listening = true;
   const down = () => {
+    // A new press cancels a release still counting down from the last one.
+    clearTimeout(releaseTimer);
     pointerDown = true;
     emit();
   };
   const up = () => {
     if (!pointerDown) return;
-    pointerDown = false;
-    emit();
+    // After the click, not before it: `pointerup` fires ahead of `click`, and a
+    // board that rearranged in between would move the card out from under the
+    // very click that was about to land on it.
+    clearTimeout(releaseTimer);
+    releaseTimer = setTimeout(() => {
+      pointerDown = false;
+      emit();
+    }, POINTER_RELEASE_MS);
   };
   // Capture, so a handler that stops propagation cannot leave the board held.
   document.addEventListener("pointerdown", down, true);
@@ -83,6 +95,7 @@ export function useFlagOrderHeld(): boolean {
 /** For tests: forget every hold and the pointer. */
 export function resetFlagOrderHold(): void {
   holds = 0;
+  clearTimeout(releaseTimer);
   pointerDown = false;
   emit();
 }

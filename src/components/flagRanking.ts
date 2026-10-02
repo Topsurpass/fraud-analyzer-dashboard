@@ -18,8 +18,9 @@ export interface FlagState {
   /**
    * Epoch ms of the last poll that found MORE flagged rows than the one before
    * it (or the first poll after none were flagged). Zero when the card was
-   * already flagged the first time it was seen: arriving flagged at page load is
-   * not news, and sorting on it would put the whole board in a race to be first.
+   * already flagged the first time it was seen during the page's first moments:
+   * arriving flagged at page load is not news, and sorting on it would put the
+   * whole board in a race to be first.
    */
   since: number;
 }
@@ -52,9 +53,13 @@ export function nextFlagState(
   count: number,
   severity: FlagSeverity | null,
   now: number,
+  settled = false,
 ): FlagState {
   if (count <= 0) return UNFLAGGED;
-  if (previous === undefined) return { count, severity, since: 0 };
+  // The first time a card is seen. During a page's first moments every card
+  // arrives this way and none is news; once the grid has settled, a card that
+  // first appears already flagged (added to the board, say) is.
+  if (previous === undefined) return { count, severity, since: settled ? now : 0 };
   if (previous.count <= 0) return { count, severity, since: now };
   if (count > previous.count) return { count, severity, since: now };
   return { count, severity, since: previous.since };

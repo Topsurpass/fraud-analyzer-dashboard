@@ -646,11 +646,22 @@ export const listPublishRequests = (options?: RequestOptions) =>
 		...options,
 	});
 
-/** Publish a chart somebody asked to publish. Administrators only. */
-export const approvePublishRequest = (chartId: string, options?: RequestOptions) =>
+/**
+ * Publish a chart somebody asked to publish. Administrators only.
+ *
+ * `definitionFingerprint` is the one on the request being looked at. The engine
+ * publishes only if the definition still has that fingerprint, so an author who
+ * withdraws, edits the SQL and asks again cannot be approved from a stale view.
+ */
+export const approvePublishRequest = (
+	chartId: string,
+	definitionFingerprint: string,
+	options?: RequestOptions,
+) =>
 	request<QueryChart>({
 		method: "POST",
 		path: `/queries/charts/${encodeURIComponent(chartId)}/publish/approve`,
+		body: { definition_fingerprint: definitionFingerprint },
 		...options,
 	});
 

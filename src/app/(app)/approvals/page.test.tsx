@@ -77,6 +77,7 @@ const waiting = (id: string, name: string): PublishRequestRead => ({
 	connection_name: "Payments (prod)",
 	requested_by: { id: "u2", full_name: "Grace Hopper", email: "grace@example.com" },
 	requested_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+	definition_fingerprint: `fp-${id}`,
 });
 
 const mount = () =>
@@ -164,7 +165,9 @@ describe("for an administrator", () => {
 		await user.click(within(row).getByRole("button", { name: "Approve" }));
 
 		await waitFor(() => expect(approvePublishRequest).toHaveBeenCalledTimes(1));
-		expect(approvePublishRequest).toHaveBeenCalledWith("a");
+		// The fingerprint of the request on screen goes with the approval, so the
+		// engine can refuse if the definition changed since it was looked at.
+		expect(approvePublishRequest).toHaveBeenCalledWith("a", "fp-a");
 		await waitFor(() => expect(screen.queryByText("Decline rate")).not.toBeInTheDocument());
 		expect(screen.getByText("Volume")).toBeInTheDocument();
 		// And the page says what happened, since the row that would have is gone.

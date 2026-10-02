@@ -141,7 +141,7 @@ function RequestRow({
 		setBusy(kind);
 		setProblem(null);
 		try {
-			if (kind === "approve") await approvePublishRequest(chart.id);
+			if (kind === "approve") await approvePublishRequest(chart.id, request.definition_fingerprint);
 			else await rejectPublishRequest(chart.id, reason);
 			onDecided({
 				tone: "ok",

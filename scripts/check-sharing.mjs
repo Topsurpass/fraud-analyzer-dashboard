@@ -201,6 +201,19 @@ const PUBLISHED_TOOLTIP = /Everyone signed in can see this chart/;
   await visit(page, "/approvals", "main");
   const row = page.locator("li", { has: page.getByRole("heading", { name: CHART }) });
   check(await seen(row), "admin: the second request is listed");
+
+  // The bait and switch: the definition moves after the administrator loaded the
+  // row (an author who withdrew, edited the SQL and asked again). Approving from
+  // the stale view must be refused, and the request must still be waiting.
+  await fetch(`${engine}/__edit?query=q_volkpi`, { method: "POST" });
+  await row.getByRole("button", { name: "Approve" }).click();
+  check(
+    await seen(page.getByRole("alert").filter({ hasText: "changed since it was reviewed" })),
+    "admin: approving a definition that changed after it was shown is refused",
+  );
+  check(await seen(row), "admin: the request is still waiting after the refusal");
+
+  // Reviewed again, the row carries the new fingerprint and the approval goes through.
   await row.getByRole("button", { name: "Approve" }).click();
   check(await gone(row), "admin: an approved request leaves the queue");
   check(

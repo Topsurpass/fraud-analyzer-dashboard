@@ -214,6 +214,12 @@ export interface PublishRequestRead {
 	connection_name: string;
 	requested_by: { id: string; full_name: string; email: string };
 	requested_at: string;
+	/**
+	 * Fingerprint of the definition as it stands now. Sent back with the approval:
+	 * if the SQL, rules or chart changed since the administrator looked, the engine
+	 * refuses (409 DEFINITION_CHANGED) instead of publishing what nobody reviewed.
+	 */
+	definition_fingerprint: string;
 }
 
 /**
@@ -223,6 +229,8 @@ export interface PublishRequestRead {
  */
 export interface ChartDefinitionRead {
 	chart: QueryChart;
+	/** See `PublishRequestRead.definition_fingerprint`. */
+	definition_fingerprint: string;
 	query: {
 		id: string;
 		name: string;

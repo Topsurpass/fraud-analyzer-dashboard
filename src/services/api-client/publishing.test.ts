@@ -49,9 +49,11 @@ describe("publishing endpoints", () => {
 		expect(lastCall()).toMatchObject({ url: `${BASE}/queries/charts/publish-requests`, method: "GET" });
 	});
 
-	it("approves with POST .../publish/approve", async () => {
-		await approvePublishRequest("c1", { baseUrl: BASE });
-		expect(lastCall()).toMatchObject({ url: `${BASE}/queries/charts/c1/publish/approve`, method: "POST" });
+	it("approves with POST .../publish/approve and the fingerprint that was reviewed", async () => {
+		await approvePublishRequest("c1", "fp-reviewed", { baseUrl: BASE });
+		const call = lastCall();
+		expect(call).toMatchObject({ url: `${BASE}/queries/charts/c1/publish/approve`, method: "POST" });
+		expect(JSON.parse(call.body ?? "{}")).toEqual({ definition_fingerprint: "fp-reviewed" });
 	});
 
 	it("rejects with a trimmed reason", async () => {

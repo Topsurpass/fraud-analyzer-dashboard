@@ -1,8 +1,8 @@
 import { act, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartGrid } from "./ChartGrid";
-import { useReportFlags } from "./FlagOrder";
-import { holdFlagOrder, resetFlagOrderHold } from "./flagOrderHold";
+import { SETTLE_MS, useReportFlags } from "./FlagOrder";
+import { POINTER_RELEASE_MS, holdFlagOrder, resetFlagOrderHold } from "./flagOrderHold";
 import type { FlagSeverity } from "@/contracts/api";
 
 /**
@@ -12,7 +12,11 @@ import type { FlagSeverity } from "@/contracts/api";
  * reader is using the board, and tidy when a card goes away.
  */
 
-afterEach(() => resetFlagOrderHold());
+afterEach(() => {
+  resetFlagOrderHold();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 function Card({
   id,
@@ -137,7 +141,7 @@ describe("the board is held while the reader is using it", () => {
     expect(ids(container)).toEqual(["b", "a"]);
   });
 
-  it("is held while a pointer is pressed", async () => {
+  it("is held while a pointer is pressed, and applied just after the click", async () => {
     const { container, rerender } = render(board({ a: 0, b: 0 }));
     await tick();
     await act(async () => {
@@ -146,11 +150,33 @@ describe("the board is held while the reader is using it", () => {
     rerender(board({ a: 0, b: 1 }));
     await tick();
     expect(ids(container)).toEqual(["a", "b"]);
+
     await act(async () => {
       document.dispatchEvent(new Event("pointerup", { bubbles: true }));
     });
     await tick();
+    // `pointerup` comes before `click`: still held, so the click lands on the
+    // card the reader aimed at. Checked again partway through the delay, because
+    // a release that merely waited one tick would pass the line above.
+    expect(ids(container)).toEqual(["a", "b"]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, POINTER_RELEASE_MS / 2)));
+    expect(ids(container)).toEqual(["a", "b"]);
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, POINTER_RELEASE_MS + 40)));
     expect(ids(container)).toEqual(["b", "a"]);
+  });
+
+  it("a second press cancels the release counting down from the first", async () => {
+    const { container, rerender } = render(board({ a: 0, b: 0 }));
+    await tick();
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      document.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      document.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    rerender(board({ a: 0, b: 1 }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, POINTER_RELEASE_MS + 40)));
+    expect(ids(container)).toEqual(["a", "b"]);
   });
 
   it("applies only the latest state when several polls land during a hold", async () => {
@@ -192,5 +218,59 @@ describe("tidy", () => {
 
   it("works for a card used outside any grid", () => {
     expect(() => render(<Card id="solo" count={3} />)).not.toThrow();
+  });
+});
+
+describe("a card that first appears flagged", () => {
+  it("leads once the grid has settled, ahead of cards flagged earlier", async () => {
+    const real = Date.now();
+    const { container, rerender } = render(board({ a: 5 }));
+    await tick();
+    vi.spyOn(Date, "now").mockReturnValue(real + SETTLE_MS + 500);
+    // A new card joins the board already flagged, with less to report than `a`.
+    rerender(board({ a: 5, n: 1 }));
+    await tick();
+    expect(ids(container)).toEqual(["n", "a"]);
+  });
+
+  it("does not lead during the page's first moments", async () => {
+    const { container } = render(board({ a: 5, n: 1 }));
+    await tick();
+    // Both arrived at once at load: ordered by count, not by who reported last.
+    expect(ids(container)).toEqual(["a", "n"]);
+  });
+});
+
+describe("keys", () => {
+  it("keeps every card when two arrays reuse the same id", async () => {
+    const { container } = render(
+      <ChartGrid>
+        {[<Card key="x" id="x" count={0} />]}
+        {[<Card key="x" id="x" count={0} />]}
+      </ChartGrid>,
+    );
+    await tick();
+    expect(ids(container)).toEqual(["x", "x"]);
+  });
+
+  it("matches an id that contains a dollar sign", async () => {
+    const { container } = render(board({ a: 0, "b$1": 2, c: 0 }));
+    await tick();
+    expect(ids(container)).toEqual(["b$1", "a", "c"]);
+  });
+
+  it("renders a Fragment child without moving the wrong card", async () => {
+    const { container } = render(
+      <ChartGrid>
+        <Card key="a" id="a" count={0} />
+        <>
+          <article key="f1" data-id="f1" />
+          <article key="f2" data-id="f2" />
+        </>
+        <Card key="c" id="c" count={3} />
+      </ChartGrid>,
+    );
+    await tick();
+    expect(ids(container).sort()).toEqual(["a", "c", "f1", "f2"]);
   });
 });
