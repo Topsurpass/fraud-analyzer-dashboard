@@ -798,6 +798,45 @@ browser against the mock engine, which signs in an email starting with `analyst`
 analyst and takes `POST /__reset`), and mutation runs of both, with each old behaviour put
 back to confirm something goes red.
 
+### The flag rules view
+
+A rule used to be open all the time, each condition as three full-width fields, so four
+rules ran past 1500px and said nothing until every field had been read. Now each rule is
+**one line**: its severity, its name, an on/off switch, and the sentence it stands for,
+for example `amount is at least 500000 and response_code equals 00`, or `terminal_id is
+in the list “Blocked terminals”`. Four rules take about 300px.
+
+- **Open one to change it.** Press its line (or Enter or Space on it). Only one rule is
+  open at a time, a new rule opens at once with its name selected, and opening an existing
+  rule puts the cursor in the name without selecting it.
+- **The editor is compact.** A condition is one aligned row: column, comparison in plain
+  words, value (a `between` takes two, with "and" between them, and a list operator takes
+  a picker). "and" is stated between conditions, and the heading says whether *all* of
+  them hold or just this one. On a phone the three fields stack full width.
+- **A message sits under the field it is about.** A missing column is said under the
+  column, a missing value under the value. A collapsed rule that has a problem says
+  "Needs attention" on its line, with the reason.
+- **Unsaved changes are marked.** The panel shows "Unsaved changes", and a rule is tagged
+  "New" or "Edited" until it is saved. Comparison is by what would be written, so the
+  engine's `null` against the editor's `""` is not an edit.
+- **Focus follows the work.** After opening, adding or removing something, focus is on a
+  control that still exists, never on the page.
+- **A viewer sees the same lines.** The read-only definition (the dialog a viewer or an
+  approving administrator opens) lists rules as the same lines, with nothing to click.
+
+What is written to the engine is unchanged (`FlagRule` and `FlagRuleSetUpdate`), and so is
+validation, so none of this needed an engine change.
+
+The wording comes from one pure function, `describeRule` in
+`src/services/rules/describe.ts`; the editor's line, the dialog and the tests all go
+through it, so a rule never reads two ways. It names a list by its name and never prints an
+id (it says "a list" when the name is not known), cuts a long value with an ellipsis, counts
+the rest of a long "is one of" list ("NG, GH, KE, ZA, EG and 2 more"), and shows a missing
+column or value as a visible placeholder. Column names are shown exactly as the SQL names
+them. `npm run check:rules` drives the whole view in a real browser against the mock engine
+(collapsed lines, opening, the aligned row, focus, 390px and 1440px, contrast in light and
+dark, and the dialog).
+
 ### The app icon
 
 The browser-tab icon (`src/app/icon.tsx`, 64px) and the iOS home-screen icon

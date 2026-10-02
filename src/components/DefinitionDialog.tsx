@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChartDefinitionRead, ChartType, FlagSeverity } from "@/contracts/api";
-import { OPERATOR_LABELS } from "@/contracts/api";
+import type { ChartDefinitionRead, ChartType } from "@/contracts/api";
 import { ApiError, getChartDefinition } from "@/services/api-client";
 import { describeDuration, formatInteger } from "@/services/format";
 import { useResource } from "@/lib/useResource";
 import { CHART_LABELS } from "./CardMenu";
 import { Modal } from "./Modal";
+import { RuleHeadline } from "./RuleSummary";
 import { Button } from "./ui";
 
 /**
@@ -82,21 +82,6 @@ function mappingRows(type: ChartType, chart: ChartDefinitionRead["chart"]): [str
   ];
   return rows.filter((row): row is [string, string] => row[1] !== null && row[1] !== "");
 }
-
-function conditionText(condition: ChartDefinitionRead["rules"][number]["conditions"][number]): string {
-  const operator = OPERATOR_LABELS[condition.operator] ?? condition.operator;
-  if (condition.list_name) return `${condition.column_name} ${operator} “${condition.list_name}”`;
-  const operands = [condition.value, condition.value2].filter(
-    (operand): operand is string => operand !== null && operand !== "",
-  );
-  return [condition.column_name, operator, operands.join(" and ")].filter(Boolean).join(" ");
-}
-
-const SEVERITY_WEIGHT: Record<FlagSeverity, string> = {
-  high: "border-alert/60 font-semibold text-ink",
-  medium: "border-line font-medium text-ink",
-  low: "border-line/60 text-muted",
-};
 
 function DefinitionView({ data, onClose }: { data: ChartDefinitionRead; onClose: () => void }) {
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
@@ -198,23 +183,19 @@ function DefinitionView({ data, onClose }: { data: ChartDefinitionRead; onClose:
         ) : (
           <ul className="space-y-2">
             {rules.map((rule) => (
-              <li key={rule.id} className="rounded-[var(--radius-sm)] border border-line px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[13px] font-medium text-ink">{rule.name}</span>
-                  <span
-                    className={`border px-1.5 py-0.5 text-[11.5px] tracking-wide uppercase ${SEVERITY_WEIGHT[rule.severity]}`}
-                  >
-                    {rule.severity}
-                  </span>
-                  {rule.enabled ? null : <span className="text-[11.5px] text-muted">switched off</span>}
-                </div>
-                <p className="mt-1 text-[12.5px] leading-relaxed text-secondary">
-                  Flags a row when{" "}
-                  {rule.conditions.length === 0
-                    ? "(no conditions)"
-                    : rule.conditions.map(conditionText).join(", and ")}
-                  .
-                </p>
+              // The same line the editor shows for a collapsed rule, with nothing
+              // to click: a reader sees what each rule catches, not how it is built.
+              <li
+                key={rule.id}
+                className={`rounded-[var(--radius-sm)] border border-line px-3 py-2 ${
+                  rule.enabled ? "" : "bg-sunken/60 opacity-70"
+                }`}
+              >
+                <RuleHeadline
+                  rule={rule}
+                  clamp={false}
+                  trailing={rule.enabled ? null : <span className="text-[11.5px] text-muted">switched off</span>}
+                />
               </li>
             ))}
           </ul>
