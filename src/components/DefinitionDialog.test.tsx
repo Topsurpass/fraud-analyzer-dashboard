@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChartDefinitionRead } from "@/contracts/api";
+import { describeRule } from "@/services/rules/describe";
 import { ApiError } from "@/services/api-client";
 import { DefinitionDialog } from "./DefinitionDialog";
 import { ViewerCardMenu } from "./ViewerCardMenu";
@@ -104,12 +105,38 @@ describe("DefinitionDialog", () => {
     expect(screen.getByText("bucket", { selector: "code" })).toBeInTheDocument();
   });
 
-  it("writes each rule in plain words, naming a list and never its items", async () => {
+  it("writes each rule as one sentence, naming a list and never its items", async () => {
     renderDialog();
     const rule = (await screen.findByText("Decline rate over threshold")).closest("li") as HTMLElement;
     expect(rule).toHaveTextContent("high"); // uppercased by CSS, not in the text
-    expect(rule).toHaveTextContent("decline_rate_pct greater than 48");
-    expect(rule).toHaveTextContent("terminal is in list “MFBs Terminal”");
+    expect(rule).toHaveTextContent(
+      "decline_rate_pct is greater than 48 and terminal is in the list “MFBs Terminal”",
+    );
+  });
+
+  it("uses the same sentence the editor shows, from the one function", async () => {
+    const data = definition();
+    renderDialog();
+    const rule = (await screen.findByText("Decline rate over threshold")).closest("li") as HTMLElement;
+    expect(rule.textContent).toContain(describeRule(data.rules[0]));
+  });
+
+  it("shows a switched-off rule as such, still with its sentence", async () => {
+    const data = definition();
+    getChartDefinition.mockResolvedValue({
+      ...data,
+      rules: [{ ...data.rules[0], enabled: false }],
+    });
+    renderDialog();
+    const rule = (await screen.findByText("Decline rate over threshold")).closest("li") as HTMLElement;
+    expect(rule).toHaveTextContent("switched off");
+    expect(rule).toHaveTextContent("decline_rate_pct is greater than 48");
+  });
+
+  it("puts no control inside the rules: nothing to click, type into or switch", async () => {
+    renderDialog();
+    const rule = (await screen.findByText("Decline rate over threshold")).closest("li") as HTMLElement;
+    expect(rule.querySelectorAll("button, input, select, textarea, a, [role='switch']")).toHaveLength(0);
   });
 
   it("has nothing to type into: only Copy and Close are controls", async () => {
