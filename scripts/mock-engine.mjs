@@ -948,6 +948,12 @@ createServer((req, res) => {
     }
     m = path.match(/^\/queries\/([^/]+)\/(poll|run)$/);
     if (m) return send(res, 200, answer(m[1], m[2] === "run" || url.searchParams.get("force") === "true"));
+    // One saved query, for the query page (the editor and its rules).
+    m = path.match(/^\/queries\/([^/]+)$/);
+    if (m && req.method === "GET") {
+      const found = queries.find((q) => q.id === m[1]);
+      return found ? send(res, 200, found) : send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+    }
     m = path.match(/^\/connections\/([^/]+)\/queries$/);
     if (m) return send(res, 200, queries.filter((q) => q.connection_id === m[1]));
     m = path.match(/^\/connections\/([^/]+)$/);
