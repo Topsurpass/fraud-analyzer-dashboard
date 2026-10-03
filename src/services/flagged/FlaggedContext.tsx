@@ -39,6 +39,13 @@ export interface FlaggedValue {
 	severityForConnection: (connectionId: string) => FlagSeverity | null;
 	countForQuery: (queryId: string) => number;
 	severityForQuery: (queryId: string) => FlagSeverity | null;
+	/**
+	 * The connection a query with findings belongs to. A published chart seen by
+	 * somebody else carries no connection of its own (its query is not theirs to
+	 * fetch), but the summary names one for every query holding findings, which
+	 * is what lets its "review flagged rows" link point somewhere real.
+	 */
+	connectionForQuery: (queryId: string) => string | null;
 	/** Connections holding findings, most first. What the bell lists. */
 	connections: FlaggedConnectionTally[];
 	/** When the most recent finding anywhere first appeared, ISO, or null. */
@@ -88,6 +95,7 @@ export function FlaggedProvider({ children }: { children: React.ReactNode }) {
 			severityForConnection: (id) => byConnection.get(id)?.severity ?? null,
 			countForQuery: (id) => byQuery.get(id)?.flagged_count ?? 0,
 			severityForQuery: (id) => byQuery.get(id)?.severity ?? null,
+			connectionForQuery: (id) => byQuery.get(id)?.connection_id ?? null,
 			loading: resource.loading,
 			error: resource.error,
 			reload: resource.reload,
@@ -113,6 +121,7 @@ const NOTHING_FLAGGED: FlaggedValue = {
 	severityForConnection: () => null,
 	countForQuery: () => 0,
 	severityForQuery: () => null,
+	connectionForQuery: () => null,
 	loading: false,
 	error: null,
 	reload: () => {},

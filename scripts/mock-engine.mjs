@@ -25,7 +25,7 @@ const POLL_MS = Number(process.env.MOCK_POLL_MS ?? 5000);
 const NOW = Date.now();
 const iso = (msAgo) => new Date(NOW - msAgo).toISOString();
 
-const user = {
+const adminUser = {
   id: "u1",
   email: "ada@fraudguard.io",
   full_name: "Ada Lovelace",
@@ -37,6 +37,23 @@ const user = {
   last_login_at: iso(3_600_000),
   created_at: iso(86_400_000 * 40),
 };
+
+/**
+ * A second person, for anything that depends on who is asking (publishing needs
+ * an administrator's approval, alerts are shared, dismissals are personal).
+ * Signing in with an email that starts with "analyst" gives this account and a
+ * token that says so; anything else is the administrator above. `user` is the
+ * caller of the request being handled, set once per request from its token.
+ */
+const analystUser = {
+  ...adminUser,
+  id: "u2",
+  email: "grace@fraudguard.io",
+  full_name: "Grace Hopper",
+  role: "analyst",
+};
+const ANALYST_TOKEN = "mock-token-analyst";
+let user = adminUser;
 
 const connections = [
   ["c1", "Payments (prod)", "postgres", "ok"],
@@ -174,6 +191,22 @@ const queryDefs = [
   ["q_biaxial", "c1", "Volume and decline rate"],
 ];
 
+/**
+ * Where a chart is in the publishing workflow (docs/shared-publishing.md):
+ * `private`, `pending` (asked, not decided) or `published`. Held on the chart
+ * objects themselves, which the query and board payloads share, so a decision
+ * shows everywhere the chart does.
+ */
+const PUBLISH_DEFAULTS = {
+  is_public: false,
+  publish_status: "private",
+  published_by: null,
+  published_by_name: null,
+  published_at: null,
+  publish_requested_at: null,
+  publish_rejection: null,
+};
+
 const charts = chartDefs.map(([id, query_id, name, chart_type, x, y, s], i) => ({
   id,
   query_id,
@@ -184,9 +217,7 @@ const charts = chartDefs.map(([id, query_id, name, chart_type, x, y, s], i) => (
   y_field: y,
   series_field: s,
   surge_threshold_pct: null,
-  is_public: false,
-  published_by: null,
-  published_at: null,
+  ...PUBLISH_DEFAULTS,
   created_at: iso(86_400_000),
   updated_at: iso(86_400_000),
 }));
@@ -196,7 +227,8 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   connection_id,
   name,
   description: null,
-  sql_text: "select 1",
+  // Distinct and multi-line, so the definition dialog has something real to show.
+  sql_text: `SELECT bucket, outcome, COUNT(*) AS transactions\nFROM ${id}_source\nWHERE amount > 0\nGROUP BY bucket, outcome\nORDER BY bucket`,
   table_hint: null,
   row_limit: 1000,
   poll_interval_ms: POLL_MS,
@@ -207,6 +239,27 @@ const queries = queryDefs.map(([id, connection_id, name]) => ({
   created_at: iso(86_400_000),
   updated_at: iso(86_400_000),
 }));
+
+/** Replace a query's charts (what PUT /queries/:id/charts does), drawn from the volume fixture. */
+function replaceCharts(query, specs) {
+  for (const old of query.charts) {
+    const at = charts.findIndex((c) => c.id === old.id);
+    if (at >= 0) charts.splice(at, 1);
+    const def = chartDefs.findIndex((d) => d[0] === old.id);
+    if (def >= 0) chartDefs.splice(def, 1);
+  }
+  query.charts = specs.map((spec, position) => {
+    const id = `ch_${query.id}_${position}`;
+    chartDefs.push([id, query.id, spec.name, spec.chart_type, spec.x_field, spec.y_field, spec.series_field, "volume"]);
+    const chart = {
+      id, query_id: query.id, name: spec.name, position, chart_type: spec.chart_type,
+      x_field: spec.x_field ?? null, y_field: spec.y_field ?? null, series_field: spec.series_field ?? null,
+      surge_threshold_pct: null, ...PUBLISH_DEFAULTS, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    charts.push(chart);
+    return chart;
+  });
+}
 
 const FLAG_ROWS = tx.filter((r) => r[4] > 80).map((_, i) => i);
 
@@ -231,6 +284,24 @@ function lastRun(queryId, { force = false } = {}) {
   return ranAt.get(queryId);
 }
 
+/*
+ * Make a query flag N rows from its next poll on: `POST /__flag?query=q_biaxial&rows=3`,
+ * and `POST /__flag?reset=1` to put everything back. This is what lets a browser
+ * check watch a card become flagged mid-session, which is the moment the board
+ * rearranges itself.
+ */
+const flagOverride = new Map();
+
+/*
+ * What an approval is bound to. The real engine hashes the SQL, settings, chart
+ * mapping and rules; the mock hashes the SQL and the chart, which is enough for a
+ * browser to watch an approval be refused after the definition moves. `POST
+ * /__edit?query=<id>` rewrites a query's SQL, standing in for an author who
+ * withdraws a request, edits and asks again.
+ */
+const fingerprintOf = (chart, query) =>
+  createHash("sha256").update(JSON.stringify([query.sql_text, query.row_limit, query.poll_interval_ms, chart.chart_type, chart.x_field, chart.y_field])).digest("hex");
+
 function runFor(queryId, options) {
   const defs = chartDefs.filter((c) => c[1] === queryId);
   const data = runs[defs[0][7]];
@@ -239,8 +310,11 @@ function runFor(queryId, options) {
     data.rows
       .map((row, index) => (predicate(row, index) ? { index, rule_ids: ruleIds(index), fingerprint: `f${queryId}${index}` } : null))
       .filter(Boolean);
+  const overridden = flagOverride.get(queryId);
   const flagRows =
-    queryId === "q_table"
+    overridden !== undefined
+      ? hit((_r, i) => i < overridden)
+      : queryId === "q_table"
       ? hit((r) => r[4] > 80)
       : queryId === "q_flagged"
         ? hit((_r, i) => i >= 18, (i) => (i >= 21 ? ["r1", "r2"] : ["r2"]))
@@ -254,6 +328,7 @@ function runFor(queryId, options) {
             ? hit((r) => r[1] === "NG" && r[0] >= "12")
             : [];
   const RULES = {
+    q_kpi: [{ id: "r1", name: "Any flagged", severity: "high" }],
     q_table: [{ id: "r1", name: "Risk over 80", severity: "high" }],
     q_flagged: [
       { id: "r1", name: "Velocity spike", severity: "high" },
@@ -270,7 +345,8 @@ function runFor(queryId, options) {
     duration_ms: 18 + (queryId.length % 7) * 11,
     row_count: data.rows.length,
     truncated: false,
-    data_hash: createHash("sha1").update(queryId).digest("hex"),
+    // The override is part of the hash, so a poll sees the flags change.
+    data_hash: createHash("sha1").update(`${queryId}${overridden ?? ""}`).digest("hex"),
     columns: data.columns,
     rows: data.rows,
     charts: defs.map(([id, , name, type, x, y, s]) => ({
@@ -321,7 +397,147 @@ const dashboards = [
     created_at: iso(86_400_000 * 3),
     updated_at: iso(3_600_000),
   },
+  {
+    // The analyst's own board. A board shows what the team has published only
+    // when it is yours, so this is where "Published by the team" appears for her.
+    id: "d3",
+    name: "Grace's board",
+    chart_ids: ["ch_kpi"],
+    charts: charts.filter((c) => c.id === "ch_kpi"),
+    owner_id: "u2",
+    owner_name: analystUser.full_name,
+    owner_email: analystUser.email,
+    created_at: iso(86_400_000 * 2),
+    updated_at: iso(3_600_000),
+  },
 ];
+
+/* ------------------------------------------------- shared publishing state
+ * See docs/shared-publishing.md. In memory, like everything here, and put back
+ * the way it started by POST /__reset so the browser check can run twice.
+ */
+
+/** Per person, per query: the fingerprints that person has dismissed. */
+const dismissals = new Map();
+const dismissedBy = (userId, queryId) => {
+  const mine = dismissals.get(userId) ?? new Map();
+  dismissals.set(userId, mine);
+  const set = mine.get(queryId) ?? new Set();
+  mine.set(queryId, set);
+  return set;
+};
+
+function resetPublication() {
+  for (const chart of charts) Object.assign(chart, PUBLISH_DEFAULTS);
+  // One chart is already published by the administrator, so the analyst's board
+  // has something under "Published by the team" and the viewer paths have a
+  // chart that is not hers.
+  Object.assign(charts.find((c) => c.id === "ch_table"), {
+    is_public: true,
+    publish_status: "published",
+    published_by: adminUser.id,
+    published_by_name: adminUser.full_name,
+    published_at: iso(7_200_000),
+  });
+  dismissals.clear();
+}
+resetPublication();
+
+const queryOf = (chart) => queries.find((q) => q.id === chart.query_id);
+const mayActOn = (query) => user.role === "admin" || query?.owner_id === user.id;
+const notAdmin = () => ({
+  error_code: "FORBIDDEN",
+  message: "This needs an administrator account.",
+  detail: null,
+});
+
+/**
+ * The flagged view's queries. Three of them, forty findings each: one the
+ * administrator owns and has published (so everyone sees it), one the
+ * administrator owns and has not (so only the administrator does), and one the
+ * analyst owns.
+ */
+const FLAG_SECTIONS = [
+  { id: "q_flag_0", name: "Declined spike", owner: "u1", published: true, severity: "high" },
+  { id: "q_flag_1", name: "Card testing", owner: "u1", published: false, severity: "medium" },
+  { id: "q_flag_2", name: "Large amounts", owner: "u2", published: false, severity: "medium" },
+];
+
+function flaggedSections() {
+  return FLAG_SECTIONS.flatMap((def, s) => {
+    if (user.role !== "admin" && def.owner !== user.id && !def.published) return [];
+    const all = Array.from({ length: 40 }, (_, i) => ({
+      index: i + 1,
+      rule_ids: [`r${s}`],
+      rule_names: [`${def.name} rule`],
+      values: [`TX-${s}${String(i).padStart(4, "0")}`, `Merchant ${i % 7}`, 100 + i * 13],
+      fingerprint: `fp-${s}-${i}`,
+      severity: def.severity,
+      first_seen_at: iso(3_600_000 + i * 60_000),
+      last_seen_at: iso(60_000),
+    }));
+    const mine = dismissedBy(user.id, def.id);
+    const rows = all.filter((row) => !mine.has(row.fingerprint));
+    const owner = users.find((u) => u.id === def.owner);
+    return [
+      {
+        query_id: def.id,
+        query_name: def.name,
+        shared: def.owner !== user.id,
+        owner_name: owner?.full_name ?? null,
+        columns: ["transaction", "merchant", "amount"],
+        rows,
+        rules: [{ id: `r${s}`, name: `${def.name} rule`, severity: def.severity, matched: rows.length }],
+        warnings: [],
+        flagged_count: rows.length,
+        dismissed_count: all.length - rows.length,
+        executed_at: iso(60_000),
+        stale: false,
+        error_code: null,
+        error_message: null,
+      },
+    ];
+  });
+}
+
+/** The summary the bell and rail read: what the caller may see, minus what they dismissed. */
+function summaryForCaller() {
+  const sections = flaggedSections();
+  // q_table is published, so everyone sees its static tally; q_flagged is not.
+  const fixed = flaggedSummary.queries
+    .filter((q) => user.role === "admin" || q.query_id === "q_table")
+    .map((q) => ({ ...q, shared: q.query_id !== "q_table" ? false : adminUser.id !== user.id }));
+  const queriesOut = [
+    ...sections.map((s) => ({
+      query_id: s.query_id,
+      connection_id: "c1",
+      flagged_count: s.flagged_count,
+      severity: s.rules[0].severity,
+      newest_first_seen_at: iso(600_000),
+      shared: s.shared,
+    })),
+    ...fixed,
+  ].filter((q) => q.flagged_count > 0);
+  const byConnection = new Map();
+  for (const q of queriesOut) {
+    const entry = byConnection.get(q.connection_id) ?? {
+      connection_id: q.connection_id,
+      connection_name: connections.find((c) => c.id === q.connection_id)?.name ?? q.connection_id,
+      flagged_count: 0,
+      severity: q.severity,
+      newest_first_seen_at: q.newest_first_seen_at,
+    };
+    entry.flagged_count += q.flagged_count;
+    byConnection.set(q.connection_id, entry);
+  }
+  const connectionsOut = [...byConnection.values()].sort((a, b) => b.flagged_count - a.flagged_count);
+  return {
+    connections: connectionsOut,
+    queries: queriesOut,
+    flagged_count: connectionsOut.reduce((n, c) => n + c.flagged_count, 0),
+    newest_first_seen_at: connectionsOut.length ? iso(600_000) : null,
+  };
+}
 
 const flaggedSummary = {
   connections: [
@@ -337,9 +553,9 @@ const flaggedSummary = {
 };
 
 const users = [
-  user,
-  { ...user, id: "u2", email: "grace@fraudguard.io", full_name: "Grace Hopper", role: "analyst" },
-  { ...user, id: "u3", email: "alan@fraudguard.io", full_name: "Alan Turing", role: "analyst", is_active: false },
+  adminUser,
+  analystUser,
+  { ...adminUser, id: "u3", email: "alan@fraudguard.io", full_name: "Alan Turing", role: "analyst", is_active: false },
 ];
 
 /* ----------------------------------------------------------------- lists
@@ -372,6 +588,45 @@ let nextListId = 3;
 
 /** Flag rules saved through PUT, by query id. Enough to know what uses a list. */
 const savedRules = new Map();
+// Rules on the published chart's query, so its definition has something to show:
+// one on a number, one that names a list (the list's name is shown, never its items).
+savedRules.set("q_table", [
+  {
+    id: "fr_q_table_0",
+    name: "Very large transfer",
+    severity: "high",
+    enabled: true,
+    conditions: [{ column_name: "amount", operator: "gt", value: "900", value2: null, list_name: null }],
+  },
+  {
+    id: "fr_q_table_1",
+    name: "Terminal on the watchlist",
+    severity: "medium",
+    enabled: true,
+    conditions: [{ column_name: "terminal", operator: "in_list", value: null, value2: null, list_name: "MFBs Terminal" }],
+  },
+]);
+
+// What `POST /__reset` puts back. A check that saves rules (the rules view check
+// does) must not leave them for the next one: the sharing check reads this exact
+// pair, and ran against four leftover rules until the reset restored these.
+const seededRules = structuredClone([...savedRules]);
+/** Queries the query builder created, gone again, so the walkthrough can run twice. */
+function dropCreatedQueries() {
+  for (const query of queries.filter((q) => q.id.startsWith("q_new_"))) {
+    for (const chart of query.charts) {
+      const at = charts.findIndex((c) => c.id === chart.id);
+      if (at >= 0) charts.splice(at, 1);
+      const def = chartDefs.findIndex((d) => d[0] === chart.id);
+      if (def >= 0) chartDefs.splice(def, 1);
+    }
+    queries.splice(queries.indexOf(query), 1);
+  }
+}
+function restoreRules() {
+  savedRules.clear();
+  for (const [queryId, rules] of structuredClone(seededRules)) savedRules.set(queryId, rules);
+}
 
 /*
  * The engine keys items with Python's Decimal: decimal literals only (no hex,
@@ -482,57 +737,225 @@ createServer((req, res) => {
   let body = "";
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
+    // Who is asking: the token the BFF forwards from the session cookie.
+    user = (req.headers.authorization ?? "").endsWith(ANALYST_TOKEN) ? analystUser : adminUser;
     if (path === "/health") return send(res, 200, { status: "ok" });
     if (path === "/__executions") return send(res, 200, Object.fromEntries(executions));
+    if (path === "/__edit" && req.method === "POST") {
+      const id = new URL(req.url, "http://x").searchParams.get("query");
+      const target = queries.find((q) => q.id === id);
+      if (target) target.sql_text = `${target.sql_text}\n-- edited ${Date.now()}`;
+      return send(res, target ? 200 : 404, { edited: Boolean(target) });
+    }
+    if (path === "/__flag" && req.method === "POST") {
+      const params = new URL(req.url, "http://x").searchParams;
+      if (params.get("reset")) flagOverride.clear();
+      else flagOverride.set(params.get("query"), Number(params.get("rows") ?? 0));
+      // Drop the cached run so the very next poll reflects it.
+      ranAt.clear();
+      return send(res, 200, Object.fromEntries(flagOverride));
+    }
     if (path === "/ready") return send(res, 200, { status: "ready" });
     if (path === "/auth/login") {
       const creds = JSON.parse(body || "{}");
       if (creds.password !== "demo") {
         return send(res, 401, { error_code: "INVALID_CREDENTIALS", message: "Wrong email or password.", detail: null });
       }
-      return send(res, 200, { token: "mock-token", user });
+      const who = String(creds.email ?? "").startsWith("analyst") ? analystUser : adminUser;
+      return send(res, 200, { token: who === analystUser ? ANALYST_TOKEN : "mock-token", user: who });
     }
     if (path === "/auth/logout") return send(res, 204);
     if (path === "/auth/me") return send(res, 200, user);
-    // A long flagged page: three queries of forty rows each, so the page has
-    // to scroll. `scripts/check-layout.mjs` needs this to mean anything.
+    if (path === "/__reset") {
+      resetPublication();
+      restoreRules();
+      dropCreatedQueries();
+      return send(res, 200, { reset: true });
+    }
+
+    // A long flagged page: three queries of forty rows each, so the page has to
+    // scroll (`scripts/check-layout.mjs` needs that to mean anything). Which of
+    // them the caller sees, and what they have dismissed, depends on who they are.
     const flaggedMatch = path.match(/^\/connections\/([^/]+)\/flagged$/);
     if (flaggedMatch) {
-      const sections = ["Declined spike", "Card testing", "Large amounts"].map((name, s) => {
-        const rules = [{ id: `r${s}`, name: `${name} rule`, severity: s === 0 ? "high" : "medium", matched: 40 }];
-        const rows = Array.from({ length: 40 }, (_, i) => ({
-          index: i + 1,
-          rule_ids: [`r${s}`],
-          rule_names: [`${name} rule`],
-          values: [`TX-${s}${String(i).padStart(4, "0")}`, `Merchant ${i % 7}`, 100 + i * 13],
-          fingerprint: `fp-${s}-${i}`,
-          severity: s === 0 ? "high" : "medium",
-          first_seen_at: iso(3_600_000 + i * 60_000),
-          last_seen_at: iso(60_000),
-        }));
-        return {
-          query_id: `q_flag_${s}`,
-          query_name: name,
-          columns: ["transaction", "merchant", "amount"],
-          rows,
-          rules,
-          warnings: [],
-          flagged_count: rows.length,
-          dismissed_count: 0,
-          executed_at: iso(60_000),
-          stale: false,
-          error_code: null,
-          error_message: null,
-        };
-      });
+      const sections = flaggedSections();
       return send(res, 200, {
         connection_id: flaggedMatch[1],
         queries: sections,
-        flagged_count: 120,
-        dismissed_count: 0,
+        flagged_count: sections.reduce((n, s) => n + s.flagged_count, 0),
+        dismissed_count: sections.reduce((n, s) => n + s.dismissed_count, 0),
         refreshed: false,
         refresh_truncated: false,
       });
+    }
+
+    // Dismissals are personal: recorded for the caller only, and nothing stored
+    // is deleted, so everybody else keeps seeing the finding.
+    const dismissMatch = path.match(/^\/queries\/([^/]+)\/flag-dismissals$/);
+    if (dismissMatch && (req.method === "POST" || req.method === "DELETE")) {
+      const mine = dismissedBy(user.id, dismissMatch[1]);
+      if (req.method === "POST") {
+        const wanted = JSON.parse(body || "{}").fingerprints ?? [];
+        const before = mine.size;
+        for (const fingerprint of wanted) mine.add(fingerprint);
+        return send(res, 200, { query_id: dismissMatch[1], changed: mine.size - before });
+      }
+      const named = url.searchParams.getAll("fingerprint");
+      const before = mine.size;
+      if (named.length === 0) mine.clear();
+      else for (const fingerprint of named) mine.delete(fingerprint);
+      return send(res, 200, { query_id: dismissMatch[1], changed: before - mine.size });
+    }
+    if (/^\/queries\/[^/]+\/flagged-rows$/.test(path) && req.method === "DELETE") {
+      return send(res, 200, { query_id: path.split("/")[2], changed: 0 });
+    }
+
+    /* ------------------------------------------------------ publishing
+     * docs/shared-publishing.md, section 1 and 4. Literal paths first, so
+     * "published" and "publish-requests" are never read as a chart id.
+     */
+    if (path === "/queries/charts/published") {
+      return send(res, 200, charts.filter((c) => c.is_public));
+    }
+    if (path === "/queries/charts/publish-requests") {
+      if (user.role !== "admin") return send(res, 403, notAdmin());
+      const waiting = charts
+        .filter((c) => c.publish_status === "pending")
+        .sort((a, b) => a.publish_requested_at.localeCompare(b.publish_requested_at))
+        .map((chart) => {
+          const query = queryOf(chart);
+          const asker = users.find((u) => u.id === query.owner_id);
+          return {
+            chart,
+            query_id: query.id,
+            query_name: query.name,
+            connection_id: query.connection_id,
+            connection_name: connections.find((c) => c.id === query.connection_id)?.name ?? query.connection_id,
+            requested_by: { id: asker.id, full_name: asker.full_name, email: asker.email },
+            requested_at: chart.publish_requested_at,
+            definition_fingerprint: fingerprintOf(chart, query),
+          };
+        });
+      return send(res, 200, waiting);
+    }
+    const chartAction = path.match(/^\/queries\/charts\/([^/]+)\/(publish|publish\/cancel|publish\/approve|publish\/reject|unpublish|definition)$/);
+    if (chartAction) {
+      const chart = charts.find((c) => c.id === chartAction[1]);
+      const query = chart && queryOf(chart);
+      const missing = () => send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such chart.", detail: null });
+      const action = chartAction[2];
+
+      if (action === "definition") {
+        // Anyone may read a published chart's; the author and an admin any state.
+        if (!chart || !(chart.is_public || mayActOn(query))) return missing();
+        const owner = users.find((u) => u.id === query.owner_id);
+        return send(res, 200, {
+          chart,
+          definition_fingerprint: fingerprintOf(chart, query),
+          query: {
+            id: query.id,
+            name: query.name,
+            description: query.description,
+            sql_text: query.sql_text,
+            row_limit: query.row_limit,
+            poll_interval_ms: query.poll_interval_ms,
+          },
+          rules: (savedRules.get(query.id) ?? []).map((rule) => ({
+            id: rule.id,
+            name: rule.name,
+            severity: rule.severity,
+            enabled: rule.enabled,
+            conditions: rule.conditions.map((c) => ({
+              column_name: c.column_name,
+              operator: c.operator,
+              value: c.value ?? null,
+              value2: c.value2 ?? null,
+              list_name: c.list_name ?? null,
+            })),
+          })),
+          connection_name: connections.find((c) => c.id === query.connection_id)?.name ?? null,
+          owner_name: owner?.full_name ?? null,
+          read_only: !mayActOn(query),
+        });
+      }
+
+      if (!chart || !mayActOn(query)) return missing();
+      const notPending = () =>
+        send(res, 409, { error_code: "PUBLISH_NOT_PENDING", message: "This chart is not waiting for approval.", detail: null });
+      const owner = users.find((u) => u.id === query.owner_id);
+
+      if (action === "publish") {
+        if (chart.publish_status === "private") {
+          if (user.role === "admin") {
+            Object.assign(chart, {
+              is_public: true,
+              publish_status: "published",
+              published_by: user.id,
+              published_by_name: user.full_name,
+              published_at: new Date().toISOString(),
+              publish_rejection: null,
+            });
+          } else {
+            Object.assign(chart, {
+              publish_status: "pending",
+              publish_requested_at: new Date().toISOString(),
+              publish_rejection: null,
+            });
+          }
+        }
+        return send(res, 200, chart);
+      }
+      if (action === "publish/cancel") {
+        if (chart.publish_status === "pending") {
+          Object.assign(chart, { publish_status: "private", publish_requested_at: null });
+        }
+        chart.publish_rejection = null;
+        return send(res, 200, chart);
+      }
+      if (action === "unpublish") {
+        if (chart.is_public && user.role !== "admin" && chart.published_by !== user.id) {
+          return send(res, 403, {
+            error_code: "FORBIDDEN",
+            message: "An administrator published this chart, so only an administrator can unpublish it.",
+            detail: null,
+          });
+        }
+        if (chart.is_public) Object.assign(chart, PUBLISH_DEFAULTS);
+        return send(res, 200, chart);
+      }
+      // approve and reject: administrators only, and only for a waiting request.
+      if (user.role !== "admin") return send(res, 403, notAdmin());
+      if (chart.publish_status !== "pending") return notPending();
+      if (action === "publish/approve") {
+        const sent = JSON.parse(body || "{}").definition_fingerprint;
+        if (typeof sent !== "string") {
+          return send(res, 422, { error_code: "REQUEST_VALIDATION_ERROR", message: "definition_fingerprint is required.", detail: null });
+        }
+        if (sent !== fingerprintOf(chart, query)) {
+          return send(res, 409, {
+            error_code: "DEFINITION_CHANGED",
+            message: "The definition changed since it was reviewed. Open it again before approving.",
+            detail: null,
+          });
+        }
+        Object.assign(chart, {
+          is_public: true,
+          publish_status: "published",
+          // The author stays the publisher: an author may retract their own.
+          published_by: owner.id,
+          published_by_name: owner.full_name,
+          published_at: new Date().toISOString(),
+          publish_requested_at: null,
+        });
+        return send(res, 200, chart);
+      }
+      const reason = JSON.parse(body || "{}").reason ?? null;
+      Object.assign(chart, {
+        publish_status: "private",
+        publish_requested_at: null,
+        publish_rejection: { reason, rejected_at: new Date().toISOString(), rejected_by_name: user.full_name },
+      });
+      return send(res, 200, chart);
     }
     if (path === "/connections") return send(res, 200, connections);
     if (path === "/dashboards") return send(res, 200, dashboards);
@@ -540,7 +963,86 @@ createServer((req, res) => {
       const found = dashboards.find((d) => d.id === path.split("/")[2]);
       return found ? send(res, 200, found) : send(res, 404, { message: "not found" });
     }
-    if (path === "/flagged/summary") return send(res, 200, flaggedSummary);
+    /*
+     * What the query builder needs to be walked through end to end: a preview that
+     * answers from the SQL it was given (and evaluates unsaved rules against the rows),
+     * and create, update and chart replacement that a connection page can then draw.
+     * The preview's data is invented from the SQL's shape, not run.
+     */
+    const previewMatch = path.match(/^\/connections\/([^/]+)\/query\/preview$/);
+    if (previewMatch && req.method === "POST") {
+      const { sql_text: sqlText = "", flag_rules: sentRules = [] } = JSON.parse(body || "{}");
+      if (/\b(insert|update|delete|drop)\b/i.test(sqlText)) {
+        return send(res, 400, { error_code: "SQL_NOT_READ_ONLY", message: "Only SELECT statements are allowed.", detail: null });
+      }
+      const withOutcome = /outcome/i.test(sqlText);
+      const columns = withOutcome ? ["bucket", "outcome", "transactions"] : ["bucket", "transactions"];
+      const rows = [];
+      for (let i = 0; i < 12; i += 1) {
+        const bucket = `${String(7 + Math.floor(i / 6)).padStart(2, "0")}:${String((i % 6) * 10).padStart(2, "0")}`;
+        const n = 80 + ((i * 37) % 90);
+        if (withOutcome) { rows.push([bucket, "approved", n], [bucket, "declined", Math.round(n / 3)]); }
+        else rows.push([bucket, n]);
+      }
+      const compare = { gt: (a, b) => a > b, gte: (a, b) => a >= b, lt: (a, b) => a < b, lte: (a, b) => a <= b, eq: (a, b) => a === b };
+      const flagged = new Map();
+      const hits = sentRules.map((rule, ruleIndex) => {
+        let matched = 0;
+        rows.forEach((row, index) => {
+          const ok = rule.conditions.every((c) => {
+            const at = columns.indexOf(c.column_name);
+            const test = compare[c.operator];
+            return at >= 0 && test && test(Number(row[at]), Number(c.value));
+          });
+          if (!ok) return;
+          matched += 1;
+          const entry = flagged.get(index) ?? { index, rule_ids: [], rule_names: [], fingerprint: `p${index}` };
+          entry.rule_ids.push(String(ruleIndex));
+          entry.rule_names.push(rule.name);
+          flagged.set(index, entry);
+        });
+        return { id: String(ruleIndex), name: rule.name, severity: rule.severity, matched };
+      });
+      return send(res, 200, {
+        connection_id: previewMatch[1],
+        executed_at: new Date().toISOString(),
+        duration_ms: 21,
+        row_count: rows.length,
+        truncated: false,
+        columns,
+        rows,
+        flags: { flagged_count: flagged.size, rows: [...flagged.values()], rules: hits, warnings: [], dismissed_count: 0 },
+      });
+    }
+    const createMatch = path.match(/^\/connections\/([^/]+)\/queries$/);
+    if (createMatch && req.method === "POST") {
+      const sent = JSON.parse(body || "{}");
+      const id = `q_new_${queries.length + 1}`;
+      const made = {
+        id, connection_id: createMatch[1], name: sent.name, description: sent.description ?? null, sql_text: sent.sql_text,
+        table_hint: null, row_limit: sent.row_limit ?? 1000, poll_interval_ms: sent.poll_interval_ms ?? POLL_MS,
+        owner_id: user.id, charts: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      };
+      queries.push(made);
+      replaceCharts(made, [{ name: sent.name, chart_type: "table", x_field: null, y_field: null, series_field: null }]);
+      return send(res, 201, made);
+    }
+    const putQuery = path.match(/^\/queries\/([^/]+)$/);
+    if (putQuery && req.method === "PUT") {
+      const target = queries.find((q) => q.id === putQuery[1]);
+      if (!target) return send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+      const sent = JSON.parse(body || "{}");
+      Object.assign(target, { name: sent.name, description: sent.description ?? null, sql_text: sent.sql_text, row_limit: sent.row_limit ?? null, poll_interval_ms: sent.poll_interval_ms ?? null, updated_at: new Date().toISOString() });
+      return send(res, 200, target);
+    }
+    const putCharts = path.match(/^\/queries\/([^/]+)\/charts$/);
+    if (putCharts && req.method === "PUT") {
+      const target = queries.find((q) => q.id === putCharts[1]);
+      if (!target) return send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+      replaceCharts(target, JSON.parse(body || "{}").charts ?? []);
+      return send(res, 200, { query_id: target.id, charts: target.charts });
+    }
+    if (path === "/flagged/summary") return send(res, 200, summaryForCaller());
     if (path === "/queries") {
       const ids = url.searchParams.get("ids");
       const wanted = ids ? ids.split(",") : null;
@@ -569,6 +1071,12 @@ createServer((req, res) => {
     }
     m = path.match(/^\/queries\/([^/]+)\/(poll|run)$/);
     if (m) return send(res, 200, answer(m[1], m[2] === "run" || url.searchParams.get("force") === "true"));
+    // One saved query, for the query page (the editor and its rules).
+    m = path.match(/^\/queries\/([^/]+)$/);
+    if (m && req.method === "GET") {
+      const found = queries.find((q) => q.id === m[1]);
+      return found ? send(res, 200, found) : send(res, 404, { error_code: "QUERY_NOT_FOUND", message: "No such query.", detail: null });
+    }
     m = path.match(/^\/connections\/([^/]+)\/queries$/);
     if (m) return send(res, 200, queries.filter((q) => q.connection_id === m[1]));
     m = path.match(/^\/connections\/([^/]+)$/);

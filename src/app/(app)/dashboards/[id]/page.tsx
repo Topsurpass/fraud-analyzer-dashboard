@@ -142,6 +142,41 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   );
   const expandedCards = useExpandedCards();
 
+  /*
+   * What the team published, as cards for the same grid as the board's own.
+   *
+   * They used to sit under their own heading, which kept them apart from the
+   * ranking: a published chart that was just flagged stayed at the bottom of the
+   * page while the board's quiet cards held the top. Now every card, placed or
+   * shared, is ranked together (flagged first, pinned above that), and a shared
+   * card says why it is here with its "Shared by <name>" badge instead.
+   */
+  const sharedCards = shared.map((chart) => (
+    <ChartCard
+      key={chart.id}
+      published
+      chartId={chart.id}
+      title={chart.name}
+      className={chartCellClass(chart.chart_type, expandedCards.isExpanded(chart.id))}
+      expanded={expandedCards.isExpanded(chart.id)}
+      onToggleExpand={() => expandedCards.toggle(chart.id)}
+      /*
+       * The viewer cannot fetch the query behind somebody else's chart and does
+       * not need to: the published poll returns the rows, the columns and this
+       * one chart's mapping. This carries the name and nothing invented, and the
+       * id is the query's real id rather than a placeholder.
+       */
+      query={
+        {
+          id: chart.query_id,
+          name: chart.name,
+          charts: [chart],
+          poll_interval_ms: null,
+        } as unknown as SavedQueryRead
+      }
+    />
+  ));
+
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -354,53 +389,14 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
               />
             );
           })}
+          {sharedCards}
         </ChartGrid>
       )}
 
-      {shared.length > 0 ? (
-        <>
-          {/*
-           * Labelled and separated rather than mixed in, because a card the
-           * viewer did not add and cannot remove needs to say why it is here.
-           * Without the heading, a board that grows cards on its own reads as
-           * a bug.
-           */}
-          <div className="mt-6 mb-2 flex items-baseline gap-2">
-            <h2 className="t-section">Published by the team</h2>
-            <span className="t-sub">{shared.length}</span>
-          </div>
-          <ChartGrid>
-            {shared.map((chart) => (
-              <ChartCard
-                key={chart.id}
-                published
-                chartId={chart.id}
-                title={chart.name}
-                className={chartCellClass(
-                  chart.chart_type,
-                  expandedCards.isExpanded(chart.id),
-                )}
-                expanded={expandedCards.isExpanded(chart.id)}
-                onToggleExpand={() => expandedCards.toggle(chart.id)}
-                /*
-                 * The viewer cannot fetch the query behind somebody else's
-                 * chart and does not need to: the published poll returns the
-                 * rows, the columns and this one chart's mapping. This carries
-                 * the name and nothing invented, and the id is the query's real
-                 * id rather than a placeholder.
-                 */
-                query={
-                  {
-                    id: chart.query_id,
-                    name: chart.name,
-                    charts: [chart],
-                    poll_interval_ms: null,
-                  } as unknown as SavedQueryRead
-                }
-              />
-            ))}
-          </ChartGrid>
-        </>
+      {/* Nothing of the board's own to rank them with: a grid of their own, under
+          the note above. With any placed card they go in that card's grid. */}
+      {chartIds.length === 0 && sharedCards.length > 0 && !dashboardsLoading && !queries.initial && !queries.error ? (
+        <ChartGrid>{sharedCards}</ChartGrid>
       ) : null}
     </PageBody>
   );

@@ -1,4 +1,7 @@
+"use client";
+
 import type { ChartType } from "@/contracts/api";
+import { FlagOrderProvider, useOrderedGrid } from "./FlagOrder";
 
 /**
  * The card grid.
@@ -7,14 +10,37 @@ import type { ChartType } from "@/contracts/api";
  * the grid reads as an instrument panel rather than a feed. External gaps stay
  * tight; the padding lives inside each card.
  *
- * Three columns at the top end rather than four. At four, a card on a 1600px
- * screen is about 325px wide, which is not enough for a plot plus its legend -
- * the axis labels start colliding and the legend wraps to three lines. Fewer,
- * wider cards read better than more, narrower ones.
+ * Three columns up to a 1920px screen rather than four. At four, a card on a
+ * 1600px screen is about 325px wide, which is not enough for a plot plus its
+ * legend - the axis labels start colliding and the legend wraps to three lines.
+ * Fewer, wider cards read better than more, narrower ones.
+ *
+ * Past that the page has room for more of them, so columns are added at the
+ * widths where a card stays about 430px or wider (4 from 2100px, 5 from 2900px,
+ * 6 from 3600px, measured with the sidebar open). They are written in
+ * `globals.css` (`.chart-grid`) and not as utilities here: Tailwind orders its
+ * `min-[...]` variants before `xl:`, so `xl:grid-cols-3` won every tie. Capping
+ * the page instead left empty bands on both sides, doubling when the sidebar
+ * collapsed.
  */
 export function ChartGrid({ children }: { children: React.ReactNode }) {
   return (
+    <FlagOrderProvider>
+      <OrderedGrid>{children}</OrderedGrid>
+    </FlagOrderProvider>
+  );
+}
+
+/**
+ * The grid itself. Cards that report flagged rows are sorted to the front (see
+ * `FlagOrder.tsx`); a card that has not reported, or is not flagged, keeps the
+ * place the page gave it.
+ */
+function OrderedGrid({ children }: { children: React.ReactNode }) {
+  const { containerRef, children: ordered } = useOrderedGrid(children);
+  return (
     <div
+      ref={containerRef}
       // `minmax(0,1fr)` rather than the default `1fr`: an auto-sized track lets
       // a wide child push the whole grid past the viewport on a phone.
       className="chart-grid grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 xl:grid-cols-3"
@@ -27,7 +53,7 @@ export function ChartGrid({ children }: { children: React.ReactNode }) {
        */
       style={{ gridAutoRows: `${ROW_HEIGHT_REM}rem` }}
     >
-      {children}
+      {ordered}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useHoldFlagOrder } from "./flagOrderHold";
 import { placePanel } from "./popoverPlacement";
 
 /**
@@ -83,6 +84,8 @@ export function Popover({
   const ref = useRef<HTMLDetailsElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  // A menu is open: the card it belongs to must stay where it is.
+  useHoldFlagOrder(open);
 
   const close = useCallback(() => {
     setOpen(false);

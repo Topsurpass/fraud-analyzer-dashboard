@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useHoldFlagOrder } from "./flagOrderHold";
 
 /**
  * A modal dialog on the platform's own `<dialog>` element.
@@ -25,12 +26,20 @@ export function Modal({
   title,
   description,
   dismissible = true,
+  size = "default",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   description?: ReactNode;
+  /**
+   * `workspace` is nearly the whole viewport with a header that stays put: the
+   * caller lays out the body and scrolls it itself, so a footer or a second pane
+   * never leaves the screen however long the content grows. The default sizes to
+   * its content and scrolls as a whole.
+   */
+  size?: "default" | "workspace";
   /**
    * False while something cannot be interrupted (a save in flight): Escape, the
    * backdrop and the close button all do nothing, so the dialog cannot vanish
@@ -43,6 +52,8 @@ export function Modal({
   const titleId = useId();
   const descriptionId = useId();
   const pressedOnBackdrop = useRef(false);
+  // A dialog is open: nothing behind it should rearrange.
+  useHoldFlagOrder(open);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -87,10 +98,15 @@ export function Modal({
         }
         pressedOnBackdrop.current = false;
       }}
-      className="m-auto max-h-[calc(100dvh-2rem)] w-[min(44rem,calc(100vw-2rem))] overflow-y-auto rounded-[var(--radius-lg)] border border-line bg-surface p-0 text-ink shadow-lg backdrop:bg-[rgb(9_11_20/0.55)] backdrop:backdrop-blur-[3px]"
+      className={`m-auto rounded-[var(--radius-lg)] border border-line bg-surface p-0 text-ink shadow-lg backdrop:bg-[rgb(9_11_20/0.55)] backdrop:backdrop-blur-[3px] ${
+        size === "workspace"
+          ? // `open:flex`, not `flex`: a plain display class would show the dialog while it is closed.
+            "h-[calc(100dvh-1.5rem)] w-[min(88rem,calc(100vw-1.5rem))] overflow-hidden open:flex open:flex-col"
+          : "max-h-[calc(100dvh-2rem)] w-[min(44rem,calc(100vw-2rem))] overflow-y-auto"
+      }`}
     >
       {open ? (
-        <div className="rise">
+        <div className={size === "workspace" ? "rise flex min-h-0 flex-1 flex-col" : "rise"}>
           <header className="flex items-start gap-3 border-b border-line px-6 py-4">
             <div className="min-w-0 flex-1">
               <h2 id={titleId} className="text-[17px] font-semibold tracking-tight">

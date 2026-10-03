@@ -406,9 +406,8 @@ than it is, and a wall clock stepped backwards cannot either. This only bites
 where the engine runs on a machine that sleeps, which is a developer laptop; a
 server never notices.
 
-The interval is set per query (`Poll interval (ms)` in the query editor, which
-now states the value back in words and offers 1 min, 5 min, 15 min, 1 hour and
-1 day presets). Saved queries that have flag rules also run on a scheduler with
+The interval is set per query (`Run every` in the query editor: a number and a unit, seconds to days,
+stored as milliseconds, with 1 min, 5 min, 15 min, 1 hour and 1 day presets). Saved queries that have flag rules also run on a scheduler with
 nobody watching, at the same interval with a one-minute floor.
 
 ### Design system
@@ -450,6 +449,56 @@ pinned to 8: the npm `latest` tag is v9, which has a different API). It adds:
 
 The 10,000-row windowing (`useVirtualRows`) still applies, now over the sorted
 and filtered rows, and flag marks stay with their row through a sort.
+
+### Creating and editing a query
+
+`connections/:id/queries/new` and `queries/:id` are one component, `QueryEditor`, redesigned
+after people kept getting lost in it: they did not know the order of things, could not find
+Preview, added a chart before there were columns to pick from, and lost the preview as the
+rules grew. The design and the bar it was held to are in `docs/query-builder-redesign.md`.
+
+- **Five numbered parts, in the order the work happens**: write the query, check the result,
+  choose how it is drawn, flag what needs a look (optional), set how often it runs. A sticky
+  **outline** lists them with a status for each (to do, needs attention and why, done, optional)
+  and rings the one that is next. Click a part to jump to it. On a phone the outline is one line
+  ("Step 2 of 5", what to do next, five dots) that opens into the full list from "All steps".
+- **Run preview is where you are writing.** A primary button under the SQL and another in the
+  outline, with the shortcut (Cmd or Ctrl plus Enter, in the SQL box). Change the SQL after a
+  preview and the results are marked **out of date**, in the card, in the outline and in the dock,
+  with a one-click re-run. The first preview scrolls the result into view.
+- **The results stay in reach.** When the results card has scrolled out of view a dock appears
+  above the save bar ("Results, 12 rows, 2 columns", Run preview, Show in page) and opens into
+  a tray with the table.
+- **Charts say why they are empty.** The pickers need the query's columns, which only a
+  preview gives, so before one the chart area says so in a sentence and has a button that runs it.
+  After it the pickers fill in and the untouched first chart is **given the type that suits** the data (a line for a time column
+  and a number, a bar for a label and a number, a number for a single figure; codes with a leading
+  zero such as `011` are treated as labels, not quantities). It says what it chose and why, with a
+  "Back to a table" button, and a chart you already set up is never swapped. Editing a saved query does not ask for a preview to show its own charts.
+- **Rules are written in a workspace**, a dialog with the rules on the left (scrolling inside
+  their own pane) and the rows they catch on the right, which never move however many conditions
+  you add. A live count ("Catches 7 of 12 rows") follows every change after a short pause, never
+  stating a number for rules it has not evaluated yet, and an unfinished rule says so. Save and
+  Cancel are fixed in the footer; **Use these rules** applies the whole set. Under a laptop width the
+  two panes are **Rules | Preview** tabs and the count stays in the footer on both. The page shows each
+  rule as one readable line, with how many rows it caught.
+- **Schedule as a sentence**: "Every [5] [minutes]", read back in the step heading as "Runs at most
+  once every 5 minutes", with the presets and the explanation of what the interval controls.
+- **Saving is honest.** A bar at the bottom lists exactly what blocks the save (a name, the SQL,
+  a chart with no name or a duplicate, an unfinished rule, an interval of zero), each one a button
+  that takes you to it, and pressing Save while blocked goes to the first. A chart missing an axis
+  is a warning, not a block (it still saves). Unsaved changes are flagged; Cancel asks before
+  discarding, and a reload or closed tab asks too (the browser offers no hook for in-app links).
+- **The payload is unchanged.** `QueryEditorValues` and the component's props are as they were;
+  no engine change.
+
+How it is built: `src/services/querybuilder/model.ts` is the arithmetic (what blocks a save, the
+outline's statuses, the chart suggestion) and is tested without a browser; `QueryEditor.tsx` composes
+`src/components/querybuilder/` (`steps.tsx` the outline and cards, `results.tsx` the card and dock,
+`RulesDialog.tsx`, `savebar.tsx`, `dialogs.tsx`). The chart and rule editors gained a `bare` option so
+they sit inside these cards without a second frame. `npm run check:builder` walks the whole journey as a
+first-time user in Chrome against the mock engine at 1440 and 390 pixels (it saves screenshots and a
+`journey.json` of clicks per step).
 
 ### Writing your own queries
 
@@ -589,6 +638,67 @@ node scripts/shoot.mjs ./shots --chrome --theme=light --base=http://localhost:31
 fighting over `.next`. Use `localhost`, not `127.0.0.1`: Next blocks dev
 resources requested from the latter.
 
+### Flagged cards rise
+
+On a board of a dozen charts the one that has just been flagged should not be the
+one you scroll to find. Every grid (the connection page, each dashboard, the
+published section) puts cards that have flagged rows first, and when a poll flags a
+card it **glides** to the top over about 0.4 s while the card gets a brief amber
+ring. The order is:
+
+1. flagged before unflagged;
+2. the card flagged most recently first (the poll on which its count last went up);
+3. then the worse severity, then the larger count;
+4. then the order the page gave it. The sort is stable, so ties never shuffle.
+
+A card that arrives already flagged at page load is not "just flagged": it sorts by
+severity and count, and the first two seconds after a grid mounts apply the order
+without motion, so a page does not shuffle itself every time it opens. Dismissing a
+card's last flagged row sends it back to its place, smoothly. The animation is
+skipped under `prefers-reduced-motion`.
+
+**Cards never move out from under you.** The order is held, and applied the moment
+the hold ends, while a card menu or a dialog is open, a card is expanded, or the
+pointer is pressed. The DOM order is the visual order, deliberately (CSS `order`
+would leave keyboard and screen-reader order different from what is on screen).
+
+How it is built: `flagRanking.ts` is the arithmetic (comparator, "newly flagged"
+bookkeeping, the FLIP shifts) and is tested without a browser; `FlagOrder.tsx` is the
+provider and the grid hook (cards report through `useReportFlags`, the grid sorts and
+animates with the Web Animations API); `flagOrderHold.ts` is the hold. A new menu or
+dialog that should hold the board calls `useHoldFlagOrder(open)`; `Popover` and `Modal`
+already do. `npm run check:reorder` drives all of it in a real browser against the mock
+engine (`POST /__flag?query=<id>&rows=<n>` flags a query from its next poll).
+
+### Pinning, and published cards on a board
+
+**Pin a card** with the pin in its header. A pinned card sits at the top of its grid
+in the order you pinned it (first pinned, first place) and does not move for anything
+but being unpinned: a poll that flags it, or flags another card, leaves it where it
+is, and its flag marks keep working. Everything after the pins is ranked as before
+(flagged first, newest flag first). Pinning and unpinning move the card at once with
+the same glide, even while the pointer is down, because it is your own action; reduced
+motion skips the animation.
+
+Pins are kept **in this browser, per signed-in person** (`localStorage`, key
+`fae.pins.v1:<user id>`), so they survive a reload, follow you across tabs, and are not
+shared with another person on the same machine. They do not follow you to another
+browser. If that matters, `src/services/pins/pinStore.tsx` is the one file to swap for
+an engine-backed store; `pins.ts` is the pure part (order, parsing, the cap) and is
+tested on its own. Pins for cards that no longer exist are ignored, damaged storage reads
+as nothing pinned, and a storage that refuses writes falls back to memory for the page.
+
+**Published cards share the board's grid.** On your own board the charts the team has
+published used to sit under a "Published by the team" heading, apart from the ranking,
+so a published chart that had just been flagged stayed at the bottom of the page. They
+are now in the same grid and ranked with the board's own cards: a flagged published card
+rises above quiet cards of your own, and you can pin one. Because a card you did not add
+needs to say why it is there, it carries a **Shared by <name>** badge (with a tooltip
+that says you cannot remove it from the board). Unchanged: they appear only on your own
+boards, never twice (your own placement wins), and never on someone else's board.
+
+`npm run check:pins` drives all of this in a real browser against the mock engine.
+
 ### Working the grid
 
 The grid is for scanning; reading one chart properly needs more room. Both are
@@ -602,6 +712,14 @@ available without leaving the page.
   unfilled, which reads as broken rather than as sparse. Three columns at the
   top end rather than four: at four, a card on a 1600px screen is about 325px
   wide, and a plot plus its legend does not fit in that.
+- **The page fills the width the sidebar leaves.** There is no width cap, so a wide
+  screen has no empty bands at the sides and collapsing the sidebar hands its width to
+  the content. (A 1600px cap, centred, used to leave up to 414px empty on each side at
+  2560px, and 854px at 3440px.) To keep cards from becoming huge, the grid adds columns
+  on wide screens: 4 from 2100px, 5 from 2900px, 6 from 3600px, so a card stays about
+  430px or wider. They live in `globals.css` (`.chart-grid`) because Tailwind orders
+  its `min-[...]` variants before `xl:` and the three-column rule would win every tie.
+  Forms cap themselves (`max-w-2xl` and so on) and are unaffected.
 - **A card's border turns amber for a beat** when its last poll brought new
   data, so across a full grid you can see which cards moved without reading any
   of them.
@@ -681,6 +799,92 @@ Two causes, and the message tells them apart:
 - **Any other list of fields** means `ENGINE_BASE_URL` points at something that is not this
   project's engine. `curl -X POST <engine>/auth/login` with a real account and compare the
   `user` it returns with `UserRead` in `src/contracts/api.ts`.
+
+### Which build is live
+
+`GET /version` answers without a sign-in: the commit and branch Vercel built, the
+environment, and two booleans, `engineConfigured` (is `ENGINE_BASE_URL` set) and
+`apiBaseUrlOverrideSet` (was `NEXT_PUBLIC_API_BASE_URL` present at build time; it should be
+`false`). Values are never printed. `curl https://<your-site>/version` settles whether a fix you
+pushed is the one being served: Vercel's "Redeploy" on an older deployment rebuilds that older
+commit, so the site can keep showing a bug that is already fixed. Compare `commit` with
+`git log -1 --format=%h` on the branch Vercel is set to deploy.
+
+### Sharing a chart: approval, shared alerts, and reading how it was made
+
+The contract is `docs/shared-publishing.md`; this is what the dashboard does with it.
+
+- **An analyst's publish is a request.** The card menu says *Request publishing*, the
+  card shows **Awaiting approval**, and the menu offers *Withdraw publish request*
+  (the query is frozen while it waits). An administrator's menu still says *Publish to
+  the team* and publishes at once. Which of these a click is comes from one function,
+  `publishActionFor` in `src/services/publishing/state.ts`, so an analyst is never
+  offered a plain Publish.
+- **`/approvals`, administrators only.** Lists each waiting request (who asked, the chart,
+  its query and connection), opens the read-only definition so the SQL is read first,
+  and approves or rejects with an optional reason. The author then sees **Not approved**
+  and the reason on the card, with *Request publishing again* in the menu. The rail's
+  Approvals link carries the waiting count and the bell has a line for it. Both come from
+  `PublishRequestsProvider`, which fetches the queue only for an administrator: for
+  anyone else the dashboard asks the engine nothing and shows nothing. A decision is
+  confirmed on the page, so losing a race (the engine answers 409) still explains itself
+  after its row leaves the list.
+- **Shared alerts.** A query with a published chart has its findings in everyone's bell,
+  rail and flagged page. A section someone else shares is labelled **Shared by <owner>**,
+  keeps *Dismiss* and *Restore* (dismissals are personal: hiding a row hides it for you
+  only), and drops *Clear*, *Delete rules* and *Edit rules*. An administrator keeps
+  everything. A published card's flagged link takes its connection from the flagged
+  summary, because a viewer's copy of a chart carries none (it used to point at
+  `/connections/undefined/flagged`).
+- **View definition.** A viewer's published card has a small menu with one item. It opens
+  `DefinitionDialog`: SQL in monospace with *Copy*, how often it runs, the row limit, the
+  chart's field mapping, the rules in plain words (a list is named, never its items), the
+  owner and a read-only note. There is nothing in it to type into, and Escape closes it
+  and returns focus to the menu. The same dialog is how an administrator reads a request.
+
+Checked three ways: unit and component tests, `npm run check:sharing` (two people in a real
+browser against the mock engine, which signs in an email starting with `analyst` as an
+analyst and takes `POST /__reset`), and mutation runs of both, with each old behaviour put
+back to confirm something goes red.
+
+### The flag rules view
+
+A rule used to be open all the time, each condition as three full-width fields, so four
+rules ran past 1500px and said nothing until every field had been read. Now each rule is
+**one line**: its severity, its name, an on/off switch, and the sentence it stands for,
+for example `amount is at least 500000 and response_code equals 00`, or `terminal_id is
+in the list “Blocked terminals”`. Four rules take about 300px.
+
+- **Open one to change it.** Press its line (or Enter or Space on it). Only one rule is
+  open at a time, a new rule opens at once with its name selected, and opening an existing
+  rule puts the cursor in the name without selecting it.
+- **The editor is compact.** A condition is one aligned row: column, comparison in plain
+  words, value (a `between` takes two, with "and" between them, and a list operator takes
+  a picker). "and" is stated between conditions, and the heading says whether *all* of
+  them hold or just this one. On a phone the three fields stack full width.
+- **A message sits under the field it is about.** A missing column is said under the
+  column, a missing value under the value. A collapsed rule that has a problem says
+  "Needs attention" on its line, with the reason.
+- **Unsaved changes are marked.** The panel shows "Unsaved changes", and a rule is tagged
+  "New" or "Edited" until it is saved. Comparison is by what would be written, so the
+  engine's `null` against the editor's `""` is not an edit.
+- **Focus follows the work.** After opening, adding or removing something, focus is on a
+  control that still exists, never on the page.
+- **A viewer sees the same lines.** The read-only definition (the dialog a viewer or an
+  approving administrator opens) lists rules as the same lines, with nothing to click.
+
+What is written to the engine is unchanged (`FlagRule` and `FlagRuleSetUpdate`), and so is
+validation, so none of this needed an engine change.
+
+The wording comes from one pure function, `describeRule` in
+`src/services/rules/describe.ts`; the editor's line, the dialog and the tests all go
+through it, so a rule never reads two ways. It names a list by its name and never prints an
+id (it says "a list" when the name is not known), cuts a long value with an ellipsis, counts
+the rest of a long "is one of" list ("NG, GH, KE, ZA, EG and 2 more"), and shows a missing
+column or value as a visible placeholder. Column names are shown exactly as the SQL names
+them. `npm run check:rules` drives the whole view in a real browser against the mock engine
+(collapsed lines, opening, the aligned row, focus, 390px and 1440px, contrast in light and
+dark, and the dialog).
 
 ### The app icon
 

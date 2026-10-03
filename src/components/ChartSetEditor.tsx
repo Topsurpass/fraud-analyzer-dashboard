@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { ChartType, QueryChartInput } from "@/contracts/api";
 import { CHART_TYPES } from "@/contracts/api";
-import { Button, Field, Input, Panel, Select } from "@/components/ui";
+import { Button, Field, Input, Select } from "@/components/ui";
+import { PanelFrame } from "./PanelFrame";
 import { FieldPicker } from "@/components/FieldPicker";
 import { DEFAULT_SURGE_THRESHOLD_PCT } from "@/services/charts/severity";
 
@@ -175,6 +176,8 @@ export interface ChartSetEditorProps {
   disabled?: boolean;
   /** Names the chart set already saved, so renames can be called out. */
   savedNames?: string[];
+  /** Without its own framed panel and title, for a page that supplies the card. */
+  bare?: boolean;
 }
 
 export function ChartSetEditor({
@@ -183,6 +186,7 @@ export function ChartSetEditor({
   columns,
   disabled = false,
   savedNames,
+  bare = false,
 }: ChartSetEditorProps) {
   const problems = validateCharts(charts);
   const [confirmingClear, setConfirmingClear] = useState(false);
@@ -214,7 +218,8 @@ export function ChartSetEditor({
       : false;
 
   return (
-    <Panel
+    <PanelFrame
+      bare={bare}
       title="Charts"
       actions={
         <div className="flex items-center gap-2">
@@ -246,7 +251,20 @@ export function ChartSetEditor({
             type="button"
             tone="primary"
             disabled={disabled}
-            onClick={() => onChange([...charts, emptyChart(charts.length)])}
+            onClick={() =>
+              onChange([
+                ...charts,
+                // With columns known, start from a chart that has pickers and sensible fields,
+                // not a table that shows nothing to set.
+                columns.length > 0
+                  ? {
+                      ...emptyChart(charts.length, "bar"),
+                      x_field: columns[0],
+                      y_field: columns[1] ?? columns[0],
+                    }
+                  : emptyChart(charts.length),
+              ])
+            }
           >
             Add chart
           </Button>
@@ -254,11 +272,15 @@ export function ChartSetEditor({
       }
     >
       <div className="space-y-3 p-3">
-        <p className="text-[13px] leading-relaxed text-secondary">
-          Every chart here draws the same result. The query runs{" "}
-          <strong>once</strong> however many you add, so a trend line, a
-          breakdown and the rows behind them cost one trip to your database.
-        </p>
+        {/* A host that frames the editor itself (the query builder's step card) says this
+            in its own subtitle; saying it twice is noise. */}
+        {bare ? null : (
+          <p className="text-[13px] leading-relaxed text-secondary">
+            Every chart here draws the same result. The query runs{" "}
+            <strong>once</strong> however many you add, so a trend line, a
+            breakdown and the rows behind them cost one trip to your database.
+          </p>
+        )}
 
         {charts.length === 0 ? (
           <p className="rounded-[var(--radius-sm)] border border-dashed border-line px-3 py-4 text-[13px] text-muted">
@@ -282,8 +304,8 @@ export function ChartSetEditor({
               key={index}
               className="space-y-2 rounded-[var(--radius-sm)] border border-line bg-raised p-2.5"
             >
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[10rem] flex-1">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="col-span-2 min-w-0 sm:col-span-1">
                   <Field
                     label="Chart name"
                     htmlFor={`chart-name-${index}`}
@@ -317,6 +339,7 @@ export function ChartSetEditor({
                 <Button
                   type="button"
                   disabled={disabled}
+                  className="justify-self-end"
                   aria-label={`Remove chart ${chart.name || index + 1}`}
                   onClick={() => onChange(charts.filter((_, i) => i !== index))}
                 >
@@ -405,6 +428,6 @@ export function ChartSetEditor({
           );
         })}
       </div>
-    </Panel>
+    </PanelFrame>
   );
 }

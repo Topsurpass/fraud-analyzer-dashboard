@@ -228,6 +228,18 @@ export function useAuth(): AuthValue {
 	return value;
 }
 
+/**
+ * The signed-in user, or null, without insisting on a provider.
+ *
+ * For a component that only *adjusts* what it offers by role (a menu item's
+ * wording) and is rendered in places that have no session of their own, such as
+ * a unit test or a published chart. `useAuth` throws without a provider, which
+ * is right for a page that cannot work signed out and wrong for a label.
+ */
+export function useOptionalUser(): UserRead | null {
+	return useContext(AuthContext)?.user ?? null;
+}
+
 /** The signed-in user, or null. Shorthand for the common read. */
 export function useUser(): UserRead | null {
 	return useAuth().user;

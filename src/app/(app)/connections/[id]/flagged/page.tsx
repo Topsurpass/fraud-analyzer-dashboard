@@ -21,6 +21,8 @@ import {
 	restoreFlaggedRows,
 } from "@/services/api-client";
 import type { FlaggedQuery, FlagSeverity, RuleHit } from "@/contracts/api";
+import { useOptionalUser } from "@/services/auth/AuthContext";
+import { isAdmin } from "@/services/auth/permissions";
 import { useConnections } from "@/services/connections/ConnectionsContext";
 import { useFlagged } from "@/services/flagged/FlaggedContext";
 import { useResource } from "@/lib/useResource";
@@ -209,16 +211,33 @@ function Section({
 		}
 	};
 
+	// A section somebody else shares with you is theirs to change. Dismissing is
+	// yours alone, so Dismiss and Restore stay; clearing the queue and editing
+	// or deleting the rules would change it for everyone, so a viewer is not
+	// offered them. An administrator may do all of it to anything, as before.
+	const admin = isAdmin(useOptionalUser());
+	const shared = Boolean(section.shared);
+	const mayChangeQuery = !shared || admin;
+
 	return (
 		<Panel
-			title={section.query_name}
+			title={
+				<>
+					{section.query_name}
+					{shared ? (
+						<span className="ml-2 align-middle text-[12px] font-normal text-muted">
+							Shared by {section.owner_name ?? "its owner"}
+						</span>
+					) : null}
+				</>
+			}
 			actions={
 				<div className="flex flex-wrap items-center gap-2">
 					{section.dismissed_count > 0 ? (
 						<Button
 							type="button"
 							disabled={busy}
-							title="Stop suppressing these rows. Dismissing deleted them, so they reappear when this query next runs."
+							title="Show the rows you dismissed again. Dismissals are yours alone, so this changes nothing for anyone else."
 							onClick={() =>
 								run("restore these rows", () => restoreFlaggedRows(section.query_id))
 							}
@@ -247,20 +266,22 @@ function Section({
 							    decision and is remembered; clearing only empties the
 							    queue, and anything still matching returns on the next
 							    run. Useful right after changing a rule. */}
-							<Button
-								type="button"
-								disabled={busy}
-								title="Empty this queue without marking the rows reviewed. Anything still matching comes back on the next run."
-								onClick={() =>
-									run("clear this queue", () => deleteFlaggedRows(section.query_id))
-								}
-							>
-								Clear
-							</Button>
+							{mayChangeQuery ? (
+								<Button
+									type="button"
+									disabled={busy}
+									title="Empty this queue without marking the rows reviewed. Anything still matching comes back on the next run."
+									onClick={() =>
+										run("clear this queue", () => deleteFlaggedRows(section.query_id))
+									}
+								>
+									Clear
+								</Button>
+							) : null}
 						</>
 					) : null}
 
-					{confirmingRules ? (
+					{!mayChangeQuery ? null : confirmingRules ? (
 						<>
 							<Button
 								type="button"
@@ -286,11 +307,20 @@ function Section({
 						</Button>
 					)}
 
-					<LinkButton href={`/queries/${section.query_id}`}>Edit rules</LinkButton>
+					{mayChangeQuery ? (
+						<LinkButton href={`/queries/${section.query_id}`}>Edit rules</LinkButton>
+					) : null}
 				</div>
 			}
 		>
 			<div className="space-y-2 p-3">
+				{shared ? (
+					<p className="text-[12.5px] text-muted">
+						Published by {section.owner_name ?? "its owner"}. Dismissing a row hides it for you only:
+						they and everyone else still see it.
+					</p>
+				) : null}
+
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<RuleLegend
 						rules={section.rules}

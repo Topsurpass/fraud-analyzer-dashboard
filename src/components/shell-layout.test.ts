@@ -105,3 +105,48 @@ describe("popover panels", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/*
+ * On a wide screen the page used to stop at 1600px and sit in the middle, leaving
+ * empty bands on both sides that doubled when the sidebar collapsed. Content now
+ * takes the width the sidebar leaves, and the card grid adds columns instead of
+ * stretching its cards.
+ */
+describe("wide screens", () => {
+  it("puts no width cap on the page body", () => {
+    const body = read("PageBody.tsx").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(body).not.toMatch(/max-w-/);
+    expect(body).not.toContain("mx-auto");
+  });
+
+  it("adds columns to the card grid as the page widens, outside the utility layer", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    for (const [width, columns] of [
+      [2100, 4],
+      [2900, 5],
+      [3600, 6],
+    ]) {
+      const rule = new RegExp(
+        `@media \\(min-width: ${width}px\\) \\{\\s*\\.chart-grid \\{\\s*grid-template-columns: repeat\\(${columns}, minmax\\(0, 1fr\\)\\);`,
+      );
+      expect(css, `${columns} columns from ${width}px`).toMatch(rule);
+    }
+  });
+
+  it("leaves the grid at three columns up to 1920px, as before", () => {
+    expect(read("ChartGrid.tsx")).toContain("sm:grid-cols-2 xl:grid-cols-3");
+  });
+});
+
+/*
+ * The query builder sticks an outline to the top and a save bar to the bottom of the
+ * page's scroll area. A browser scrolling a focused field into view ignores sticky
+ * bars, so a field could land underneath one. Scroll padding on that page keeps it clear.
+ */
+describe("sticky bars on the query builder page", () => {
+  it("pads the scroll area so a focused field is never left under them", () => {
+    const main = classesOf(read("PageBody.tsx"), "<main");
+    expect(main).toContain("has-[#qb-query]:scroll-pt-28");
+    expect(main).toContain("has-[#qb-query]:scroll-pb-32");
+  });
+});

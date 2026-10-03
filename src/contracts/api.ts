@@ -175,8 +175,87 @@ export interface QueryChart {
 	/** Who published it, and therefore who may retract it. An admin always may. */
 	published_by: string | null;
 	published_at: string | null;
+	/**
+	 * Where the chart is in the publishing workflow. Optional only because an
+	 * engine older than the approval workflow does not send it: read it through
+	 * `publishStatusOf`, which falls back to `is_public`.
+	 */
+	publish_status?: PublishStatus;
+	/** When the author asked, while `pending`. */
+	publish_requested_at?: string | null;
+	/** Set after a rejection until the author asks again or withdraws. */
+	publish_rejection?: PublishRejection | null;
+	/** Display name of the author, for people who are not the author. */
+	published_by_name?: string | null;
 	created_at: string;
 	updated_at: string;
+}
+
+/**
+ * `private` is the default. `pending` means the author asked and an
+ * administrator has not decided. `published` is visible to everyone signed in.
+ * Only an administrator's action ever produces `published`.
+ */
+export type PublishStatus = "private" | "pending" | "published";
+
+/** An administrator declined a request. The chart is `private` again. */
+export interface PublishRejection {
+	reason: string | null;
+	rejected_at: string;
+	rejected_by_name: string;
+}
+
+/** One waiting request, for the administrators' queue. */
+export interface PublishRequestRead {
+	chart: QueryChart;
+	query_id: string;
+	query_name: string;
+	connection_id: string;
+	connection_name: string;
+	requested_by: { id: string; full_name: string; email: string };
+	requested_at: string;
+	/**
+	 * Fingerprint of the definition as it stands now. Sent back with the approval:
+	 * if the SQL, rules or chart changed since the administrator looked, the engine
+	 * refuses (409 DEFINITION_CHANGED) instead of publishing what nobody reviewed.
+	 */
+	definition_fingerprint: string;
+}
+
+/**
+ * Everything behind a published chart that someone else may read in order to
+ * rebuild it. No connection host, database, username or id, and a list
+ * condition carries the list's name, never its items.
+ */
+export interface ChartDefinitionRead {
+	chart: QueryChart;
+	/** See `PublishRequestRead.definition_fingerprint`. */
+	definition_fingerprint: string;
+	query: {
+		id: string;
+		name: string;
+		description: string | null;
+		sql_text: string;
+		row_limit: number | null;
+		poll_interval_ms: number | null;
+	};
+	rules: {
+		id: string;
+		name: string;
+		severity: FlagSeverity;
+		enabled: boolean;
+		conditions: {
+			column_name: string;
+			operator: FlagOperator;
+			value: string | null;
+			value2: string | null;
+			list_name: string | null;
+		}[];
+	}[];
+	connection_name: string | null;
+	owner_name: string | null;
+	/** True unless the caller is the author or an administrator. */
+	read_only: boolean;
 }
 
 /** What the editor sends: the whole set, in display order. */
@@ -452,6 +531,10 @@ export const EMPTY_FLAGS: FlagOutcome = {
 export interface FlaggedQuery {
 	query_id: string;
 	query_name: string;
+	/** True when the caller does not own this query (it is published to them). */
+	shared?: boolean;
+	/** The owner's display name, for a section that says who shares it. */
+	owner_name?: string | null;
 	columns: string[];
 	/**
 	 * `fingerprint` is a hash of the row's values and is how a row is dismissed.
@@ -515,6 +598,8 @@ export interface FlaggedConnectionTally extends FlaggedTallyBase {
 export interface FlaggedQueryTally extends FlaggedTallyBase {
 	query_id: string;
 	connection_id: string;
+	/** True when the caller does not own this query. */
+	shared?: boolean;
 }
 
 /** Flagged totals across everything, in one request. Drives the badges. */

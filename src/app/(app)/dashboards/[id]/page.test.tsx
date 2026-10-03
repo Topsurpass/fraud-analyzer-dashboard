@@ -40,7 +40,19 @@ vi.mock("@/services/api-client", async () => {
 
 // The page asks who is signed in, to decide whether a board is the viewer's
 // own. Boards in these tests are owned by "me" unless a test says otherwise.
+const SIGNED_IN = {
+  id: "me",
+  email: "ada@example.com",
+  full_name: "Ada Lovelace",
+  role: "analyst",
+  is_active: true,
+  must_change_password: false,
+  last_login_at: null,
+  created_at: "2026-08-01T00:00:00Z",
+};
 vi.mock("@/services/auth/AuthContext", () => ({
+  // The pin button reads it, to keep pins per person.
+  useOptionalUser: () => SIGNED_IN,
   useAuth: () => ({
     status: "signedIn",
     user: {
@@ -342,6 +354,7 @@ describe("published charts on a board", () => {
     surge_threshold_pct: null,
     is_public: true,
     published_by: "admin1",
+    published_by_name: "Grace Hopper",
     published_at: "2026-08-28T09:00:00",
     created_at: "2026-08-28T09:00:00",
     updated_at: "2026-08-28T09:00:00",
@@ -355,8 +368,26 @@ describe("published charts on a board", () => {
 
     await open();
 
-    expect(await screen.findByText("Published by the team")).toBeInTheDocument();
-    expect(await screen.findByLabelText("Terminal movers")).toBeInTheDocument();
+    // Ranked with the board's own cards in one grid, not under a heading of its
+    // own, so a flagged published chart can rise above a quiet card of the board's.
+    const sharedCard = await screen.findByLabelText("Terminal movers");
+    const own = await screen.findByLabelText("Declines by hour");
+    expect(sharedCard.parentElement).toBe(own.parentElement);
+    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+    // (The "Shared by <name>" badge that explains it is the card's own; see
+    // PublishedBadge.test and ChartCard.shared.test.)
+  });
+
+  it("marks only the shared card as published, in the same grid", async () => {
+    getDashboard.mockResolvedValue(board());
+    getPublishedCharts.mockResolvedValue([shared()]);
+
+    await open();
+
+    const own = await screen.findByLabelText("Declines by hour");
+    const sharedCard = await screen.findByLabelText("Terminal movers");
+    expect(sharedCard).toHaveAttribute("data-published", "true");
+    expect(own).not.toHaveAttribute("data-published", "true");
   });
 
   it("renders a shared card read-only", async () => {
@@ -380,7 +411,7 @@ describe("published charts on a board", () => {
 
     await screen.findByLabelText("Declines by hour");
     expect(screen.getAllByLabelText("Declines by hour")).toHaveLength(1);
-    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shared by/)).not.toBeInTheDocument();
   });
 
   it("leaves somebody else's board showing only what its owner placed", async () => {
@@ -396,7 +427,7 @@ describe("published charts on a board", () => {
     await open();
 
     await screen.findByLabelText("Declines by hour");
-    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shared by/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Terminal movers")).not.toBeInTheDocument();
   });
 
@@ -406,7 +437,7 @@ describe("published charts on a board", () => {
 
     await open();
 
-    expect(await screen.findByText("Published by the team")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Terminal movers")).toBeInTheDocument();
   });
 
   it("asks for the published set once, not on every render", async () => {
@@ -423,7 +454,7 @@ describe("published charts on a board", () => {
     getPublishedCharts.mockResolvedValue([shared()]);
 
     await open();
-    await screen.findByText("Published by the team");
+    await screen.findByLabelText("Terminal movers");
     const afterFirstRender = getPublishedCharts.mock.calls.length;
 
     // Give any render loop room to run away.
@@ -440,7 +471,7 @@ describe("published charts on a board", () => {
     await open();
 
     await screen.findByLabelText("Declines by hour");
-    expect(screen.queryByText("Published by the team")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shared by/)).not.toBeInTheDocument();
   });
 });
 
